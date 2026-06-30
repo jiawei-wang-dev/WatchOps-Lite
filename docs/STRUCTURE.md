@@ -13,6 +13,13 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── bootstrap/              # Dependency wiring and server lifecycle
     ├── config/                 # Configuration loading and validation
     ├── observability/          # Structured logging and OTel lifecycle boundary
+    ├── agent/eino/             # Eino assembly for current mock tools
+    ├── tools/
+    │   ├── common/             # Shared results, errors, evidence, execution policy
+    │   ├── logs/               # Deterministic query_logs mock
+    │   ├── metrics/            # Deterministic query_metrics mock
+    │   ├── traces/             # Deterministic query_traces mock
+    │   └── knowledge/          # Deterministic search_knowledge mock
     └── transport/http/
         ├── handler/            # Thin Gin handlers
         ├── middleware/         # Gin request middleware
@@ -25,6 +32,8 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/bootstrap` wires dependencies and owns HTTP server startup and graceful shutdown.
 - `internal/config` loads defaults, JSON configuration, and environment overrides.
 - `internal/observability` owns structured logging and the future OpenTelemetry SDK boundary.
+- `internal/agent/eino` exposes typed mock implementations through Eino's official Tool abstraction.
+- `internal/tools` owns WatchOps business contracts, normalized evidence, structured errors, timeout policy, and mock implementations.
 - `internal/transport/http` contains HTTP concerns only: Gin routing, middleware, handlers, and later transport DTOs.
 - Gin handlers bind and validate HTTP input, call application-level operations, and format HTTP output. Business rules do not belong in handlers.
 
@@ -34,8 +43,6 @@ The following modules are part of the planned architecture, but their directorie
 
 | Module | Intended responsibility |
 | --- | --- |
-| `internal/agent` | Eino-based Graph and ReAct orchestration, prompt rendering, model invocation, context assembly, and stop conditions |
-| `internal/tools` | Business-level tool I/O contracts, `ToolError`, execution policy wrappers, evidence normalization, redaction, and Eino Tool implementations |
 | `internal/retrieval` | Document chunking, retrieval contracts, ranking policy, and Elasticsearch-backed knowledge search |
 | `internal/memory` | Session-memory and long-term-memory contracts and application-facing behavior |
 | `internal/feedback` | Likes, dislikes, eval candidates, review flow, and evaluation reuse |

@@ -17,15 +17,15 @@ Delivered:
 
 Exit status: complete.
 
-## Phase 2: Eino Tool Skeleton and WatchOps Tool Contracts
+## Phase 2: Eino Tool Skeleton and WatchOps Tool Contracts — Completed
 
-Deliverables:
+Delivered:
 
 - Add Eino as the Agent/LLM framework dependency.
 - Use Eino's Tool abstraction for schema exposure, registration, and invocation.
 - Define business-level input and output contracts for the initial tools.
 - Define structured `ToolError`.
-- Add wrappers for timeout, fallback, redaction, output size control, and tracing boundaries.
+- Add a shared timeout/fallback execution wrapper and safe internal-error normalization.
 - Introduce deterministic fixture-based tool tests.
 
 Initial tool contracts:
@@ -43,9 +43,11 @@ Constraints:
 
 Exit criteria:
 
-- Eino can register and invoke fixture-backed tools.
+- Eino can expose and invoke fixture-backed tools.
 - Invalid input produces a structured validation error.
-- Timeout and oversized-output behavior are deterministic and tested.
+- Timeout behavior is deterministic and tested.
+
+Exit status: complete. Redaction, output-size enforcement, and tracing hooks remain extension points for the real-connector and observability phases.
 
 ## Phase 3: Chat API and Eino Agent Skeleton
 

@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project is currently at the initial skeleton stage. It contains a runnable Go HTTP server, layered configuration, structured logging, and an OpenTelemetry integration boundary. RAG, Agent orchestration, persistence, and observability tools are intentionally not implemented yet.
+The project currently contains the Gin HTTP skeleton and a Phase 2 Eino Tool skeleton. The four reliability tools return deterministic mock evidence through Eino's official Tool abstraction. RAG, Agent orchestration, persistence, and real observability integrations are intentionally not implemented yet.
 
 ## Current Scope
 
@@ -14,13 +14,16 @@ Implemented:
 - JSON structured logging with request metadata
 - OpenTelemetry setup and shutdown placeholder
 - Unit tests for configuration and health handling
+- Shared `ToolResult`, `ToolError`, and evidence contracts
+- Timeout and fallback execution wrapper
+- Eino-backed mock tools for logs, metrics, traces, and knowledge
 
 Not implemented yet:
 
-- Chat or Agent logic
+- Chat API, Eino Graph, or ReAct Agent logic
 - RAG ingestion and retrieval
 - Redis or MySQL integration
-- Logs, metrics, traces, or knowledge tools
+- Real logs, metrics, traces, or knowledge backends
 - Feedback and evaluation workflows
 
 ## Requirements
@@ -28,7 +31,7 @@ Not implemented yet:
 - Go 1.23 or newer
 - `make` for the convenience commands
 
-No external services are required for the initial skeleton. Gin is the only direct third-party runtime dependency at this stage; its transitive modules are managed through `go.mod` and `go.sum`.
+No external services are required for the current skeleton. Gin and Eino are the direct third-party runtime dependencies at this stage; their transitive modules are managed through `go.mod` and `go.sum`.
 
 ## Run Locally
 
@@ -105,6 +108,8 @@ make fmt    # format Go source files
     ├── bootstrap/              # Application wiring and lifecycle
     ├── config/                 # Config loading and validation
     ├── observability/          # Structured logging and OTel boundary
+    ├── agent/eino/             # Eino mock-tool assembly
+    ├── tools/                  # Contracts and deterministic mock tools
     └── transport/http/
         ├── handler/            # Thin Gin handlers
         └── middleware/         # Gin middleware
@@ -127,6 +132,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [Project Structure](docs/STRUCTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [ADR 0001: Framework and Technology Stack](docs/adr/0001-framework-and-stack.md)
+- [ADR 0002: Eino Tooling and WatchOps Tool Contracts](docs/adr/0002-eino-tooling.md)
 
 ## Originality
 

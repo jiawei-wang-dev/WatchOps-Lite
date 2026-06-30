@@ -334,13 +334,14 @@ WatchOps-Lite/
 │   │   ├── knowledge/          # Document and retrieval use cases
 │   │   └── feedback/           # Feedback use cases
 │   ├── agent/
+│   │   ├── eino/               # Eino Tool assembly; Graph/Agent later
 │   │   ├── orchestrator/       # Eino Graph/ReAct orchestration and stop rules
 │   │   ├── prompt/             # Versioned templates and rendering
 │   │   ├── context/            # Summary, window, and token budget
 │   │   ├── harness/            # Timeout, fallback, and structured errors
 │   │   └── loop/               # Feedback-to-eval candidates
 │   ├── tools/
-│   │   ├── contracts/          # Business I/O contracts and ToolError
+│   │   ├── common/             # ToolResult, ToolError, evidence, execution policy
 │   │   ├── logs/
 │   │   ├── metrics/
 │   │   ├── traces/
@@ -523,6 +524,8 @@ WatchOps-Lite owns:
 - Output size limits and truncation metadata
 
 These policies wrap Eino tools rather than recreating Eino's tool runtime.
+
+Phase 2 exposes deterministic implementations through Eino `InvokableTool` values. Real backend connectors, the Chat API, and the ReAct Agent remain deferred to their roadmap phases.
 
 The initial tools are:
 
