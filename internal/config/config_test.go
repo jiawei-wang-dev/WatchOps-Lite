@@ -102,3 +102,29 @@ func TestLoadAppliesElasticsearchEnvironment(t *testing.T) {
 		t.Fatalf("Knowledge config = %#v", cfg.Knowledge)
 	}
 }
+
+func TestLoadAppliesMySQLEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("WATCHOPS_MYSQL_ENABLED", "true")
+	t.Setenv("WATCHOPS_MYSQL_DSN", "user:pass@tcp(mysql:3306)/watchops")
+	t.Setenv("WATCHOPS_MYSQL_MAX_OPEN_CONNS", "20")
+	t.Setenv("WATCHOPS_MYSQL_MAX_IDLE_CONNS", "8")
+	t.Setenv("WATCHOPS_MYSQL_CONN_MAX_LIFETIME", "10m")
+	t.Setenv("WATCHOPS_MYSQL_REQUEST_TIMEOUT", "900ms")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.MySQL.Enabled ||
+		cfg.MySQL.MaxOpenConns != 20 ||
+		cfg.MySQL.MaxIdleConns != 8 ||
+		cfg.MySQL.ConnMaxLifetime.Value() != 10*time.Minute ||
+		cfg.MySQL.RequestTimeout.Value() != 900*time.Millisecond {
+		t.Fatalf("MySQL config = %#v", cfg.MySQL)
+	}
+}

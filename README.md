@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project currently contains the Gin HTTP skeleton, Eino-backed tools, a deterministic Chat/Agent skeleton, Redis session memory, and an Elasticsearch-backed BM25 knowledge retrieval path.
+The project currently contains the Gin HTTP skeleton, Eino-backed tools, a deterministic Chat/Agent skeleton, Redis session memory, Elasticsearch-backed BM25 knowledge retrieval, and MySQL-backed feedback/eval seeding.
 
 ## Current Scope
 
@@ -23,21 +23,23 @@ Implemented:
 - Plain-text/Markdown knowledge ingestion with deterministic paragraph-first chunking
 - Elasticsearch chunk indexing and BM25 knowledge search
 - Real `search_knowledge` evidence with explicit mock fallback when Elasticsearch is unavailable
+- Upvote/downvote feedback persistence with answer and evidence snapshots
+- Manual good-case and bad-case eval seeding from reviewed feedback
 
 Not implemented yet:
 
 - Real `ChatModel`, Eino Graph, or production ReAct Agent logic
-- MySQL integration
 - Real logs, metrics, or traces backends
 - Embeddings, vector/hybrid retrieval, reranking, and RRF
-- Feedback and evaluation workflows
+- Automatic eval runner, LLM judge, scoring, and prompt comparison
+- MySQL long-term memory, audit records, and document metadata
 
 ## Requirements
 
 - Go 1.23 or newer
 - `make` for the convenience commands
 
-The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests. Elasticsearch is disabled by default; when disabled, knowledge APIs return `503` and `search_knowledge` keeps the deterministic mock behavior.
+The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests. Elasticsearch and MySQL are disabled by default. Disabled persistence endpoints return a structured `503` response.
 
 ## Run Locally
 
@@ -103,6 +105,42 @@ curl -sS http://localhost:8080/api/v1/knowledge/search \
   -d '{"query":"checkout timeout","limit":5}'
 ```
 
+To persist feedback and eval seeds, create a MySQL database and enable the integration:
+
+```bash
+mysql -u root -p -e "
+  CREATE DATABASE IF NOT EXISTS watchops_lite CHARACTER SET utf8mb4;
+  CREATE USER IF NOT EXISTS 'watchops'@'%' IDENTIFIED BY 'watchops';
+  GRANT ALL PRIVILEGES ON watchops_lite.* TO 'watchops'@'%';
+"
+export WATCHOPS_MYSQL_ENABLED=true
+export 'WATCHOPS_MYSQL_DSN=watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true'
+make run
+```
+
+WatchOps-Lite creates the minimal `feedback` and `eval_cases` tables when MySQL is reachable. Submit a downvote and seed a bad case:
+
+```bash
+curl -sS http://localhost:8080/api/v1/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "request_id":"req-123",
+    "session_id":"ses_01",
+    "rating":"down",
+    "reason_tags":["missing_evidence"],
+    "comment":"The answer did not cite trace evidence."
+  }'
+
+curl -sS http://localhost:8080/api/v1/eval/cases \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "feedback_id":"fb_replace_me",
+    "case_type":"bad_case",
+    "input_message":"Why did checkout error rate increase?",
+    "expected_behavior":"Cite evidence and report missing trace data."
+  }'
+```
+
 Example response:
 
 ```json
@@ -161,7 +199,10 @@ make fmt    # format Go source files
     ├── agent/eino/             # Eino tools and deterministic Agent runner
     ├── application/chat/       # Chat use-case orchestration
     ├── memory/session/         # Redis session store and rolling summary
+    ├── feedback/               # Feedback policy and MySQL store
+    ├── eval/                   # Manual eval-seed policy and MySQL store
     ├── platform/elasticsearch/ # Official Elasticsearch client boundary
+    ├── platform/mysql/         # database/sql client and schema boundary
     ├── retrieval/knowledge/    # Chunking, retrieval policy, and ES store
     ├── tools/                  # Contracts and deterministic mock tools
     └── transport/http/
@@ -191,6 +232,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [ADR 0003: Deterministic Chat and Agent Skeleton](docs/adr/0003-chat-agent-skeleton.md)
 - [ADR 0004: Redis Session Memory](docs/adr/0004-redis-session-memory.md)
 - [ADR 0005: Elasticsearch Knowledge RAG](docs/adr/0005-elasticsearch-rag.md)
+- [ADR 0006: MySQL Feedback and Eval Seed](docs/adr/0006-feedback-eval-seed.md)
 
 ## Originality
 

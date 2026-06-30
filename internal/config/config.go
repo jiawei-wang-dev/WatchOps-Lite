@@ -45,6 +45,7 @@ type Config struct {
 	Session       SessionConfig       `json:"session"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
+	MySQL         MySQLConfig         `json:"mysql"`
 	Telemetry     TelemetryConfig     `json:"telemetry"`
 }
 
@@ -90,6 +91,15 @@ type KnowledgeConfig struct {
 	ChunkMaxSize int `json:"chunk_max_size"`
 }
 
+type MySQLConfig struct {
+	Enabled         bool     `json:"enabled"`
+	DSN             string   `json:"dsn"`
+	MaxOpenConns    int      `json:"max_open_conns"`
+	MaxIdleConns    int      `json:"max_idle_conns"`
+	ConnMaxLifetime Duration `json:"conn_max_lifetime"`
+	RequestTimeout  Duration `json:"request_timeout"`
+}
+
 type TelemetryConfig struct {
 	Enabled      bool    `json:"enabled"`
 	ServiceName  string  `json:"service_name"`
@@ -130,6 +140,14 @@ func Default() Config {
 		},
 		Knowledge: KnowledgeConfig{
 			ChunkMaxSize: 1200,
+		},
+		MySQL: MySQLConfig{
+			Enabled:         false,
+			DSN:             "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",
+			MaxOpenConns:    10,
+			MaxIdleConns:    5,
+			ConnMaxLifetime: Duration(30 * time.Minute),
+			RequestTimeout:  Duration(3 * time.Second),
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:      false,
@@ -190,6 +208,7 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_USERNAME", &cfg.Elasticsearch.Username)
 	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
+	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("TELEMETRY_SERVICE_NAME", &cfg.Telemetry.ServiceName)
 	setString("TELEMETRY_OTLP_ENDPOINT", &cfg.Telemetry.OTLPEndpoint)
 
@@ -207,6 +226,8 @@ func applyEnvironment(cfg *Config) error {
 		{"REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout},
 		{"SESSION_TTL", &cfg.Session.TTL},
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
+		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
+		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 	}
 	for _, item := range durationValues {
 		if err := setDuration(item.name, item.target); err != nil {
@@ -222,6 +243,8 @@ func applyEnvironment(cfg *Config) error {
 		{"SESSION_RECENT_WINDOW_SIZE", &cfg.Session.RecentWindowSize},
 		{"SESSION_SUMMARY_THRESHOLD", &cfg.Session.SummaryThreshold},
 		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
+		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
+		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
 	}
 	for _, item := range integerValues {
 		if err := setInteger(item.name, item.target); err != nil {
@@ -238,6 +261,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sELASTICSEARCH_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Elasticsearch.Enabled = parsed
+	}
+	if value, ok := lookup("MYSQL_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sMYSQL_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.MySQL.Enabled = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_ENABLED"); ok {
@@ -381,6 +411,24 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(cfg.Elasticsearch.KnowledgeIndex) == "" {
 			return errors.New("elasticsearch.knowledge_index is required when Elasticsearch is enabled")
 		}
+	}
+	if cfg.MySQL.MaxOpenConns <= 0 {
+		return errors.New("mysql.max_open_conns must be greater than zero")
+	}
+	if cfg.MySQL.MaxIdleConns < 0 {
+		return errors.New("mysql.max_idle_conns must not be negative")
+	}
+	if cfg.MySQL.MaxIdleConns > cfg.MySQL.MaxOpenConns {
+		return errors.New("mysql.max_idle_conns must not exceed mysql.max_open_conns")
+	}
+	if cfg.MySQL.ConnMaxLifetime <= 0 {
+		return errors.New("mysql.conn_max_lifetime must be greater than zero")
+	}
+	if cfg.MySQL.RequestTimeout <= 0 {
+		return errors.New("mysql.request_timeout must be greater than zero")
+	}
+	if cfg.MySQL.Enabled && strings.TrimSpace(cfg.MySQL.DSN) == "" {
+		return errors.New("mysql.dsn is required when MySQL is enabled")
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {

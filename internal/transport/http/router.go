@@ -11,6 +11,8 @@ import (
 type RouterDependencies struct {
 	Chat      handler.ChatExecutor
 	Knowledge handler.KnowledgeExecutor
+	Feedback  handler.FeedbackExecutor
+	Eval      handler.EvalExecutor
 }
 
 func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDependencies) *gin.Engine {
@@ -32,6 +34,14 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	knowledgeAPI.POST("/documents", knowledgeHandler.Ingest)
 	knowledgeAPI.POST("/search", knowledgeHandler.Search)
 	knowledgeAPI.GET("/documents/:id", knowledgeHandler.GetDocument)
+
+	feedbackHandler := handler.NewFeedback(dependencies.Feedback)
+	api.POST("/feedback", feedbackHandler.Create)
+	api.GET("/feedback/:id", feedbackHandler.Get)
+
+	evalHandler := handler.NewEval(dependencies.Eval)
+	api.POST("/eval/cases", evalHandler.Create)
+	api.GET("/eval/cases", evalHandler.List)
 
 	return router
 }

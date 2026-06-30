@@ -114,24 +114,25 @@ Exit criteria:
 
 Exit status: complete. Durable ingestion status, deletion, deduplication, access control, file extraction, and Docker Compose Elasticsearch provisioning remain future extensions.
 
-## Phase 6: MySQL Memory, Feedback, and Eval Candidates
+## Phase 6: MySQL Feedback and Eval Seed — Completed
 
-Deliverables:
+Delivered:
 
-- MySQL-backed long-term memory
-- Feedback storage for likes, dislikes, and reasons
-- Document metadata and ingestion state
-- Bad-case and positive-case eval candidates
-- Audit records and review state
-- MySQL migrations and local Docker Compose service
-- `agent_eval_cases.json` export path
+- Optional `database/sql` MySQL client with bounded connection settings
+- Minimal `feedback` and `eval_cases` schema initialization
+- Upvote/downvote records with reasons, corrections, answer snapshots, evidence IDs, tool summaries, and metadata
+- Manual good-case and bad-case creation from compatible feedback
+- Feedback create/get and eval create/list APIs
+- Structured unavailable behavior without blocking application startup
 
 Exit criteria:
 
-- Only confirmed or policy-approved facts enter long-term memory.
-- Positive and negative feedback become redacted review candidates.
-- A bad case does not preserve an incorrect answer as ground truth.
-- Durable records retain the versions needed for reproduction.
+- Feedback retains the answer and execution context needed for later review.
+- Downvotes can seed bad cases without treating the incorrect answer as gold truth.
+- Upvotes can seed good cases for future regression coverage.
+- MySQL failures do not break Chat, health, or knowledge endpoints.
+
+Exit status: complete. Long-term memory, document metadata, redaction/review workflow, audit records, JSON export, automatic evaluation, scoring, and LLM judging remain deferred.
 
 ## Phase 7: OpenTelemetry and Jaeger Tracing
 
@@ -164,13 +165,15 @@ flowchart LR
     P2 --> P3["P3 Chat + Eino Agent"]
     P3 --> P4["P4 Redis Context"]
     P4 --> P5["P5 Elasticsearch RAG (complete)"]
-    P5 --> P6["P6 MySQL + Feedback/Eval"]
+    P5 --> P6["P6 MySQL Feedback + Eval Seed (complete)"]
     P6 --> P7["P7 OTel + Jaeger"]
 ```
 
 ## Deferred Work
 
 - Prometheus application metrics
+- MySQL long-term memory, audit records, and document lifecycle metadata
+- Eval-case review/export and automatic regression runner
 - Multi-agent orchestration
 - Automated production changes
 - Model fine-tuning

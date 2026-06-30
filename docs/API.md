@@ -1,6 +1,6 @@
 # HTTP API
 
-The current API combines deterministic Chat orchestration with Redis session memory and Elasticsearch-backed knowledge retrieval. The production LLM and observability integrations remain deferred.
+The current API combines deterministic Chat orchestration, Redis session memory, Elasticsearch knowledge retrieval, and MySQL-backed feedback/eval seeds. Production LLM and observability integrations remain deferred.
 
 ## Health Check
 
@@ -242,3 +242,104 @@ GET /api/v1/knowledge/documents/{document_id}
 This phase does not maintain a separate durable document record. The endpoint reconstructs title, source, metadata, creation time, and chunk count from indexed chunks; it does not return the original full document.
 
 When Elasticsearch is disabled or unavailable, knowledge endpoints return `503 Service Unavailable` with the safe error code `DEPENDENCY_UNAVAILABLE`.
+
+## Feedback
+
+```http
+POST /api/v1/feedback
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "request_id": "req-123",
+  "session_id": "ses_01",
+  "rating": "down",
+  "reason_tags": ["missing_evidence", "too_vague"],
+  "comment": "The answer did not cite trace evidence.",
+  "corrected_answer": "The likely issue is upstream timeout, but trace evidence is still missing.",
+  "answer_snapshot": {
+    "conclusion": ["The error rate increased."],
+    "limitations": ["Trace evidence is unavailable."]
+  },
+  "evidence_ids": ["metric-evidence-001", "log-evidence-001"],
+  "tool_runs": [
+    {
+      "tool": "query_metrics",
+      "success": true,
+      "duration_ms": 35
+    }
+  ],
+  "metadata": {
+    "prompt_version": "answer_schema_v1"
+  }
+}
+```
+
+`rating` must be `up` or `down`. Successful response (`201 Created`):
+
+```json
+{
+  "feedback_id": "fb_0123456789abcdef01234567",
+  "status": "created"
+}
+```
+
+Fetch the stored record:
+
+```http
+GET /api/v1/feedback/{feedback_id}
+```
+
+The response contains the normalized request fields plus `id` and `created_at`.
+
+## Eval Case Seeds
+
+Eval cases are created manually. Providing `feedback_id` verifies that the source feedback exists and enforces:
+
+- an upvote can seed a `good_case`
+- a downvote can seed a `bad_case`
+
+```http
+POST /api/v1/eval/cases
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "feedback_id": "fb_0123456789abcdef01234567",
+  "case_type": "bad_case",
+  "input_message": "Why did checkout error rate increase?",
+  "expected_behavior": "The answer must cite evidence and mention missing trace data as a limitation.",
+  "gold_answer": "",
+  "forbidden_patterns": [
+    "Do not claim root cause without evidence."
+  ],
+  "metadata": {
+    "source": "manual_feedback"
+  }
+}
+```
+
+Successful response (`201 Created`):
+
+```json
+{
+  "case_id": "eval_0123456789abcdef01234567",
+  "status": "created"
+}
+```
+
+List cases:
+
+```http
+GET /api/v1/eval/cases?case_type=bad_case&limit=20
+```
+
+`case_type` is optional. `limit` defaults to 50 and must be between 1 and 100.
+
+Missing source feedback returns `404`. Validation failures return `400`. When MySQL is disabled or unavailable, feedback and eval endpoints return `503 DEPENDENCY_UNAVAILABLE`. Database errors are not exposed.

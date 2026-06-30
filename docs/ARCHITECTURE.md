@@ -208,7 +208,7 @@ Suggested MySQL tables:
 | `memories` | Long-term memory | content, source_type, confidence, expires_at |
 | `knowledge_documents` | Document processing state | source, content_hash, status, error_code |
 | `feedback` | Raw user feedback | request_id, rating, reason, prompt_version |
-| `eval_candidates` | Reviewable eval candidates | feedback_id, kind, review_status |
+| `eval_cases` | Manually seeded good and bad cases | feedback_id, case_type, expected_behavior |
 | `audit_records` | Durable security and workflow audit | action, resource_type, resource_id, created_at |
 
 Whether full request text is retained must be controlled by privacy policy and configuration. The default should favor hashes, summaries, and reproducibility metadata over indefinite raw-content storage.
@@ -274,3 +274,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0003: Deterministic Chat and Agent Skeleton](adr/0003-chat-agent-skeleton.md)
 - [ADR 0004: Redis Session Memory](adr/0004-redis-session-memory.md)
 - [ADR 0005: Elasticsearch Knowledge RAG](adr/0005-elasticsearch-rag.md)
+- [ADR 0006: MySQL Feedback and Eval Seed](adr/0006-feedback-eval-seed.md)

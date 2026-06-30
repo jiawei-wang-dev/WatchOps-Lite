@@ -10,9 +10,12 @@ import (
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/eval"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
+	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 	"github.com/redis/go-redis/v9"
@@ -23,6 +26,7 @@ type App struct {
 	logger              *slog.Logger
 	redisClient         *redis.Client
 	elasticsearchClient *elasticsearchplatform.Client
+	mysqlClient         *mysqlplatform.Client
 	shutdownTimeout     time.Duration
 }
 
@@ -97,6 +101,63 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	var mysqlClient *mysqlplatform.Client
+	feedbackStore := feedback.Store(feedback.UnavailableStore{})
+	evalStore := eval.Store(eval.UnavailableStore{})
+	if cfg.MySQL.Enabled {
+		client, err := mysqlplatform.New(mysqlplatform.Config{
+			DSN:             cfg.MySQL.DSN,
+			MaxOpenConns:    cfg.MySQL.MaxOpenConns,
+			MaxIdleConns:    cfg.MySQL.MaxIdleConns,
+			ConnMaxLifetime: cfg.MySQL.ConnMaxLifetime.Value(),
+			RequestTimeout:  cfg.MySQL.RequestTimeout.Value(),
+		})
+		if err != nil {
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		mysqlClient = client
+		mysqlFeedbackStore, err := feedback.NewMySQLStore(client.DB())
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		mysqlEvalStore, err := eval.NewMySQLStore(client.DB())
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		feedbackStore = mysqlFeedbackStore
+		evalStore = mysqlEvalStore
+
+		mysqlContext, cancel := context.WithTimeout(context.Background(), cfg.MySQL.RequestTimeout.Value())
+		if err := client.Ping(mysqlContext); err != nil {
+			logger.Warn("MySQL is not ready; startup will continue", "error", err)
+		} else if err := client.EnsureSchema(mysqlContext); err != nil {
+			logger.Warn("MySQL feedback and eval schema is not ready; startup will continue", "error", err)
+		}
+		cancel()
+	}
+	feedbackService, err := feedback.NewService(feedbackStore)
+	if err != nil {
+		return nil, err
+	}
+	evalService, err := eval.NewService(evalStore, feedbackService)
+	if err != nil {
+		return nil, err
+	}
+
 	agentRunner := agenteino.NewDeterministicRunner(tools)
 	chatService := applicationchat.NewService(
 		agentRunner,
@@ -113,6 +174,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		httptransport.RouterDependencies{
 			Chat:      chatService,
 			Knowledge: knowledgeService,
+			Feedback:  feedbackService,
+			Eval:      evalService,
 		},
 	)
 
@@ -128,6 +191,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		logger:              logger,
 		redisClient:         redisClient,
 		elasticsearchClient: elasticsearchClient,
+		mysqlClient:         mysqlClient,
 		shutdownTimeout:     cfg.Server.ShutdownTimeout.Value(),
 	}, nil
 }
@@ -140,6 +204,11 @@ func (a *App) Run(ctx context.Context) error {
 		if a.elasticsearchClient != nil {
 			if err := a.elasticsearchClient.Close(context.Background()); err != nil {
 				a.logger.Warn("failed to close Elasticsearch client", "error", err)
+			}
+		}
+		if a.mysqlClient != nil {
+			if err := a.mysqlClient.Close(); err != nil {
+				a.logger.Warn("failed to close MySQL client", "error", err)
 			}
 		}
 	}()

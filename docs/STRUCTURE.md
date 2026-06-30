@@ -18,7 +18,10 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── memory/session/
     │   ├── redisstore/         # Redis list/hash persistence and TTL
     │   └── summary/            # Deterministic rolling summarizer
+    ├── feedback/               # Feedback validation, store contract, and MySQL store
+    ├── eval/                   # Eval-seed validation, store contract, and MySQL store
     ├── platform/elasticsearch/ # Official client configuration and request boundary
+    ├── platform/mysql/         # database/sql pool and feedback/eval schema
     ├── retrieval/knowledge/    # Chunking, retrieval service, and ES-backed store
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
@@ -46,6 +49,9 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/memory/session/summary` owns deterministic rolling summarization.
 - `internal/platform/elasticsearch` owns official-client construction and bounded requests.
 - `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, retrieval policy, and Elasticsearch query construction.
+- `internal/feedback` owns feedback validation and persistence contracts.
+- `internal/eval` owns manual good-case/bad-case seeding and feedback-rating compatibility.
+- `internal/platform/mysql` owns MySQL driver, connection-pool settings, and schema initialization.
 - `internal/tools` owns WatchOps business contracts, normalized evidence, structured errors, timeout policy, and mock implementations.
 - `internal/transport/http` contains HTTP concerns only: Gin routing, middleware, handlers, and later transport DTOs.
 - Gin handlers bind and validate HTTP input, call application-level operations, and format HTTP output. Business rules do not belong in handlers.
@@ -56,8 +62,8 @@ The following modules are part of the planned architecture, but their directorie
 
 | Module | Intended responsibility |
 | --- | --- |
-| `internal/feedback` | Likes, dislikes, eval candidates, review flow, and evaluation reuse |
-| Additional `internal/platform` packages | MySQL, model-provider, and other external-system adapters |
+| Feedback review/export | Redaction, approval state, and `agent_eval_cases.json` export |
+| Additional `internal/platform` packages | Model-provider and other external-system adapters |
 
 These names describe ownership boundaries, not a requirement to create every package at once.
 
