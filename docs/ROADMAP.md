@@ -49,24 +49,26 @@ Exit criteria:
 
 Exit status: complete. Redaction, output-size enforcement, and tracing hooks remain extension points for the real-connector and observability phases.
 
-## Phase 3: Chat API and Eino Agent Skeleton
+## Phase 3: Chat API and Eino Agent Skeleton — Completed
 
-Deliverables:
+Delivered:
 
 - `POST /api/v1/chat`
-- Eino `ChatModel` integration boundary
-- Versioned Eino `PromptTemplate` assets
-- Eino-based ReAct-style Agent
-- Eino Graph for explicit workflow stages where appropriate
-- Bounded steps, tool calls, request deadline, and repeated-call detection
-- Structured answer sections and evidence validation
+- Thin Gin Chat handler and transport DTOs
+- Chat application service
+- Deterministic Eino `InvokableTool` runner
+- Transparent routing for error-rate, trace/slow, and runbook questions
+- Structured answer sections, evidence IDs, limitations, and tool run summaries
+- Safe HTTP and tool error mapping
 
 Exit criteria:
 
-- A fixture model can complete a Chat request end to end.
-- The Agent invokes Phase 2 tools through Eino.
-- Unsupported factual claims are rejected or downgraded.
-- The Agent stops reliably when its budget is exhausted.
+- An error-rate Chat request completes end to end.
+- The skeleton invokes Phase 2 tools through Eino.
+- Conclusions reference returned evidence.
+- Failed tools appear in limitations without fabricated evidence.
+
+Exit status: complete. Real `ChatModel`, `PromptTemplate`, Eino Graph, and production ReAct orchestration remain deferred.
 
 ## Phase 4: Redis Session Memory
 

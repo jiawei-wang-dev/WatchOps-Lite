@@ -44,7 +44,11 @@ func run() int {
 		}
 	}()
 
-	app := bootstrap.New(cfg, logger)
+	app, err := bootstrap.New(cfg, logger)
+	if err != nil {
+		logger.Error("failed to build application", "error", err)
+		return 1
+	}
 	if err := app.Run(ctx); err != nil {
 		logger.Error("server stopped with an error", "error", err)
 		return 1

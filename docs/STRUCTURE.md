@@ -14,6 +14,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── config/                 # Configuration loading and validation
     ├── observability/          # Structured logging and OTel lifecycle boundary
     ├── agent/eino/             # Eino assembly for current mock tools
+    ├── application/chat/       # Chat use-case validation and orchestration
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
     │   ├── logs/               # Deterministic query_logs mock
@@ -33,6 +34,8 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/config` loads defaults, JSON configuration, and environment overrides.
 - `internal/observability` owns structured logging and the future OpenTelemetry SDK boundary.
 - `internal/agent/eino` exposes typed mock implementations through Eino's official Tool abstraction.
+- `internal/agent/eino` also contains the deterministic Phase 3 runner; full Graph/ReAct orchestration remains deferred.
+- `internal/application/chat` owns the Chat use case and does not depend on Gin.
 - `internal/tools` owns WatchOps business contracts, normalized evidence, structured errors, timeout policy, and mock implementations.
 - `internal/transport/http` contains HTTP concerns only: Gin routing, middleware, handlers, and later transport DTOs.
 - Gin handlers bind and validate HTTP input, call application-level operations, and format HTTP output. Business rules do not belong in handlers.

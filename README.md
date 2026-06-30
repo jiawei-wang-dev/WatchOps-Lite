@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project currently contains the Gin HTTP skeleton and a Phase 2 Eino Tool skeleton. The four reliability tools return deterministic mock evidence through Eino's official Tool abstraction. RAG, Agent orchestration, persistence, and real observability integrations are intentionally not implemented yet.
+The project currently contains the Gin HTTP skeleton, Eino-backed mock tools, and a deterministic Chat/Agent skeleton. It validates request, tool, evidence, and answer contracts without calling a real LLM or backend.
 
 ## Current Scope
 
@@ -17,10 +17,12 @@ Implemented:
 - Shared `ToolResult`, `ToolError`, and evidence contracts
 - Timeout and fallback execution wrapper
 - Eino-backed mock tools for logs, metrics, traces, and knowledge
+- `POST /api/v1/chat` with deterministic tool routing
+- Evidence-aware answers and tool run summaries
 
 Not implemented yet:
 
-- Chat API, Eino Graph, or ReAct Agent logic
+- Real `ChatModel`, Eino Graph, or production ReAct Agent logic
 - RAG ingestion and retrieval
 - Redis or MySQL integration
 - Real logs, metrics, traces, or knowledge backends
@@ -52,6 +54,23 @@ Check the health endpoint:
 ```bash
 curl -i http://localhost:8080/healthz
 ```
+
+Call the deterministic Chat endpoint:
+
+```bash
+curl -sS http://localhost:8080/api/v1/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "ses_01",
+    "message": "Why did checkout error rate increase in the last 20 minutes?",
+    "time_context": {
+      "from": "2026-06-30T00:00:00Z",
+      "to": "2026-06-30T00:20:00Z"
+    }
+  }'
+```
+
+This route uses deterministic mock evidence. See [HTTP API](docs/API.md) for the request, response, routing, and error contracts.
 
 Example response:
 
@@ -108,7 +127,8 @@ make fmt    # format Go source files
     ├── bootstrap/              # Application wiring and lifecycle
     ├── config/                 # Config loading and validation
     ├── observability/          # Structured logging and OTel boundary
-    ├── agent/eino/             # Eino mock-tool assembly
+    ├── agent/eino/             # Eino tools and deterministic Agent runner
+    ├── application/chat/       # Chat use-case orchestration
     ├── tools/                  # Contracts and deterministic mock tools
     └── transport/http/
         ├── handler/            # Thin Gin handlers
@@ -128,11 +148,13 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 ## Design Documents
 
 - [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
+- [HTTP API](docs/API.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Project Structure](docs/STRUCTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [ADR 0001: Framework and Technology Stack](docs/adr/0001-framework-and-stack.md)
 - [ADR 0002: Eino Tooling and WatchOps Tool Contracts](docs/adr/0002-eino-tooling.md)
+- [ADR 0003: Deterministic Chat and Agent Skeleton](docs/adr/0003-chat-agent-skeleton.md)
 
 ## Originality
 

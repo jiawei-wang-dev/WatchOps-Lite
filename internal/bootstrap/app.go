@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 )
@@ -17,8 +19,19 @@ type App struct {
 	shutdownTimeout time.Duration
 }
 
-func New(cfg config.Config, logger *slog.Logger) *App {
-	router := httptransport.NewRouter(logger, cfg.Telemetry.ServiceName)
+func New(cfg config.Config, logger *slog.Logger) (*App, error) {
+	tools, err := agenteino.BuildMockTools()
+	if err != nil {
+		return nil, err
+	}
+
+	agentRunner := agenteino.NewDeterministicRunner(tools)
+	chatService := applicationchat.NewService(agentRunner)
+	router := httptransport.NewRouter(
+		logger,
+		cfg.Telemetry.ServiceName,
+		httptransport.RouterDependencies{Chat: chatService},
+	)
 
 	return &App{
 		server: &http.Server{
@@ -31,7 +44,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 		},
 		logger:          logger,
 		shutdownTimeout: cfg.Server.ShutdownTimeout.Value(),
-	}
+	}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {

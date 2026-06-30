@@ -271,3 +271,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 
 - [ADR 0001: Framework and Technology Stack](adr/0001-framework-and-stack.md)
 - [ADR 0002: Eino Tooling and WatchOps Tool Contracts](adr/0002-eino-tooling.md)
+- [ADR 0003: Deterministic Chat and Agent Skeleton](adr/0003-chat-agent-skeleton.md)

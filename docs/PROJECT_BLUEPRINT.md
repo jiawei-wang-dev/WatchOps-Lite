@@ -208,6 +208,8 @@ Suggested `agent_eval_cases.json` format:
 
 Responsibilities: request validation, session loading, Eino-based Agent execution, evidence assembly, context persistence, and response delivery. Gin owns routing, middleware, request binding, validation entry points, and response formatting. Eino owns Agent workflow orchestration, prompt rendering, model invocation, tool calling, and graph-style execution. Handlers translate HTTP requests into application commands and must not contain business logic.
 
+Phase 3 provides a deterministic Chat skeleton that invokes Eino `InvokableTool` values through explicit message rules. It validates the API shape, evidence mapping, limitations, and tool run summaries without a real `ChatModel`, `PromptTemplate`, Graph, or ReAct loop. Those production orchestration capabilities remain future work.
+
 `POST /api/v1/chat`
 
 ```json
