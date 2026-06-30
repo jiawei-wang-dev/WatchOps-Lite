@@ -2,13 +2,13 @@
 
 ## 1. Overview
 
-WatchOps-Lite follows a pragmatic ports-and-adapters architecture. HTTP, Redis, MySQL, model SDKs, vector stores, and observability backends remain outside the core business boundary.
+WatchOps-Lite follows a pragmatic ports-and-adapters architecture. Gin, Eino, Elasticsearch, Redis, MySQL, and observability backends remain outside the core business-policy boundary.
 
 ```mermaid
 flowchart LR
-    U["SRE / Developer"] --> API["Go HTTP API"]
+    U["SRE / Developer"] --> API["Gin HTTP API"]
     API --> APP["Application Use Cases"]
-    APP --> AGENT["Agent Orchestrator"]
+    APP --> AGENT["Eino Graph / ReAct Agent"]
     AGENT --> CTX["Context Builder"]
     AGENT --> PROMPT["Prompt Renderer"]
     AGENT --> HARNESS["Tool Harness"]
@@ -18,29 +18,30 @@ flowchart LR
     HARNESS --> RAG["Knowledge Search"]
     CTX --> REDIS[("Redis")]
     CTX --> MYSQL[("MySQL")]
-    RAG --> VECTOR[("Vector Store")]
+    RAG --> ES[("Elasticsearch")]
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
     API -. spans .-> OTEL["OpenTelemetry"]
     AGENT -. spans .-> OTEL
     HARNESS -. spans .-> OTEL
+    OTEL --> JAEGER["Jaeger"]
 ```
 
 ## 2. Layer Responsibilities
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Transport | HTTP protocol, authentication entry point, DTOs, and status codes | Agent decisions or database semantics |
+| Transport | Gin routing, middleware, binding, DTOs, and status codes | Agent decisions or database semantics |
 | Application | Chat, knowledge, and feedback use-case orchestration | Vendor SDK details |
 | Domain | Entities, rules, ports, and error semantics | Networking, serialization, or persistence |
-| Agent | Context, planning, tool loop, and output constraints | Direct external-system queries |
-| Adapters/Platform | Redis, MySQL, model, vector-store, and telemetry integrations | Product policy |
+| Agent | Eino Graph/ReAct orchestration, prompt rendering, model calls, and tool calling | Direct external-system queries |
+| Adapters/Platform | Elasticsearch, Redis, MySQL, model-provider, and telemetry integrations | Product policy |
 
 Dependencies point inward: adapters depend on core interfaces, never the reverse.
 
 ## 3. Agent Execution Model
 
-The MVP uses a bounded single-Agent loop. This is easier to observe, test, and cost-control than an unconstrained autonomous loop.
+The MVP uses a bounded Eino-based ReAct-style Agent, with Eino Graph for explicit workflow stages. This is easier to observe, test, and cost-control than an unconstrained autonomous loop.
 
 ```mermaid
 stateDiagram-v2
@@ -66,14 +67,17 @@ Hard stop conditions:
 - Identical tool and arguments produced repeatedly
 - User asks for a production write operation forbidden by the MVP
 
-The orchestrator depends only on these ports:
+The Agent layer uses Eino capabilities and WatchOps-Lite business contracts:
 
-- `Model`
+- Eino `ChatModel`
+- Eino `PromptTemplate`
+- Eino Graph and ReAct execution
+- Eino Tool registration and invocation
 - `ContextStore`
 - `LongTermMemory`
-- `ToolExecutor`
-- `PromptRepository`
 - `TraceRecorder`, implemented through the OpenTelemetry API
+
+WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools.
 
 ## 4. Chat Data Flow
 
@@ -84,7 +88,7 @@ sequenceDiagram
     participant A as Chat Use Case
     participant R as Redis
     participant M as MySQL
-    participant G as Agent
+    participant G as Eino Agent
     participant T as Tool Harness
 
     C->>H: POST /api/v1/chat
@@ -136,7 +140,7 @@ The system does not prune by raw character count alone. The Context Builder assi
 
 ```text
 Upload -> Validate -> Extract -> Normalize -> Chunk
-       -> Embed -> Vector Upsert -> Mark Ready
+       -> Elasticsearch Index -> Mark Ready
 ```
 
 Document states are `pending` → `processing` → `ready`. A failed job enters `failed` with a safe error code. Duplicate content can be detected from tenant, source, and content hash.
@@ -145,16 +149,18 @@ The MVP may accept uploads synchronously and process them asynchronously. A smal
 
 ### 6.2 Retrieval Path
 
-1. Normalize the query and generate an embedding.
+1. Normalize the query.
 2. Apply tenant, document-state, and access-scope filters.
-3. Retrieve vector top-k candidates.
-4. Optionally apply hybrid keyword search and reranking.
-5. Remove results below the relevance threshold.
+3. Retrieve BM25 candidates from Elasticsearch.
+4. Add vector retrieval and hybrid fusion when embeddings are introduced.
+5. Add RRF and reranking when evaluation data demonstrates value.
 6. Assign immutable evidence IDs while retaining source positions.
 
-The vector-store implementation never enters the Agent layer. Development and deployment may use different engines without changing the use-case contract.
+Elasticsearch query construction remains in the platform adapter and never enters the Agent or HTTP layers.
 
 ## 7. Tool Harness
+
+Eino owns tool schema exposure, registration, and invocation. The WatchOps-Lite harness is a policy wrapper, not a second tool runtime or custom Tool Registry.
 
 Tool execution lifecycle:
 
@@ -203,10 +209,11 @@ Suggested MySQL tables:
 | `knowledge_documents` | Document processing state | source, content_hash, status, error_code |
 | `feedback` | Raw user feedback | request_id, rating, reason, prompt_version |
 | `eval_candidates` | Reviewable eval candidates | feedback_id, kind, review_status |
+| `audit_records` | Durable security and workflow audit | action, resource_type, resource_id, created_at |
 
 Whether full request text is retained must be controlled by privacy policy and configuration. The default should favor hashes, summaries, and reproducibility metadata over indefinite raw-content storage.
 
-## 9. OpenTelemetry
+## 9. OpenTelemetry and Jaeger
 
 Recommended trace hierarchy:
 
@@ -226,6 +233,8 @@ http POST /api/v1/chat
 
 Attributes contain only low-cardinality, non-sensitive values: model name, prompt version, tool name, status, token count, result count, and truncation state. User questions, raw logs, and credentials do not belong in span attributes.
 
+Jaeger is the local trace visualization backend. Prometheus metrics may be added after the MVP and are not required for the tracing baseline.
+
 Key metrics:
 
 - Chat latency and success rate
@@ -242,7 +251,7 @@ Key metrics:
 | --- | --- |
 | Redis | Process a single turn and clearly report loss of short-term continuity |
 | MySQL | Reject operations requiring durable persistence; Chat degrades or fails according to policy |
-| Vector store | Return a structured knowledge-search error; other tools remain available |
+| Elasticsearch | Return a structured knowledge-search error; other tools remain available |
 | Logs/Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
 | Model | Fail quickly with a retryable dependency error |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
@@ -252,17 +261,12 @@ Key metrics:
 - Unit tests: domain rules, context pruning, evidence validation, fallback selection, and stop conditions.
 - Golden tests: prompt rendering and structured response templates.
 - Contract tests: four tool adapters and their external API fixtures.
-- Integration tests: MySQL, Redis, and vector-store lifecycles.
+- Integration tests: Elasticsearch, MySQL, and Redis lifecycles.
 - End-to-end tests: upload → retrieve → Chat → feedback.
 - Eval: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
 
 CI uses redacted fixtures or containers and never depends on real production endpoints.
 
-## 12. Initial Architecture Decision Records
+## 12. Architecture Decision Records
 
-- ADR-001: Use a bounded single-Agent loop
-- ADR-002: Use Redis summary plus sliding window
-- ADR-003: Treat MySQL as the business metadata source of truth
-- ADR-004: Keep the vector store replaceable behind a port
-- ADR-005: Let the model emit constrained tool-domain parameters only
-- ADR-006: Require review before production feedback enters eval
+- [ADR 0001: Framework and Technology Stack](adr/0001-framework-and-stack.md)

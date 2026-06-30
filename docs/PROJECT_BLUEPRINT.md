@@ -118,17 +118,9 @@ Long-term memory only stores user-confirmed information or high-confidence extra
 
 ### 4.3 Harness Engineering
 
-All tools run through a shared `Tool` interface and registry:
+Tools use Eino's Tool abstraction for schema exposure, registration, and invocation. WatchOps-Lite does not build a parallel Tool Registry when Eino already provides the required mechanism.
 
-```go
-type Tool interface {
-    Name() string
-    Validate(input json.RawMessage) error
-    Execute(ctx context.Context, input json.RawMessage) (ToolResult, error)
-}
-```
-
-The Agent adapts this interface to Eino's Tool abstraction, but the Eino-facing type does not replace the WatchOps-Lite domain contract. The orchestration loop uses a bounded, Eino-based ReAct-style Agent: reason about the next step, call a validated tool when evidence is required, observe the result, and stop when the answer or execution budget is complete. Eino Graph is used where the workflow benefits from explicit nodes, transitions, and execution state.
+WatchOps-Lite defines the business-level input and output contracts for each tool, plus a shared structured `ToolError`. Its harness wrappers add policy around Eino tools without replacing Eino's registration or calling lifecycle. The orchestration loop uses a bounded, Eino-based ReAct-style Agent: reason about the next step, call a validated tool when evidence is required, observe the result, and stop when the answer or execution budget is complete. Eino Graph is used where the workflow benefits from explicit nodes, transitions, and execution state.
 
 The harness provides:
 
@@ -348,7 +340,7 @@ WatchOps-Lite/
 │   │   ├── harness/            # Timeout, fallback, and structured errors
 │   │   └── loop/               # Feedback-to-eval candidates
 │   ├── tools/
-│   │   ├── registry/
+│   │   ├── contracts/          # Business I/O contracts and ToolError
 │   │   ├── logs/
 │   │   ├── metrics/
 │   │   ├── traces/
@@ -433,7 +425,11 @@ Secrets enter through environment variables or a secret manager. Example files c
 
 ## 11. Framework and Technology Choices
 
-WatchOps-Lite uses mature, widely adopted frameworks for infrastructure and orchestration when they provide reliable building blocks. It does not rebuild established components without a project-specific reason. Frameworks remain implementation tools, not the owners of domain policy or package boundaries.
+WatchOps-Lite uses mature, widely adopted frameworks and libraries for infrastructure and orchestration when they provide reliable building blocks. Features that resemble mature capabilities in the reference project should be implemented with established components rather than custom replacements. This applies to HTTP routing, Agent orchestration, ReAct-style tool calling, tool schema exposure, RAG storage, session caching, durable metadata storage, and tracing infrastructure.
+
+Frameworks remain implementation tools, not the owners of WatchOps-Lite business policy or package boundaries. A custom replacement is justified only when a documented requirement cannot be met through the selected framework.
+
+The accepted decision is recorded in [ADR 0001: Framework and Technology Stack](adr/0001-framework-and-stack.md).
 
 ### 11.1 Web Framework: Gin
 
@@ -514,15 +510,19 @@ Spans record safe operational metadata such as component name, duration, status,
 
 ### 11.6 Tool System
 
-WatchOps-Lite owns a unified domain-level `Tool` interface and `Tool Registry`. An Eino adapter exposes registered WatchOps-Lite tools through Eino's Tool abstraction, but Eino tool types do not replace the domain contract.
+Eino owns tool schema exposure, registration, invocation, and integration with the ReAct-style Agent. WatchOps-Lite must not build a custom Tool Registry if Eino already provides the required registration and calling mechanism.
 
-Every tool must provide:
+WatchOps-Lite owns:
 
-- Input schema validation
-- An execution timeout
-- Structured errors
-- OpenTelemetry spans
+- Business-level tool input and output contracts
+- Structured `ToolError`
+- Timeout, bounded retry, and fallback policy
+- Evidence normalization
+- Sensitive-value redaction
+- OpenTelemetry wrappers
 - Output size limits and truncation metadata
+
+These policies wrap Eino tools rather than recreating Eino's tool runtime.
 
 The initial tools are:
 
@@ -531,7 +531,13 @@ The initial tools are:
 - `query_traces`
 - `search_knowledge`
 
-### 11.7 Independence Principle
+### 11.7 Local Deployment: Docker Compose
+
+Docker Compose is the standard local deployment mechanism. As each phase is implemented, the local stack can add Elasticsearch, Redis, MySQL, an OpenTelemetry Collector, and Jaeger. Services are added only when the corresponding feature exists; the Compose file should not simulate unimplemented business modules.
+
+Prometheus metrics are a post-MVP enhancement and are not required in the initial Compose stack.
+
+### 11.8 Independence Principle
 
 Use established frameworks for transport, infrastructure, telemetry, and orchestration. In particular, use Gin for the HTTP layer and Eino for the Agent orchestration layer. Do not reinvent mature components unless a documented WatchOps-Lite requirement demands it.
 

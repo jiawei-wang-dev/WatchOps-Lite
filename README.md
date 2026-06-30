@@ -124,7 +124,9 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 
 - [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Project Structure](docs/STRUCTURE.md)
 - [Roadmap](docs/ROADMAP.md)
+- [ADR 0001: Framework and Technology Stack](docs/adr/0001-framework-and-stack.md)
 
 ## Originality
 

@@ -1,180 +1,173 @@
 # WatchOps-Lite Development Roadmap
 
-The roadmap follows one principle: each phase should validate a complete technical or product risk. Dates will be assigned when implementation starts; this document defines dependency order and exit criteria.
+The roadmap introduces one architectural capability at a time. Each phase should remain runnable and testable, and no later-phase infrastructure should be added early merely to complete the directory tree.
 
-## Phase 0: Design Baseline
+## Phase 1: Gin HTTP Skeleton — Completed
 
-Deliverables:
+Delivered:
 
-- Project blueprint, architecture document, and README
-- MVP boundaries and recommended project layout
-- Explicit implementation points for all four Agent engineering disciplines
-- Initial API, error, and evaluation-data contracts
+- Go module and minimal package structure
+- Gin router and `GET /healthz`
+- Request logging, request IDs, and panic recovery middleware
+- JSON configuration with environment overrides
+- Structured logging
+- Graceful startup and shutdown
+- OpenTelemetry lifecycle placeholder
+- Unit tests and developer commands
 
-Exit criteria:
+Exit status: complete.
 
-- Product scope contains no material contradictions.
-- Every external dependency has an abstraction boundary.
-- No content is copied from another project.
-
-## Phase 1: Engineering Scaffold
-
-Deliverables:
-
-- `go.mod`, directory skeleton, and configuration loading
-- HTTP server, `/healthz`, and graceful shutdown
-- Common error envelope and request IDs
-- Local MySQL and Redis with Compose
-- Basic OpenTelemetry integration
-- Lint, test, and build CI
-
-Exit criteria:
-
-- A new environment can start dependencies with one command.
-- The service starts, reports health, and shuts down gracefully.
-- A request produces a visible root span in the trace backend.
-
-## Phase 2: Minimal RAG Loop
+## Phase 2: Eino Tool Skeleton and WatchOps Tool Contracts
 
 Deliverables:
 
-- Document upload, status, and deletion
-- Text extraction, chunking, and embedding
-- `VectorStore` interface and one MVP implementation
-- `search_knowledge` tool
-- Source locations and evidence IDs
+- Add Eino as the Agent/LLM framework dependency.
+- Use Eino's Tool abstraction for schema exposure, registration, and invocation.
+- Define business-level input and output contracts for the initial tools.
+- Define structured `ToolError`.
+- Add wrappers for timeout, fallback, redaction, output size control, and tracing boundaries.
+- Introduce deterministic fixture-based tool tests.
 
-Exit criteria:
-
-- A fixed runbook reliably returns the expected passage.
-- Duplicate upload and failure behavior are predictable.
-- Retrieval never crosses access scopes.
-
-## Phase 3: Agent Chat and Prompt Engineering
-
-Deliverables:
-
-- `POST /api/v1/chat`
-- Model port and one adapter
-- Bounded Agent loop
-- Versioned prompt templates
-- Structured answer and evidence validator
-- Model, prompt, token, and step tracing
-
-Exit criteria:
-
-- Answers contain conclusion, evidence, inferences, recommendations, and limitations.
-- Unsupported factual claims are blocked or downgraded.
-- The loop stops reliably on exhausted budget or repeated calls.
-
-## Phase 4: Context Engineering
-
-Deliverables:
-
-- Redis recent-message sliding window
-- Structured Redis session summary
-- MySQL long-term memory
-- Token budget and context pruning
-- Concurrent summary version control
-- Session and memory deletion endpoints
-
-Exit criteria:
-
-- Long conversations retain confirmed facts after exceeding the raw-message window.
-- A Redis outage permits an explicitly degraded single-turn request.
-- Model inference never enters long-term memory without confirmation.
-
-## Phase 5: SRE Tools and Harness Engineering
-
-Deliverables:
+Initial tool contracts:
 
 - `query_logs`
 - `query_metrics`
 - `query_traces`
-- Shared tool registry and executor
-- Schema validation, timeouts, bounded retries, and fallbacks
-- Structured errors, truncation, and redaction
-- Backend contract tests
+- `search_knowledge`
+
+Constraints:
+
+- Do not build a custom Tool Registry.
+- Do not connect production observability or knowledge backends yet.
+- Eino owns registration and calling; WatchOps-Lite owns execution policy and business contracts.
 
 Exit criteria:
 
-- All four tools execute consistently against fixture environments.
-- A tool timeout cannot exceed the overall Chat deadline.
-- Partial tool failure still allows an answer using remaining evidence.
-- The model cannot bypass the allowlist with arbitrary backend queries.
+- Eino can register and invoke fixture-backed tools.
+- Invalid input produces a structured validation error.
+- Timeout and oversized-output behavior are deterministic and tested.
 
-## Phase 6: Loop Engineering and Eval
+## Phase 3: Chat API and Eino Agent Skeleton
 
 Deliverables:
 
-- Like/dislike API
-- Feedback reason, version, and evidence snapshot
-- Positive-case and bad-case candidate generation
-- Redaction and human review states
-- `evals/agent_eval_cases.json`
-- `cmd/eval` with a JSON report
+- `POST /api/v1/chat`
+- Eino `ChatModel` integration boundary
+- Versioned Eino `PromptTemplate` assets
+- Eino-based ReAct-style Agent
+- Eino Graph for explicit workflow stages where appropriate
+- Bounded steps, tool calls, request deadline, and repeated-call detection
+- Structured answer sections and evidence validation
 
 Exit criteria:
 
-- One like and one dislike can each become a compliant candidate.
-- A bad case tests forbidden behavior without preserving a wrong answer as truth.
-- Evaluation runs offline and deterministically in CI.
-- Prompt or tool changes expose regression differences.
+- A fixture model can complete a Chat request end to end.
+- The Agent invokes Phase 2 tools through Eino.
+- Unsupported factual claims are rejected or downgraded.
+- The Agent stops reliably when its budget is exhausted.
 
-## Phase 7: Open-source Presentation Quality
+## Phase 4: Redis Session Memory
 
 Deliverables:
 
-- OpenAPI contract, architecture diagrams, and demonstration data
-- One reproducible incident-analysis walkthrough
-- Security policy, contributing guide, and license
-- Example dashboard and trace screenshots
-- Capacity, timeout, and degradation guidance
+- Recent-message sliding window
+- Rolling structured session summary
+- Session TTL and deletion behavior
+- Optimistic summary versioning
+- Context budget and pruning
+- Redis in the local Docker Compose stack
 
 Exit criteria:
 
-- A clean environment can complete the demo from the README.
-- The repository contains no credentials, production data, or personal information.
-- Critical paths have appropriate test coverage.
-- Documentation agrees with actual behavior.
+- Multi-turn conversations retain confirmed facts beyond the raw-message window.
+- Concurrent summary updates do not silently overwrite newer state.
+- Redis failure produces an explicit single-turn degradation.
+
+## Phase 5: RAG with Elasticsearch
+
+Deliverables:
+
+- Document upload, status, and deletion
+- Text extraction and chunking
+- Elasticsearch chunk indexing
+- BM25-first `search_knowledge` implementation
+- Source locations, access filters, and evidence IDs
+- Elasticsearch in the local Docker Compose stack
+
+Evolution path:
+
+- Add embeddings and vector search.
+- Add hybrid lexical/vector retrieval.
+- Add RRF and reranking when eval results justify them.
+
+Exit criteria:
+
+- A fixed runbook reliably returns the expected source chunk.
+- Duplicate and failed ingestion behavior is predictable.
+- Retrieval respects access filters and preserves source locations.
+
+## Phase 6: MySQL Memory, Feedback, and Eval Candidates
+
+Deliverables:
+
+- MySQL-backed long-term memory
+- Feedback storage for likes, dislikes, and reasons
+- Document metadata and ingestion state
+- Bad-case and positive-case eval candidates
+- Audit records and review state
+- MySQL migrations and local Docker Compose service
+- `agent_eval_cases.json` export path
+
+Exit criteria:
+
+- Only confirmed or policy-approved facts enter long-term memory.
+- Positive and negative feedback become redacted review candidates.
+- A bad case does not preserve an incorrect answer as ground truth.
+- Durable records retain the versions needed for reproduction.
+
+## Phase 7: OpenTelemetry and Jaeger Tracing
+
+Deliverables:
+
+- OpenTelemetry SDK and OTLP exporter
+- OpenTelemetry Collector and Jaeger in Docker Compose
+- Spans for:
+  - Agent runs
+  - Context building
+  - RAG search and ranking
+  - Tool execution
+  - Prompt rendering
+  - Model calls
+  - Feedback processing
+- Safe trace attributes and redaction rules
+- Trace IDs returned from relevant API responses
+
+Exit criteria:
+
+- A Chat trace is visible end to end in Jaeger.
+- Tool timeout and fallback events are visible without exposing sensitive data.
+- Telemetry export failure does not block business requests.
 
 ## Milestone Dependencies
 
 ```mermaid
 flowchart LR
-    P0["P0 Design"] --> P1["P1 Scaffold"]
-    P1 --> P2["P2 RAG"]
-    P1 --> P3["P3 Agent Chat"]
-    P2 --> P3
-    P3 --> P4["P4 Context"]
-    P3 --> P5["P5 Tools + Harness"]
-    P4 --> P6["P6 Feedback + Eval"]
-    P5 --> P6
-    P6 --> P7["P7 Open-source polish"]
+    P1["P1 Gin HTTP (complete)"] --> P2["P2 Eino Tools"]
+    P2 --> P3["P3 Chat + Eino Agent"]
+    P3 --> P4["P4 Redis Context"]
+    P4 --> P5["P5 Elasticsearch RAG"]
+    P5 --> P6["P6 MySQL + Feedback/Eval"]
+    P6 --> P7["P7 OTel + Jaeger"]
 ```
-
-## Suggested First Issues
-
-1. Initialize the Go module, base directories, and build tasks.
-2. Define the configuration schema and startup validation.
-3. Implement HTTP lifecycle, health, and the error envelope.
-4. Add the OTel trace provider and request span.
-5. Define domain entities and storage ports.
-6. Establish MySQL migrations and the Redis session store.
-7. Define `VectorStore`, `Embedder`, and `DocumentExtractor`.
-8. Define `Tool`, `ToolResult`, `ToolError`, and the registry.
-9. Establish prompt-version conventions and golden tests.
-10. Create the first `agent_eval_cases.json` and fixture rules.
 
 ## Deferred Work
 
-The following items enter the roadmap only when MVP evidence shows they are necessary:
-
+- Prometheus application metrics
 - Multi-agent orchestration
 - Automated production changes
-- Self-training or model fine-tuning
+- Model fine-tuning
 - Cross-region high availability
 - Advanced tenant billing
-- Real-time voice and multimodal input
+- Voice and multimodal input
 
-Deferral is not permanent exclusion. It prevents these features from increasing system risk before evidence handling, tool safety, and evaluation feedback are mature.
+Prometheus may be added after the MVP when concrete service-level metrics and dashboards have been identified.
