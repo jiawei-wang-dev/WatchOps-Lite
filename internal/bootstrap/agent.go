@@ -1,0 +1,85 @@
+package bootstrap
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"strings"
+
+	openai "github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino/components/model"
+	einotool "github.com/cloudwego/eino/components/tool"
+	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
+)
+
+type chatModelFactory func(
+	context.Context,
+	config.LLMConfig,
+	string,
+) (model.ToolCallingChatModel, error)
+
+func buildAgentRunner(
+	ctx context.Context,
+	cfg config.Config,
+	tools []einotool.InvokableTool,
+	logger *slog.Logger,
+	factory chatModelFactory,
+) agenteino.AgentRunner {
+	deterministic := agenteino.NewDeterministicRunner(tools)
+	if strings.ToLower(strings.TrimSpace(cfg.Agent.Mode)) != "eino_react" {
+		logger.Info("deterministic Agent runner selected")
+		return deterministic
+	}
+	if !cfg.LLM.Enabled {
+		logger.Warn("LLM is disabled; deterministic Agent fallback selected")
+		return deterministic
+	}
+
+	apiKey := strings.TrimSpace(os.Getenv(cfg.LLM.APIKeyEnv))
+	if strings.TrimSpace(cfg.LLM.Model) == "" || apiKey == "" {
+		logger.Warn(
+			"LLM configuration is incomplete; deterministic Agent fallback selected",
+			"model_configured", strings.TrimSpace(cfg.LLM.Model) != "",
+			"api_key_configured", apiKey != "",
+		)
+		return deterministic
+	}
+	chatModel, err := factory(ctx, cfg.LLM, apiKey)
+	if err != nil {
+		logger.Warn("LLM model initialization failed; deterministic Agent fallback selected", "error", err)
+		return deterministic
+	}
+	einoRunner, err := agenteino.NewReActRunner(ctx, chatModel, tools, agenteino.ReActRunnerConfig{
+		MaxIterations: cfg.Agent.MaxIterations,
+		Timeout:       cfg.Agent.Timeout.Value(),
+		PromptVersion: cfg.Agent.PromptVersion,
+		ModelName:     cfg.LLM.Model,
+	})
+	if err != nil {
+		logger.Warn("Eino ReAct Agent initialization failed; deterministic fallback selected", "error", err)
+		return deterministic
+	}
+	logger.Info(
+		"Eino ReAct Agent selected",
+		"model", cfg.LLM.Model,
+		"prompt_version", cfg.Agent.PromptVersion,
+		"max_iterations", cfg.Agent.MaxIterations,
+	)
+	return agenteino.NewFallbackRunner(einoRunner, deterministic)
+}
+
+func newOpenAICompatibleModel(
+	ctx context.Context,
+	cfg config.LLMConfig,
+	apiKey string,
+) (model.ToolCallingChatModel, error) {
+	temperature := float32(cfg.Temperature)
+	return openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		APIKey:      apiKey,
+		BaseURL:     cfg.BaseURL,
+		Model:       cfg.Model,
+		Temperature: &temperature,
+		Timeout:     cfg.RequestTimeout.Value(),
+	})
+}

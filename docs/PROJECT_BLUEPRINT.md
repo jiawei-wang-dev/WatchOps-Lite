@@ -210,7 +210,7 @@ Suggested `agent_eval_cases.json` format:
 
 Responsibilities: request validation, session loading, Eino-based Agent execution, evidence assembly, context persistence, and response delivery. Gin owns routing, middleware, request binding, validation entry points, and response formatting. Eino owns Agent workflow orchestration, prompt rendering, model invocation, tool calling, and graph-style execution. Handlers translate HTTP requests into application commands and must not contain business logic.
 
-Phase 3 provides a deterministic Chat skeleton that invokes Eino `InvokableTool` values through explicit message rules. It validates the API shape, evidence mapping, limitations, and tool run summaries without a real `ChatModel`, `PromptTemplate`, Graph, or ReAct loop. Those production orchestration capabilities remain future work.
+Phase 3 introduced a deterministic Chat skeleton that invokes Eino `InvokableTool` values through explicit message rules. Phase 8 adds the production Eino `ChatModel`, versioned `PromptTemplate`, and bounded ReAct Graph while preserving the deterministic runner for tests and fallback.
 
 `POST /api/v1/chat`
 
@@ -529,7 +529,7 @@ WatchOps-Lite owns:
 
 These policies wrap Eino tools rather than recreating Eino's tool runtime.
 
-Phase 2 introduced deterministic implementations through Eino `InvokableTool` values. The Elasticsearch-backed `search_knowledge` adapter was added in Phase 5; production observability connectors and full ReAct orchestration remain deferred to their roadmap phases.
+Phase 2 introduced deterministic implementations through Eino `InvokableTool` values. The Elasticsearch-backed `search_knowledge` adapter was added in Phase 5, and Phase 8 connects all four tools to a bounded Eino ReAct Agent through Eino's official tool-calling mechanism. Production log, metrics, and trace data-source connectors remain deferred.
 
 The initial tools are:
 

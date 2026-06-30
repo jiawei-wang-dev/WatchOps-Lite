@@ -43,6 +43,21 @@
     "conn_max_lifetime": "30m",
     "request_timeout": "3s"
   },
+  "agent": {
+    "mode": "deterministic",
+    "max_iterations": 6,
+    "timeout": "30s",
+    "prompt_version": "watchops_agent_v1"
+  },
+  "llm": {
+    "enabled": false,
+    "provider": "openai_compatible",
+    "base_url": "",
+    "api_key_env": "WATCHOPS_LLM_API_KEY",
+    "model": "",
+    "temperature": 0.2,
+    "request_timeout": "30s"
+  },
   "telemetry": {
     "enabled": false,
     "service_name": "watchops-lite",

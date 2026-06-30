@@ -17,7 +17,7 @@ flowchart LR
     HARNESS --> TRACES["Traces Adapter"]
     HARNESS --> RAG["Knowledge Search"]
     CTX --> REDIS[("Redis")]
-    CTX --> MYSQL[("MySQL")]
+    CTX -. planned long-term memory .-> MYSQL[("MySQL")]
     RAG --> ES[("Elasticsearch")]
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
@@ -41,43 +41,37 @@ Dependencies point inward: adapters depend on core interfaces, never the reverse
 
 ## 3. Agent Execution Model
 
-The MVP uses a bounded Eino-based ReAct-style Agent, with Eino Graph for explicit workflow stages. This is easier to observe, test, and cost-control than an unconstrained autonomous loop.
+The runtime selects either the deterministic runner or a bounded Eino ReAct Graph while preserving the same `AgentRunner`, `AgentInput`, and `AgentOutput` boundary.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> LoadContext
-    LoadContext --> Decide
-    Decide --> RunTools: External evidence required
-    RunTools --> MergeEvidence
-    MergeEvidence --> Decide: More evidence needed and budget remains
-    Decide --> Compose: Ready to answer
-    Decide --> Clarify: Critical parameters missing
-    RunTools --> Compose: Partial failure or exhausted budget
-    Compose --> PersistContext
-    Clarify --> PersistContext
-    PersistContext --> [*]
+flowchart TD
+    I["AgentInput"] --> P["Eino PromptTemplate v1"]
+    P --> M["ToolCalling ChatModel"]
+    M -->|"tool calls"| T["Eino ToolsNode"]
+    T --> N["Normalized ToolResult"]
+    N --> M
+    M -->|"final JSON"| V["Structured parser + evidence validation"]
+    V --> O["AgentOutput"]
+    M -->|"model error"| F["Deterministic fallback"]
+    F --> O
 ```
 
 Hard stop conditions:
 
-- Maximum loop steps reached
-- Maximum tool calls reached
+- Configured Eino graph-step/iteration bound reached
 - Request deadline exceeded
-- Token or cost budget exhausted
-- Identical tool and arguments produced repeatedly
-- User asks for a production write operation forbidden by the MVP
+- ChatModel request timeout reached
 
-The Agent layer uses Eino capabilities and WatchOps-Lite business contracts:
+The current Agent layer uses:
 
-- Eino `ChatModel`
+- Eino `ToolCallingChatModel` through the official OpenAI-compatible extension
 - Eino `PromptTemplate`
-- Eino Graph and ReAct execution
+- Eino ReAct Graph and `ToolsNode`
 - Eino Tool registration and invocation
-- `ContextStore`
-- `LongTermMemory`
-- `TraceRecorder`, implemented through the OpenTelemetry API
+- `MessageFuture` to collect executed tool results
+- OpenTelemetry spans for prompt rendering, model calls, tool calls, parsing, and fallback
 
-WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools.
+WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools. Model-produced evidence is never trusted directly: only IDs found in actual `ToolResult` records can support conclusions or inferences.
 
 ## 4. Chat Data Flow
 
@@ -87,17 +81,12 @@ sequenceDiagram
     participant H as HTTP Handler
     participant A as Chat Use Case
     participant R as Redis
-    participant M as MySQL
     participant G as Eino Agent
     participant T as Tool Harness
 
     C->>H: POST /api/v1/chat
     H->>A: Validated command
-    par Short-term context
-        A->>R: Load summary and recent messages
-    and Relevant memory
-        A->>M: Search long-term memory
-    end
+    A->>R: Load summary and recent messages
     A->>G: Message and context budget
     loop Bounded decision loop
         G->>T: Execute typed tool request
@@ -105,7 +94,6 @@ sequenceDiagram
     end
     G-->>A: Structured answer and citations
     A->>R: Append recent messages / refresh summary
-    A->>M: Persist request metadata
     A-->>H: Result
     H-->>C: Answer, request_id, and trace_id
 ```
@@ -234,7 +222,7 @@ http POST /api/v1/chat
         └── session.update_summary
 ```
 
-Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
+When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, and `agent.output.parse` spans. Request-time model failure also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
 
 Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 

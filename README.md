@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project currently contains the Gin HTTP skeleton, Eino-backed tools, a deterministic Chat/Agent skeleton, Redis session memory, Elasticsearch-backed BM25 knowledge retrieval, and MySQL-backed feedback/eval seeding.
+The project currently contains the Gin HTTP API, an optional Eino ReAct Agent with deterministic fallback, Redis session memory, Elasticsearch-backed BM25 knowledge retrieval, MySQL-backed feedback/eval seeding, and OpenTelemetry tracing.
 
 ## Current Scope
 
@@ -18,7 +18,11 @@ Implemented:
 - Shared `ToolResult`, `ToolError`, and evidence contracts
 - Timeout and fallback execution wrapper
 - Eino-backed mock tools for logs, metrics, traces, and knowledge
-- `POST /api/v1/chat` with deterministic tool routing
+- `POST /api/v1/chat` with configurable Eino ReAct or deterministic execution
+- Versioned Eino PromptTemplate and OpenAI-compatible ChatModel integration
+- Official Eino ReAct Graph tool calling over the four existing tools
+- Evidence-ID validation and safe structured-output parsing
+- Startup and per-request deterministic fallback when the LLM is unavailable
 - Evidence-aware answers and tool run summaries
 - Redis recent messages, versioned rolling summaries, and graceful memory degradation
 - Plain-text/Markdown knowledge ingestion with deterministic paragraph-first chunking
@@ -29,7 +33,6 @@ Implemented:
 
 Not implemented yet:
 
-- Real `ChatModel`, Eino Graph, or production ReAct Agent logic
 - Real logs, metrics, or traces backends
 - Embeddings, vector/hybrid retrieval, reranking, and RRF
 - Automatic eval runner, LLM judge, scoring, and prompt comparison
@@ -64,7 +67,7 @@ Check the health endpoint:
 curl -i http://localhost:8080/healthz
 ```
 
-Call the deterministic Chat endpoint:
+Call the Chat endpoint:
 
 ```bash
 curl -sS http://localhost:8080/api/v1/chat \
@@ -79,7 +82,7 @@ curl -sS http://localhost:8080/api/v1/chat \
   }'
 ```
 
-This route uses deterministic mock evidence. See [HTTP API](docs/API.md) for the request, response, routing, and error contracts.
+The default configuration uses the deterministic runner and mock observability tools. See [HTTP API](docs/API.md) for the request, response, Agent modes, and error contracts.
 
 Redis defaults to `localhost:6379`. Configure it through `configs/config.json` or `WATCHOPS_REDIS_*` environment variables. Session defaults are a 12-message window, a 12-message summary threshold, and a 24-hour TTL.
 
@@ -156,6 +159,25 @@ Example response:
 
 Stop the server with `Ctrl+C`. It handles `SIGINT` and `SIGTERM` with a bounded graceful shutdown.
 
+## Enable the Eino ReAct Agent
+
+WatchOps-Lite supports OpenAI-compatible chat-completion providers through Eino:
+
+```bash
+export WATCHOPS_AGENT_MODE=eino_react
+export WATCHOPS_AGENT_MAX_ITERATIONS=6
+export WATCHOPS_AGENT_PROMPT_VERSION=watchops_agent_v1
+export WATCHOPS_LLM_ENABLED=true
+export WATCHOPS_LLM_BASE_URL=https://api.openai.com/v1
+export WATCHOPS_LLM_MODEL=your-tool-calling-model
+export WATCHOPS_LLM_API_KEY=replace-me
+make run
+```
+
+`WATCHOPS_LLM_API_KEY_ENV` defaults to `WATCHOPS_LLM_API_KEY`; configuration stores only the environment-variable name, never the secret.
+
+If LLM configuration or initialization is incomplete, startup selects the deterministic runner. If an LLM request fails later, that Chat request falls back to the deterministic runner and includes `AGENT_LLM_FALLBACK` plus `metadata.fallback_used=true`. Malformed model JSON does not become an unchecked answer: the response contains `AGENT_OUTPUT_PARSE_FAILED`.
+
 ## Local Tracing with Jaeger
 
 Run Jaeger all-in-one with OTLP enabled:
@@ -225,7 +247,7 @@ make fmt    # format Go source files
     ├── bootstrap/              # Application wiring and lifecycle
     ├── config/                 # Config loading and validation
     ├── observability/          # Structured logging and OTLP tracing
-    ├── agent/eino/             # Eino tools and deterministic Agent runner
+    ├── agent/eino/             # Eino ReAct, prompt/parser, tools, and fallback runner
     ├── application/chat/       # Chat use-case orchestration
     ├── memory/session/         # Redis session store and rolling summary
     ├── feedback/               # Feedback policy and MySQL store
@@ -263,6 +285,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [ADR 0005: Elasticsearch Knowledge RAG](docs/adr/0005-elasticsearch-rag.md)
 - [ADR 0006: MySQL Feedback and Eval Seed](docs/adr/0006-feedback-eval-seed.md)
 - [ADR 0007: OpenTelemetry and Jaeger Tracing](docs/adr/0007-opentelemetry-jaeger-tracing.md)
+- [ADR 0008: Eino ReAct Agent](docs/adr/0008-eino-react-agent.md)
 
 ## Originality
 

@@ -1,6 +1,6 @@
 # HTTP API
 
-The current API combines deterministic Chat orchestration, Redis session memory, Elasticsearch knowledge retrieval, MySQL-backed feedback/eval seeds, and OpenTelemetry tracing. Production LLM orchestration and production collector deployment remain deferred.
+The current API combines configurable Eino ReAct or deterministic Chat execution, Redis session memory, Elasticsearch knowledge retrieval, MySQL-backed feedback/eval seeds, and OpenTelemetry tracing.
 
 ## Trace Correlation
 
@@ -103,6 +103,8 @@ Successful response shape:
   ],
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "metadata": {
+    "agent_mode": "deterministic",
+    "fallback_used": false,
     "session_context_loaded": false,
     "recent_message_count": 0,
     "summary_version": 0,
@@ -114,9 +116,9 @@ Successful response shape:
 
 The actual error-rate route calls both `query_metrics` and `query_logs`; the shortened example above shows one result.
 
-### Deterministic Routing
+### Agent Modes
 
-The Phase 3 skeleton uses transparent rules:
+`agent.mode=deterministic` remains the default and uses transparent rules:
 
 | Message contains | Mock tool calls |
 | --- | --- |
@@ -125,7 +127,34 @@ The Phase 3 skeleton uses transparent rules:
 | `runbook`, `playbook`, `knowledge`, `how should`, or `how do` | `search_knowledge` |
 | No recognized phrase | No tool call; `MORE_CONTEXT_REQUIRED` limitation |
 
-This is not a production ReAct loop and does not call an LLM.
+With `agent.mode=eino_react` and complete LLM configuration, Eino's ReAct Graph exposes the same four tools to the configured OpenAI-compatible ChatModel. The model may select tools iteratively within the configured timeout and maximum-iteration bound.
+
+Eino responses include metadata such as:
+
+```json
+{
+  "agent_mode": "eino_react",
+  "prompt_version": "watchops_agent_v1",
+  "model": "configured-model",
+  "max_iterations": 6,
+  "tool_names": ["query_metrics"],
+  "output_parse_success": true,
+  "fallback_used": false
+}
+```
+
+Only evidence returned by tools is copied into `answer.evidence`. Conclusions and inferences referencing invented or missing evidence IDs are removed and reported through `EVIDENCE_REFERENCE_INVALID`.
+
+If a model call fails, the request uses the deterministic fallback and adds:
+
+```json
+{
+  "code": "AGENT_LLM_FALLBACK",
+  "message": "The LLM Agent was unavailable; the deterministic runner handled this request."
+}
+```
+
+Malformed final JSON produces `AGENT_OUTPUT_PARSE_FAILED`; raw model output and model errors are not exposed.
 
 ### Session Context
 

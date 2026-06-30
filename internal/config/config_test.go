@@ -155,3 +155,34 @@ func TestLoadAppliesTelemetryEnvironment(t *testing.T) {
 		t.Fatalf("Telemetry config = %#v", cfg.Telemetry)
 	}
 }
+
+func TestLoadAppliesAgentAndLLMEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("WATCHOPS_AGENT_MODE", "eino_react")
+	t.Setenv("WATCHOPS_AGENT_MAX_ITERATIONS", "4")
+	t.Setenv("WATCHOPS_AGENT_TIMEOUT", "12s")
+	t.Setenv("WATCHOPS_AGENT_PROMPT_VERSION", "watchops_agent_v1")
+	t.Setenv("WATCHOPS_LLM_ENABLED", "true")
+	t.Setenv("WATCHOPS_LLM_BASE_URL", "http://model.local/v1")
+	t.Setenv("WATCHOPS_LLM_MODEL", "test-model")
+	t.Setenv("WATCHOPS_LLM_TEMPERATURE", "0.4")
+	t.Setenv("WATCHOPS_LLM_REQUEST_TIMEOUT", "8s")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Agent.Mode != "eino_react" ||
+		cfg.Agent.MaxIterations != 4 ||
+		cfg.Agent.Timeout.Value() != 12*time.Second ||
+		!cfg.LLM.Enabled ||
+		cfg.LLM.Model != "test-model" ||
+		cfg.LLM.Temperature != 0.4 ||
+		cfg.LLM.RequestTimeout.Value() != 8*time.Second {
+		t.Fatalf("Agent=%#v LLM=%#v", cfg.Agent, cfg.LLM)
+	}
+}

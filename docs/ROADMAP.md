@@ -68,7 +68,7 @@ Exit criteria:
 - Conclusions reference returned evidence.
 - Failed tools appear in limitations without fabricated evidence.
 
-Exit status: complete. Real `ChatModel`, `PromptTemplate`, Eino Graph, and production ReAct orchestration remain deferred.
+Exit status: complete. Phase 8 subsequently added the real `ChatModel`, versioned `PromptTemplate`, bounded Eino ReAct Graph, and request-time deterministic fallback.
 
 ## Phase 4: Redis Session Memory — Completed
 
@@ -158,7 +158,28 @@ Exit criteria:
 - Tool timeout and fallback events are visible without exposing sensitive data.
 - Telemetry export failure does not block business requests.
 
-Exit status: complete. Prompt-rendering and model-call spans will be added when those runtime stages exist. Prometheus metrics, Grafana dashboards, alerting, advanced sampling, production collector deployment, and structured log correlation remain deferred.
+Exit status: complete. Phase 8 subsequently added prompt-rendering and model-call spans. Prometheus metrics, Grafana dashboards, alerting, advanced sampling, production collector deployment, and structured log correlation remain deferred.
+
+## Phase 8: Eino ReAct Agent — Completed
+
+Delivered:
+
+- OpenAI-compatible Eino `ToolCallingChatModel`
+- Versioned `watchops_agent_v1` Eino PromptTemplate
+- Bounded Eino ReAct Graph using the four existing tools
+- Collection and normalization of actual `ToolResult` messages
+- Structured final-output parser with evidence-ID allowlisting
+- Deterministic startup and request-time fallback
+- Agent, prompt, model, tool-call, parser, and fallback tracing
+
+Exit criteria:
+
+- The Eino runner can invoke an existing Eino tool and return its evidence.
+- Invalid evidence references cannot enter conclusions or inferences.
+- Missing configuration and runtime model failure do not break Chat.
+- The deterministic runner remains independently testable.
+
+Exit status: complete. Multi-agent workflows, planning agents, LLM session summarization, automatic eval execution, and advanced token/cost budgets remain deferred.
 
 ## Milestone Dependencies
 
@@ -170,6 +191,7 @@ flowchart LR
     P4 --> P5["P5 Elasticsearch RAG (complete)"]
     P5 --> P6["P6 MySQL Feedback + Eval Seed (complete)"]
     P6 --> P7["P7 OTel + Jaeger (complete)"]
+    P7 --> P8["P8 Eino ReAct Agent (complete)"]
 ```
 
 ## Deferred Work

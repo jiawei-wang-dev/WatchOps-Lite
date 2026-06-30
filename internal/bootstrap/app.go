@@ -158,7 +158,13 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	agentRunner := agenteino.NewDeterministicRunner(tools)
+	agentRunner := buildAgentRunner(
+		context.Background(),
+		cfg,
+		tools,
+		logger,
+		newOpenAICompatibleModel,
+	)
 	chatService := applicationchat.NewService(
 		agentRunner,
 		sessionStore,

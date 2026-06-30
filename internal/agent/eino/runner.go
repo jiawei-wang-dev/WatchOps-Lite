@@ -105,6 +105,8 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		Limitations:     []Limitation{},
 		ToolRuns:        []ToolRun{},
 		Metadata: map[string]any{
+			"agent_mode":    "deterministic",
+			"fallback_used": false,
 			"session_context_loaded": len(input.RecentMessages) > 0 ||
 				input.SessionSummary.Version > 0 ||
 				input.SessionSummary.Content != "",

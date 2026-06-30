@@ -46,6 +46,8 @@ type Config struct {
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
 	MySQL         MySQLConfig         `json:"mysql"`
+	Agent         AgentConfig         `json:"agent"`
+	LLM           LLMConfig           `json:"llm"`
 	Telemetry     TelemetryConfig     `json:"telemetry"`
 }
 
@@ -100,6 +102,23 @@ type MySQLConfig struct {
 	RequestTimeout  Duration `json:"request_timeout"`
 }
 
+type AgentConfig struct {
+	Mode          string   `json:"mode"`
+	MaxIterations int      `json:"max_iterations"`
+	Timeout       Duration `json:"timeout"`
+	PromptVersion string   `json:"prompt_version"`
+}
+
+type LLMConfig struct {
+	Enabled        bool     `json:"enabled"`
+	Provider       string   `json:"provider"`
+	BaseURL        string   `json:"base_url"`
+	APIKeyEnv      string   `json:"api_key_env"`
+	Model          string   `json:"model"`
+	Temperature    float64  `json:"temperature"`
+	RequestTimeout Duration `json:"request_timeout"`
+}
+
 type TelemetryConfig struct {
 	Enabled       bool     `json:"enabled"`
 	ServiceName   string   `json:"service_name"`
@@ -151,6 +170,19 @@ func Default() Config {
 			MaxIdleConns:    5,
 			ConnMaxLifetime: Duration(30 * time.Minute),
 			RequestTimeout:  Duration(3 * time.Second),
+		},
+		Agent: AgentConfig{
+			Mode:          "deterministic",
+			MaxIterations: 6,
+			Timeout:       Duration(30 * time.Second),
+			PromptVersion: "watchops_agent_v1",
+		},
+		LLM: LLMConfig{
+			Enabled:        false,
+			Provider:       "openai_compatible",
+			APIKeyEnv:      "WATCHOPS_LLM_API_KEY",
+			Temperature:    0.2,
+			RequestTimeout: Duration(30 * time.Second),
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:       false,
@@ -215,6 +247,12 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
+	setString("AGENT_MODE", &cfg.Agent.Mode)
+	setString("AGENT_PROMPT_VERSION", &cfg.Agent.PromptVersion)
+	setString("LLM_PROVIDER", &cfg.LLM.Provider)
+	setString("LLM_BASE_URL", &cfg.LLM.BaseURL)
+	setString("LLM_API_KEY_ENV", &cfg.LLM.APIKeyEnv)
+	setString("LLM_MODEL", &cfg.LLM.Model)
 	setString("TELEMETRY_SERVICE_NAME", &cfg.Telemetry.ServiceName)
 	setString("TELEMETRY_ENVIRONMENT", &cfg.Telemetry.Environment)
 	setString("TELEMETRY_OTLP_ENDPOINT", &cfg.Telemetry.OTLPEndpoint)
@@ -235,6 +273,8 @@ func applyEnvironment(cfg *Config) error {
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
+		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
+		{"LLM_REQUEST_TIMEOUT", &cfg.LLM.RequestTimeout},
 		{"TELEMETRY_EXPORT_TIMEOUT", &cfg.Telemetry.ExportTimeout},
 	}
 	for _, item := range durationValues {
@@ -253,6 +293,7 @@ func applyEnvironment(cfg *Config) error {
 		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
 		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
+		{"AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations},
 	}
 	for _, item := range integerValues {
 		if err := setInteger(item.name, item.target); err != nil {
@@ -276,6 +317,20 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sMYSQL_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.MySQL.Enabled = parsed
+	}
+	if value, ok := lookup("LLM_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sLLM_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.LLM.Enabled = parsed
+	}
+	if value, ok := lookup("LLM_TEMPERATURE"); ok {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("%sLLM_TEMPERATURE must be a number: %w", envPrefix, err)
+		}
+		cfg.LLM.Temperature = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_ENABLED"); ok {
@@ -444,6 +499,32 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.MySQL.Enabled && strings.TrimSpace(cfg.MySQL.DSN) == "" {
 		return errors.New("mysql.dsn is required when MySQL is enabled")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Agent.Mode)) {
+	case "deterministic", "eino_react":
+	default:
+		return errors.New("agent.mode must be deterministic or eino_react")
+	}
+	if cfg.Agent.MaxIterations <= 0 || cfg.Agent.MaxIterations > 20 {
+		return errors.New("agent.max_iterations must be between 1 and 20")
+	}
+	if cfg.Agent.Timeout <= 0 {
+		return errors.New("agent.timeout must be greater than zero")
+	}
+	if strings.TrimSpace(cfg.Agent.PromptVersion) == "" {
+		return errors.New("agent.prompt_version is required")
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.LLM.Provider)) != "openai_compatible" {
+		return errors.New("llm.provider must be openai_compatible")
+	}
+	if strings.TrimSpace(cfg.LLM.APIKeyEnv) == "" {
+		return errors.New("llm.api_key_env is required")
+	}
+	if cfg.LLM.Temperature < 0 || cfg.LLM.Temperature > 2 {
+		return errors.New("llm.temperature must be between 0 and 2")
+	}
+	if cfg.LLM.RequestTimeout <= 0 {
+		return errors.New("llm.request_timeout must be greater than zero")
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {
