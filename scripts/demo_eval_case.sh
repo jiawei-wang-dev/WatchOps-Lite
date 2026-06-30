@@ -17,7 +17,14 @@ import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
-    print(json.load(source)["feedback_id"])
+    response = json.load(source)
+feedback_id = response.get("feedback_id")
+if not feedback_id:
+    raise SystemExit(
+        "feedback_id is missing; feedback creation may have failed. "
+        "Inspect " + sys.argv[1]
+    )
+print(feedback_id)
 ' "${FEEDBACK_RESPONSE}"
 )"
 
