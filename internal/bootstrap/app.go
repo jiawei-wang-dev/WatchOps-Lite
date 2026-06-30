@@ -12,20 +12,66 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
+	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 	"github.com/redis/go-redis/v9"
 )
 
 type App struct {
-	server          *http.Server
-	logger          *slog.Logger
-	redisClient     *redis.Client
-	shutdownTimeout time.Duration
+	server              *http.Server
+	logger              *slog.Logger
+	redisClient         *redis.Client
+	elasticsearchClient *elasticsearchplatform.Client
+	shutdownTimeout     time.Duration
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
-	tools, err := agenteino.BuildMockTools()
+	var elasticsearchClient *elasticsearchplatform.Client
+	knowledgeStore := retrievalknowledge.Store(retrievalknowledge.UnavailableStore{})
+	if cfg.Elasticsearch.Enabled {
+		client, err := elasticsearchplatform.New(elasticsearchplatform.Config{
+			Addresses:      cfg.Elasticsearch.Addresses,
+			Username:       cfg.Elasticsearch.Username,
+			Password:       cfg.Elasticsearch.Password,
+			RequestTimeout: cfg.Elasticsearch.RequestTimeout.Value(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		elasticsearchClient = client
+		store, err := retrievalknowledge.NewElasticsearchStore(client, cfg.Elasticsearch.KnowledgeIndex)
+		if err != nil {
+			_ = client.Close(context.Background())
+			return nil, err
+		}
+		knowledgeStore = store
+	}
+	knowledgeService, err := retrievalknowledge.NewService(knowledgeStore, cfg.Knowledge.ChunkMaxSize)
 	if err != nil {
+		if elasticsearchClient != nil {
+			_ = elasticsearchClient.Close(context.Background())
+		}
+		return nil, err
+	}
+	if cfg.Elasticsearch.Enabled {
+		indexContext, cancel := context.WithTimeout(context.Background(), cfg.Elasticsearch.RequestTimeout.Value())
+		if err := knowledgeService.EnsureIndex(indexContext); err != nil {
+			logger.Warn("Elasticsearch knowledge index is not ready; startup will continue", "error", err)
+		}
+		cancel()
+	}
+
+	toolConfig := agenteino.MockToolsConfig{}
+	if cfg.Elasticsearch.Enabled {
+		toolConfig.KnowledgeSearcher = knowledgeService
+		toolConfig.KnowledgeTimeout = cfg.Elasticsearch.RequestTimeout.Value()
+	}
+	tools, err := agenteino.BuildMockToolsWithConfig(toolConfig)
+	if err != nil {
+		if elasticsearchClient != nil {
+			_ = elasticsearchClient.Close(context.Background())
+		}
 		return nil, err
 	}
 
@@ -45,6 +91,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 	if err != nil {
 		_ = redisClient.Close()
+		if elasticsearchClient != nil {
+			_ = elasticsearchClient.Close(context.Background())
+		}
 		return nil, err
 	}
 
@@ -61,7 +110,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	router := httptransport.NewRouter(
 		logger,
 		cfg.Telemetry.ServiceName,
-		httptransport.RouterDependencies{Chat: chatService},
+		httptransport.RouterDependencies{
+			Chat:      chatService,
+			Knowledge: knowledgeService,
+		},
 	)
 
 	return &App{
@@ -73,9 +125,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			WriteTimeout:      cfg.Server.WriteTimeout.Value(),
 			IdleTimeout:       cfg.Server.IdleTimeout.Value(),
 		},
-		logger:          logger,
-		redisClient:     redisClient,
-		shutdownTimeout: cfg.Server.ShutdownTimeout.Value(),
+		logger:              logger,
+		redisClient:         redisClient,
+		elasticsearchClient: elasticsearchClient,
+		shutdownTimeout:     cfg.Server.ShutdownTimeout.Value(),
 	}, nil
 }
 
@@ -83,6 +136,11 @@ func (a *App) Run(ctx context.Context) error {
 	defer func() {
 		if err := a.redisClient.Close(); err != nil {
 			a.logger.Warn("failed to close Redis client", "error", err)
+		}
+		if a.elasticsearchClient != nil {
+			if err := a.elasticsearchClient.Close(context.Background()); err != nil {
+				a.logger.Warn("failed to close Elasticsearch client", "error", err)
+			}
 		}
 	}()
 

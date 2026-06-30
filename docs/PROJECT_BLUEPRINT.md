@@ -529,7 +529,7 @@ WatchOps-Lite owns:
 
 These policies wrap Eino tools rather than recreating Eino's tool runtime.
 
-Phase 2 exposes deterministic implementations through Eino `InvokableTool` values. Real backend connectors, the Chat API, and the ReAct Agent remain deferred to their roadmap phases.
+Phase 2 introduced deterministic implementations through Eino `InvokableTool` values. The Elasticsearch-backed `search_knowledge` adapter was added in Phase 5; production observability connectors and full ReAct orchestration remain deferred to their roadmap phases.
 
 The initial tools are:
 

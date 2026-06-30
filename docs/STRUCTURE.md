@@ -18,12 +18,14 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── memory/session/
     │   ├── redisstore/         # Redis list/hash persistence and TTL
     │   └── summary/            # Deterministic rolling summarizer
+    ├── platform/elasticsearch/ # Official client configuration and request boundary
+    ├── retrieval/knowledge/    # Chunking, retrieval service, and ES-backed store
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
     │   ├── logs/               # Deterministic query_logs mock
     │   ├── metrics/            # Deterministic query_metrics mock
     │   ├── traces/             # Deterministic query_traces mock
-    │   └── knowledge/          # Deterministic search_knowledge mock
+    │   └── knowledge/          # Elasticsearch search tool with mock fallback
     └── transport/http/
         ├── handler/            # Thin Gin handlers
         ├── middleware/         # Gin request middleware
@@ -42,6 +44,8 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/memory/session` owns short-term memory contracts.
 - `internal/memory/session/redisstore` owns Redis key and transaction behavior.
 - `internal/memory/session/summary` owns deterministic rolling summarization.
+- `internal/platform/elasticsearch` owns official-client construction and bounded requests.
+- `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, retrieval policy, and Elasticsearch query construction.
 - `internal/tools` owns WatchOps business contracts, normalized evidence, structured errors, timeout policy, and mock implementations.
 - `internal/transport/http` contains HTTP concerns only: Gin routing, middleware, handlers, and later transport DTOs.
 - Gin handlers bind and validate HTTP input, call application-level operations, and format HTTP output. Business rules do not belong in handlers.
@@ -52,9 +56,8 @@ The following modules are part of the planned architecture, but their directorie
 
 | Module | Intended responsibility |
 | --- | --- |
-| `internal/retrieval` | Document chunking, retrieval contracts, ranking policy, and Elasticsearch-backed knowledge search |
 | `internal/feedback` | Likes, dislikes, eval candidates, review flow, and evaluation reuse |
-| `internal/platform` | Infrastructure adapters for Elasticsearch, Redis, MySQL, model providers, and other external systems |
+| Additional `internal/platform` packages | MySQL, model-provider, and other external-system adapters |
 
 These names describe ownership boundaries, not a requirement to create every package at once.
 

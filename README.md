@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project currently contains the Gin HTTP skeleton, Eino-backed mock tools, a deterministic Chat/Agent skeleton, and Redis session memory with a recent-message window and rolling summary.
+The project currently contains the Gin HTTP skeleton, Eino-backed tools, a deterministic Chat/Agent skeleton, Redis session memory, and an Elasticsearch-backed BM25 knowledge retrieval path.
 
 ## Current Scope
 
@@ -20,13 +20,16 @@ Implemented:
 - `POST /api/v1/chat` with deterministic tool routing
 - Evidence-aware answers and tool run summaries
 - Redis recent messages, versioned rolling summaries, and graceful memory degradation
+- Plain-text/Markdown knowledge ingestion with deterministic paragraph-first chunking
+- Elasticsearch chunk indexing and BM25 knowledge search
+- Real `search_knowledge` evidence with explicit mock fallback when Elasticsearch is unavailable
 
 Not implemented yet:
 
 - Real `ChatModel`, Eino Graph, or production ReAct Agent logic
-- RAG ingestion and retrieval
 - MySQL integration
-- Real logs, metrics, traces, or knowledge backends
+- Real logs, metrics, or traces backends
+- Embeddings, vector/hybrid retrieval, reranking, and RRF
 - Feedback and evaluation workflows
 
 ## Requirements
@@ -34,7 +37,7 @@ Not implemented yet:
 - Go 1.23 or newer
 - `make` for the convenience commands
 
-The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests; responses include a `SESSION_MEMORY_UNAVAILABLE` limitation instead.
+The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests. Elasticsearch is disabled by default; when disabled, knowledge APIs return `503` and `search_knowledge` keeps the deterministic mock behavior.
 
 ## Run Locally
 
@@ -74,6 +77,31 @@ curl -sS http://localhost:8080/api/v1/chat \
 This route uses deterministic mock evidence. See [HTTP API](docs/API.md) for the request, response, routing, and error contracts.
 
 Redis defaults to `localhost:6379`. Configure it through `configs/config.json` or `WATCHOPS_REDIS_*` environment variables. Session defaults are a 12-message window, a 12-message summary threshold, and a 24-hour TTL.
+
+To use real knowledge retrieval, run Elasticsearch 9.x locally and enable it:
+
+```bash
+export WATCHOPS_ELASTICSEARCH_ENABLED=true
+export WATCHOPS_ELASTICSEARCH_ADDRESSES=http://localhost:9200
+make run
+```
+
+Ingest and search a runbook:
+
+```bash
+curl -sS http://localhost:8080/api/v1/knowledge/documents \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Checkout runbook",
+    "source": "manual",
+    "content": "Check upstream timeout saturation.\n\nCompare retry volume with latency.",
+    "metadata": {"service": "checkout"}
+  }'
+
+curl -sS http://localhost:8080/api/v1/knowledge/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"checkout timeout","limit":5}'
+```
 
 Example response:
 
@@ -133,6 +161,8 @@ make fmt    # format Go source files
     ├── agent/eino/             # Eino tools and deterministic Agent runner
     ├── application/chat/       # Chat use-case orchestration
     ├── memory/session/         # Redis session store and rolling summary
+    ├── platform/elasticsearch/ # Official Elasticsearch client boundary
+    ├── retrieval/knowledge/    # Chunking, retrieval policy, and ES store
     ├── tools/                  # Contracts and deterministic mock tools
     └── transport/http/
         ├── handler/            # Thin Gin handlers
@@ -160,6 +190,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [ADR 0002: Eino Tooling and WatchOps Tool Contracts](docs/adr/0002-eino-tooling.md)
 - [ADR 0003: Deterministic Chat and Agent Skeleton](docs/adr/0003-chat-agent-skeleton.md)
 - [ADR 0004: Redis Session Memory](docs/adr/0004-redis-session-memory.md)
+- [ADR 0005: Elasticsearch Knowledge RAG](docs/adr/0005-elasticsearch-rag.md)
 
 ## Originality
 

@@ -251,7 +251,7 @@ Key metrics:
 | --- | --- |
 | Redis | Process a single turn and clearly report loss of short-term continuity |
 | MySQL | Reject operations requiring durable persistence; Chat degrades or fails according to policy |
-| Elasticsearch | Return a structured knowledge-search error; other tools remain available |
+| Elasticsearch | Knowledge APIs return a structured dependency error; the Agent tool reports explicit mock fallback evidence |
 | Logs/Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
 | Model | Fail quickly with a retryable dependency error |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
@@ -273,3 +273,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0002: Eino Tooling and WatchOps Tool Contracts](adr/0002-eino-tooling.md)
 - [ADR 0003: Deterministic Chat and Agent Skeleton](adr/0003-chat-agent-skeleton.md)
 - [ADR 0004: Redis Session Memory](adr/0004-redis-session-memory.md)
+- [ADR 0005: Elasticsearch Knowledge RAG](adr/0005-elasticsearch-rag.md)

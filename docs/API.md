@@ -1,6 +1,6 @@
 # HTTP API
 
-The current API is a deterministic skeleton. It validates the transport and evidence flow before real LLM, memory, retrieval, and observability integrations are introduced.
+The current API combines deterministic Chat orchestration with Redis session memory and Elasticsearch-backed knowledge retrieval. The production LLM and observability integrations remain deferred.
 
 ## Health Check
 
@@ -156,3 +156,89 @@ Invalid HTTP input returns:
 ```
 
 The response status is `400 Bad Request`. Unexpected internal errors use a safe `INTERNAL` message without exposing raw errors.
+
+## Knowledge Documents
+
+Elasticsearch must be enabled for the knowledge endpoints. Plain text and Markdown are accepted as a `content` string.
+
+```http
+POST /api/v1/knowledge/documents
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "title": "Checkout runbook",
+  "source": "manual",
+  "content": "Check upstream timeout saturation.\n\nCompare retry volume with latency.",
+  "metadata": {
+    "service": "checkout",
+    "category": "runbook"
+  }
+}
+```
+
+Successful response (`201 Created`):
+
+```json
+{
+  "document_id": "doc_0123456789abcdef01234567",
+  "chunk_count": 2
+}
+```
+
+The service splits content by paragraphs, merges text up to the configured chunk size, and assigns stable chunk IDs from the document ID and chunk index.
+
+## Knowledge Search
+
+```http
+POST /api/v1/knowledge/search
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "query": "checkout timeout",
+  "limit": 5,
+  "filters": {
+    "service": "checkout"
+  }
+}
+```
+
+Successful response:
+
+```json
+{
+  "results": [
+    {
+      "chunk_id": "doc_0123456789abcdef01234567_chunk_0000",
+      "document_id": "doc_0123456789abcdef01234567",
+      "title": "Checkout runbook",
+      "content": "Check upstream timeout saturation.",
+      "source": "manual",
+      "score": 3.42,
+      "metadata": {
+        "service": "checkout",
+        "category": "runbook"
+      }
+    }
+  ]
+}
+```
+
+`limit` defaults to 5 and must be between 1 and 20. Retrieval is BM25/text only in this phase.
+
+## Knowledge Document Metadata
+
+```http
+GET /api/v1/knowledge/documents/{document_id}
+```
+
+This phase does not maintain a separate durable document record. The endpoint reconstructs title, source, metadata, creation time, and chunk count from indexed chunks; it does not return the original full document.
+
+When Elasticsearch is disabled or unavailable, knowledge endpoints return `503 Service Unavailable` with the safe error code `DEPENDENCY_UNAVAILABLE`.

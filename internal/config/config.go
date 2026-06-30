@@ -39,11 +39,13 @@ func (d Duration) Value() time.Duration {
 }
 
 type Config struct {
-	Server    ServerConfig    `json:"server"`
-	Log       LogConfig       `json:"log"`
-	Redis     RedisConfig     `json:"redis"`
-	Session   SessionConfig   `json:"session"`
-	Telemetry TelemetryConfig `json:"telemetry"`
+	Server        ServerConfig        `json:"server"`
+	Log           LogConfig           `json:"log"`
+	Redis         RedisConfig         `json:"redis"`
+	Session       SessionConfig       `json:"session"`
+	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
+	Knowledge     KnowledgeConfig     `json:"knowledge"`
+	Telemetry     TelemetryConfig     `json:"telemetry"`
 }
 
 type ServerConfig struct {
@@ -73,6 +75,19 @@ type SessionConfig struct {
 	RecentWindowSize int      `json:"recent_window_size"`
 	SummaryThreshold int      `json:"summary_threshold"`
 	TTL              Duration `json:"ttl"`
+}
+
+type ElasticsearchConfig struct {
+	Enabled        bool     `json:"enabled"`
+	Addresses      []string `json:"addresses"`
+	Username       string   `json:"username"`
+	Password       string   `json:"password"`
+	KnowledgeIndex string   `json:"knowledge_index"`
+	RequestTimeout Duration `json:"request_timeout"`
+}
+
+type KnowledgeConfig struct {
+	ChunkMaxSize int `json:"chunk_max_size"`
 }
 
 type TelemetryConfig struct {
@@ -106,6 +121,15 @@ func Default() Config {
 			RecentWindowSize: 12,
 			SummaryThreshold: 12,
 			TTL:              Duration(24 * time.Hour),
+		},
+		Elasticsearch: ElasticsearchConfig{
+			Enabled:        false,
+			Addresses:      []string{"http://localhost:9200"},
+			KnowledgeIndex: "watchops_knowledge",
+			RequestTimeout: Duration(3 * time.Second),
+		},
+		Knowledge: KnowledgeConfig{
+			ChunkMaxSize: 1200,
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:      false,
@@ -163,6 +187,9 @@ func applyEnvironment(cfg *Config) error {
 	setString("REDIS_ADDRESS", &cfg.Redis.Address)
 	setString("REDIS_USERNAME", &cfg.Redis.Username)
 	setString("REDIS_PASSWORD", &cfg.Redis.Password)
+	setString("ELASTICSEARCH_USERNAME", &cfg.Elasticsearch.Username)
+	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
+	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
 	setString("TELEMETRY_SERVICE_NAME", &cfg.Telemetry.ServiceName)
 	setString("TELEMETRY_OTLP_ENDPOINT", &cfg.Telemetry.OTLPEndpoint)
 
@@ -179,6 +206,7 @@ func applyEnvironment(cfg *Config) error {
 		{"REDIS_READ_TIMEOUT", &cfg.Redis.ReadTimeout},
 		{"REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout},
 		{"SESSION_TTL", &cfg.Session.TTL},
+		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 	}
 	for _, item := range durationValues {
 		if err := setDuration(item.name, item.target); err != nil {
@@ -193,11 +221,23 @@ func applyEnvironment(cfg *Config) error {
 		{"REDIS_DB", &cfg.Redis.DB},
 		{"SESSION_RECENT_WINDOW_SIZE", &cfg.Session.RecentWindowSize},
 		{"SESSION_SUMMARY_THRESHOLD", &cfg.Session.SummaryThreshold},
+		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
 	}
 	for _, item := range integerValues {
 		if err := setInteger(item.name, item.target); err != nil {
 			return err
 		}
+	}
+
+	if value, ok := lookup("ELASTICSEARCH_ADDRESSES"); ok {
+		cfg.Elasticsearch.Addresses = splitCommaSeparated(value)
+	}
+	if value, ok := lookup("ELASTICSEARCH_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sELASTICSEARCH_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Elasticsearch.Enabled = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_ENABLED"); ok {
@@ -258,6 +298,17 @@ func lookup(name string) (string, bool) {
 	return strings.TrimSpace(value), ok
 }
 
+func splitCommaSeparated(value string) []string {
+	parts := strings.Split(value, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
 func (cfg Config) Validate() error {
 	if strings.TrimSpace(cfg.Server.Address) == "" {
 		return errors.New("server.address is required")
@@ -310,6 +361,26 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Session.TTL <= 0 {
 		return errors.New("session.ttl must be greater than zero")
+	}
+
+	if cfg.Elasticsearch.RequestTimeout <= 0 {
+		return errors.New("elasticsearch.request_timeout must be greater than zero")
+	}
+	if cfg.Knowledge.ChunkMaxSize <= 0 {
+		return errors.New("knowledge.chunk_max_size must be greater than zero")
+	}
+	if cfg.Elasticsearch.Enabled {
+		if len(cfg.Elasticsearch.Addresses) == 0 {
+			return errors.New("elasticsearch.addresses is required when Elasticsearch is enabled")
+		}
+		for _, address := range cfg.Elasticsearch.Addresses {
+			if strings.TrimSpace(address) == "" {
+				return errors.New("elasticsearch.addresses must not contain empty values")
+			}
+		}
+		if strings.TrimSpace(cfg.Elasticsearch.KnowledgeIndex) == "" {
+			return errors.New("elasticsearch.knowledge_index is required when Elasticsearch is enabled")
+		}
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {

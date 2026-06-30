@@ -9,7 +9,8 @@ import (
 )
 
 type RouterDependencies struct {
-	Chat handler.ChatExecutor
+	Chat      handler.ChatExecutor
+	Knowledge handler.KnowledgeExecutor
 }
 
 func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDependencies) *gin.Engine {
@@ -25,6 +26,12 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	api := router.Group("/api/v1")
 	chatHandler := handler.NewChat(dependencies.Chat)
 	api.POST("/chat", chatHandler.Handle)
+
+	knowledgeHandler := handler.NewKnowledge(dependencies.Knowledge)
+	knowledgeAPI := api.Group("/knowledge")
+	knowledgeAPI.POST("/documents", knowledgeHandler.Ingest)
+	knowledgeAPI.POST("/search", knowledgeHandler.Search)
+	knowledgeAPI.GET("/documents/:id", knowledgeHandler.GetDocument)
 
 	return router
 }

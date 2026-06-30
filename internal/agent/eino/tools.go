@@ -13,10 +13,11 @@ import (
 )
 
 type MockToolsConfig struct {
-	LogsTimeout      time.Duration
-	MetricsTimeout   time.Duration
-	TracesTimeout    time.Duration
-	KnowledgeTimeout time.Duration
+	LogsTimeout       time.Duration
+	MetricsTimeout    time.Duration
+	TracesTimeout     time.Duration
+	KnowledgeTimeout  time.Duration
+	KnowledgeSearcher knowledge.Searcher
 }
 
 func BuildMockTools() ([]einotool.InvokableTool, error) {
@@ -51,10 +52,17 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		return nil, fmt.Errorf("build %s tool: %w", traces.Name, err)
 	}
 
+	knowledgeExecutor := knowledge.NewMockTool(config.KnowledgeTimeout).Execute
+	if config.KnowledgeSearcher != nil {
+		knowledgeExecutor = knowledge.NewSearchTool(
+			config.KnowledgeSearcher,
+			config.KnowledgeTimeout,
+		).Execute
+	}
 	knowledgeTool, err := toolutils.InferTool(
 		knowledge.Name,
 		"Search operational knowledge and runbooks for relevant evidence.",
-		knowledge.NewMockTool(config.KnowledgeTimeout).Execute,
+		knowledgeExecutor,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build %s tool: %w", knowledge.Name, err)

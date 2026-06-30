@@ -89,16 +89,16 @@ Exit criteria:
 
 Exit status: complete. The current summary implementation is deterministic; an LLM-based summary model remains deferred.
 
-## Phase 5: RAG with Elasticsearch
+## Phase 5: RAG with Elasticsearch — Completed
 
-Deliverables:
+Delivered:
 
-- Document upload, status, and deletion
-- Text extraction and chunking
+- Plain-text/Markdown document ingestion and metadata lookup
+- Deterministic paragraph-first chunking
 - Elasticsearch chunk indexing
-- BM25-first `search_knowledge` implementation
-- Source locations, access filters, and evidence IDs
-- Elasticsearch in the local Docker Compose stack
+- BM25-first knowledge search API and `search_knowledge` implementation
+- Metadata filters, evidence IDs, and graceful mock fallback
+- Optional Elasticsearch configuration that does not block startup
 
 Evolution path:
 
@@ -109,8 +109,10 @@ Evolution path:
 Exit criteria:
 
 - A fixed runbook reliably returns the expected source chunk.
-- Duplicate and failed ingestion behavior is predictable.
-- Retrieval respects access filters and preserves source locations.
+- Elasticsearch failures are sanitized and do not prevent application startup.
+- Existing Chat and health behavior remains intact.
+
+Exit status: complete. Durable ingestion status, deletion, deduplication, access control, file extraction, and Docker Compose Elasticsearch provisioning remain future extensions.
 
 ## Phase 6: MySQL Memory, Feedback, and Eval Candidates
 
@@ -161,7 +163,7 @@ flowchart LR
     P1["P1 Gin HTTP (complete)"] --> P2["P2 Eino Tools"]
     P2 --> P3["P3 Chat + Eino Agent"]
     P3 --> P4["P4 Redis Context"]
-    P4 --> P5["P5 Elasticsearch RAG"]
+    P4 --> P5["P5 Elasticsearch RAG (complete)"]
     P5 --> P6["P6 MySQL + Feedback/Eval"]
     P6 --> P7["P7 OTel + Jaeger"]
 ```

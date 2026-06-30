@@ -75,3 +75,30 @@ func TestLoadAppliesRedisAndSessionEnvironment(t *testing.T) {
 		t.Fatalf("Session config = %#v, want environment overrides", cfg.Session)
 	}
 }
+
+func TestLoadAppliesElasticsearchEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("WATCHOPS_ELASTICSEARCH_ENABLED", "true")
+	t.Setenv("WATCHOPS_ELASTICSEARCH_ADDRESSES", "http://es-1:9200, http://es-2:9200")
+	t.Setenv("WATCHOPS_ELASTICSEARCH_KNOWLEDGE_INDEX", "knowledge_test")
+	t.Setenv("WATCHOPS_ELASTICSEARCH_REQUEST_TIMEOUT", "750ms")
+	t.Setenv("WATCHOPS_KNOWLEDGE_CHUNK_MAX_SIZE", "640")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Elasticsearch.Enabled ||
+		len(cfg.Elasticsearch.Addresses) != 2 ||
+		cfg.Elasticsearch.KnowledgeIndex != "knowledge_test" ||
+		cfg.Elasticsearch.RequestTimeout.Value() != 750*time.Millisecond {
+		t.Fatalf("Elasticsearch config = %#v", cfg.Elasticsearch)
+	}
+	if cfg.Knowledge.ChunkMaxSize != 640 {
+		t.Fatalf("Knowledge config = %#v", cfg.Knowledge)
+	}
+}
