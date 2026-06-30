@@ -91,7 +91,13 @@ Successful response shape:
       "warning_count": 0
     }
   ],
-  "trace_id": ""
+  "trace_id": "",
+  "metadata": {
+    "session_context_loaded": false,
+    "recent_message_count": 0,
+    "summary_version": 0,
+    "session_memory_available": true
+  }
 }
 ```
 
@@ -109,6 +115,26 @@ The Phase 3 skeleton uses transparent rules:
 | No recognized phrase | No tool call; `MORE_CONTEXT_REQUIRED` limitation |
 
 This is not a production ReAct loop and does not call an LLM.
+
+### Session Context
+
+Before Agent execution, the Chat service loads the Redis rolling summary and recent-message window. The response metadata reports:
+
+- `session_context_loaded`: whether prior summary or recent messages were present
+- `recent_message_count`: number of raw messages passed to the Agent
+- `summary_version`: optimistic revision loaded for this request
+- `session_memory_available`: whether Redis memory operations succeeded
+
+If Redis is unavailable, Chat still returns a normal answer for the current turn. `session_memory_available` is `false`, and `answer.limitations` contains:
+
+```json
+{
+  "code": "SESSION_MEMORY_UNAVAILABLE",
+  "message": "Session memory is unavailable; this response was generated without durable conversation context."
+}
+```
+
+Raw Redis errors are not returned.
 
 ### Tool Failures
 

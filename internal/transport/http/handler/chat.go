@@ -68,6 +68,7 @@ func mapChatResponse(result applicationchat.Result) dto.ChatResponse {
 		},
 		ToolRuns: make([]dto.ToolRunDTO, 0, len(result.Agent.ToolRuns)),
 		TraceID:  result.TraceID,
+		Metadata: result.Agent.Metadata,
 	}
 
 	for _, conclusion := range result.Agent.Conclusions {

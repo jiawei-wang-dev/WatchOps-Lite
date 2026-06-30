@@ -116,6 +116,8 @@ Initial policy:
 
 Long-term memory only stores user-confirmed information or high-confidence extracted facts. Every item records its source, creation time, expiry, and deletion state. Model inference must never be promoted directly into long-term fact.
 
+Phase 4 implements the Redis recent-message window and versioned rolling summary. The current summarizer is deterministic and processes messages leaving the raw window; a future LLM summary model can replace it without changing the session storage contract. Redis failures degrade Chat to the current turn and are surfaced through safe response limitations.
+
 ### 4.3 Harness Engineering
 
 Tools use Eino's Tool abstraction for schema exposure, registration, and invocation. WatchOps-Lite does not build a parallel Tool Registry when Eino already provides the required mechanism.

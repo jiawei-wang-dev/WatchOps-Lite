@@ -2,7 +2,9 @@ package httptransport
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
+	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http/dto"
 )
 
@@ -101,6 +105,9 @@ func TestRouterServesChatForErrorRateQuestion(t *testing.T) {
 		len(response.Answer.Recommendations) == 0 ||
 		len(response.Answer.Limitations) == 0 {
 		t.Fatalf("answer is missing required populated sections: %#v", response.Answer)
+	}
+	if response.Metadata["session_memory_available"] != true {
+		t.Fatalf("metadata = %#v, want available session memory", response.Metadata)
 	}
 
 	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
@@ -193,7 +200,51 @@ func TestRouterHandlesMalformedChatJSONWithoutPanic(t *testing.T) {
 	}
 }
 
+func TestRouterChatSucceedsWhenSessionMemoryIsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouterWithStore(t, &routerSessionStore{
+		loadErr: errors.New("redis connection refused"),
+	})
+
+	requestBody := []byte(`{
+		"session_id": "ses_03",
+		"message": "Why did checkout error rate increase?",
+		"time_context": {
+			"from": "2026-06-30T00:00:00Z",
+			"to": "2026-06-30T00:20:00Z"
+		}
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/chat", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	var response dto.ChatResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Metadata["session_memory_available"] != false {
+		t.Fatalf("metadata = %#v, want unavailable session memory", response.Metadata)
+	}
+	for _, limitation := range response.Answer.Limitations {
+		if limitation.Code == "SESSION_MEMORY_UNAVAILABLE" {
+			return
+		}
+	}
+	t.Fatalf("limitations = %#v, want SESSION_MEMORY_UNAVAILABLE", response.Answer.Limitations)
+}
+
 func newTestRouter(t *testing.T) *gin.Engine {
+	t.Helper()
+	return newTestRouterWithStore(t, &routerSessionStore{})
+}
+
+func newTestRouterWithStore(t *testing.T, store session.Store) *gin.Engine {
 	t.Helper()
 
 	tools, err := agenteino.BuildMockTools()
@@ -201,7 +252,15 @@ func newTestRouter(t *testing.T) *gin.Engine {
 		t.Fatalf("BuildMockTools() error = %v", err)
 	}
 	runner := agenteino.NewDeterministicRunner(tools)
-	chatService := applicationchat.NewService(runner)
+	chatService := applicationchat.NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		applicationchat.ServiceConfig{
+			RecentWindowSize: 12,
+			SummaryThreshold: 12,
+		},
+	)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 
 	return NewRouter(
@@ -209,6 +268,67 @@ func newTestRouter(t *testing.T) *gin.Engine {
 		"watchops-lite",
 		RouterDependencies{Chat: chatService},
 	)
+}
+
+type routerSessionStore struct {
+	messages []session.Message
+	summary  session.Summary
+	loadErr  error
+}
+
+func (s *routerSessionStore) AppendMessage(
+	_ context.Context,
+	_ string,
+	message session.Message,
+) error {
+	s.messages = append(s.messages, message)
+	if len(s.messages) > 12 {
+		s.messages = s.messages[len(s.messages)-12:]
+	}
+	return nil
+}
+
+func (s *routerSessionStore) GetRecentMessages(
+	context.Context,
+	string,
+	int,
+) ([]session.Message, error) {
+	return s.messages, nil
+}
+
+func (s *routerSessionStore) GetSummary(context.Context, string) (session.Summary, error) {
+	if s.summary.ConfirmedFacts == nil {
+		return session.EmptySummary(), nil
+	}
+	return s.summary, nil
+}
+
+func (s *routerSessionStore) UpdateSummary(
+	_ context.Context,
+	_ string,
+	summary session.Summary,
+	expectedVersion int64,
+) error {
+	summary.Version = expectedVersion + 1
+	s.summary = summary
+	return nil
+}
+
+func (s *routerSessionStore) LoadContext(
+	ctx context.Context,
+	sessionID string,
+) (session.ContextSnapshot, error) {
+	if s.loadErr != nil {
+		return session.ContextSnapshot{}, s.loadErr
+	}
+	summary, err := s.GetSummary(ctx, sessionID)
+	if err != nil {
+		return session.ContextSnapshot{}, err
+	}
+	return session.ContextSnapshot{
+		Summary:        summary,
+		RecentMessages: append([]session.Message{}, s.messages...),
+	}, nil
 }
 
 func assertToolRuns(t *testing.T, runs []dto.ToolRunDTO, expectedNames ...string) {

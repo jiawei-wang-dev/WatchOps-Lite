@@ -70,9 +70,9 @@ Exit criteria:
 
 Exit status: complete. Real `ChatModel`, `PromptTemplate`, Eino Graph, and production ReAct orchestration remain deferred.
 
-## Phase 4: Redis Session Memory
+## Phase 4: Redis Session Memory — Completed
 
-Deliverables:
+Delivered:
 
 - Recent-message sliding window
 - Rolling structured session summary
@@ -86,6 +86,8 @@ Exit criteria:
 - Multi-turn conversations retain confirmed facts beyond the raw-message window.
 - Concurrent summary updates do not silently overwrite newer state.
 - Redis failure produces an explicit single-turn degradation.
+
+Exit status: complete. The current summary implementation is deterministic; an LLM-based summary model remains deferred.
 
 ## Phase 5: RAG with Elasticsearch
 

@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/logs"
@@ -22,8 +23,10 @@ type AgentRunner interface {
 }
 
 type AgentInput struct {
-	Message     string
-	TimeContext common.TimeRange
+	SessionSummary session.Summary
+	RecentMessages []session.Message
+	CurrentMessage string
+	TimeContext    common.TimeRange
 }
 
 type AgentOutput struct {
@@ -33,6 +36,7 @@ type AgentOutput struct {
 	Recommendations []Recommendation
 	Limitations     []Limitation
 	ToolRuns        []ToolRun
+	Metadata        map[string]any
 }
 
 type Conclusion struct {
@@ -86,6 +90,13 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		Recommendations: []Recommendation{},
 		Limitations:     []Limitation{},
 		ToolRuns:        []ToolRun{},
+		Metadata: map[string]any{
+			"session_context_loaded": len(input.RecentMessages) > 0 ||
+				input.SessionSummary.Version > 0 ||
+				input.SessionSummary.Content != "",
+			"recent_message_count": len(input.RecentMessages),
+			"summary_version":      input.SessionSummary.Version,
+		},
 	}
 
 	calls := planToolCalls(input)
@@ -221,7 +232,7 @@ func (r *DeterministicRunner) findTool(ctx context.Context, name string) (einoto
 }
 
 func planToolCalls(input AgentInput) []plannedToolCall {
-	message := strings.ToLower(strings.TrimSpace(input.Message))
+	message := strings.ToLower(strings.TrimSpace(input.CurrentMessage))
 	service := inferService(message)
 	calls := make([]plannedToolCall, 0, 3)
 

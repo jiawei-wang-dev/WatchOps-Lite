@@ -12,11 +12,12 @@ type TimeContext struct {
 }
 
 type ChatResponse struct {
-	RequestID string       `json:"request_id"`
-	SessionID string       `json:"session_id"`
-	Answer    Answer       `json:"answer"`
-	ToolRuns  []ToolRunDTO `json:"tool_runs"`
-	TraceID   string       `json:"trace_id"`
+	RequestID string         `json:"request_id"`
+	SessionID string         `json:"session_id"`
+	Answer    Answer         `json:"answer"`
+	ToolRuns  []ToolRunDTO   `json:"tool_runs"`
+	TraceID   string         `json:"trace_id"`
+	Metadata  map[string]any `json:"metadata"`
 }
 
 type Answer struct {

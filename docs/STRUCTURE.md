@@ -15,6 +15,9 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── observability/          # Structured logging and OTel lifecycle boundary
     ├── agent/eino/             # Eino assembly for current mock tools
     ├── application/chat/       # Chat use-case validation and orchestration
+    ├── memory/session/
+    │   ├── redisstore/         # Redis list/hash persistence and TTL
+    │   └── summary/            # Deterministic rolling summarizer
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
     │   ├── logs/               # Deterministic query_logs mock
@@ -36,6 +39,9 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/agent/eino` exposes typed mock implementations through Eino's official Tool abstraction.
 - `internal/agent/eino` also contains the deterministic Phase 3 runner; full Graph/ReAct orchestration remains deferred.
 - `internal/application/chat` owns the Chat use case and does not depend on Gin.
+- `internal/memory/session` owns short-term memory contracts.
+- `internal/memory/session/redisstore` owns Redis key and transaction behavior.
+- `internal/memory/session/summary` owns deterministic rolling summarization.
 - `internal/tools` owns WatchOps business contracts, normalized evidence, structured errors, timeout policy, and mock implementations.
 - `internal/transport/http` contains HTTP concerns only: Gin routing, middleware, handlers, and later transport DTOs.
 - Gin handlers bind and validate HTTP input, call application-level operations, and format HTTP output. Business rules do not belong in handlers.
@@ -47,7 +53,6 @@ The following modules are part of the planned architecture, but their directorie
 | Module | Intended responsibility |
 | --- | --- |
 | `internal/retrieval` | Document chunking, retrieval contracts, ranking policy, and Elasticsearch-backed knowledge search |
-| `internal/memory` | Session-memory and long-term-memory contracts and application-facing behavior |
 | `internal/feedback` | Likes, dislikes, eval candidates, review flow, and evaluation reuse |
 | `internal/platform` | Infrastructure adapters for Elasticsearch, Redis, MySQL, model providers, and other external systems |
 

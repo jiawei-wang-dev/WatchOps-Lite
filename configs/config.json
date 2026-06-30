@@ -10,6 +10,20 @@
   "log": {
     "level": "info"
   },
+  "redis": {
+    "address": "localhost:6379",
+    "username": "",
+    "password": "",
+    "db": 0,
+    "dial_timeout": "2s",
+    "read_timeout": "2s",
+    "write_timeout": "2s"
+  },
+  "session": {
+    "recent_window_size": 12,
+    "summary_threshold": 12,
+    "ttl": "24h"
+  },
   "telemetry": {
     "enabled": false,
     "service_name": "watchops-lite",

@@ -2,7 +2,7 @@
 
 WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-The project currently contains the Gin HTTP skeleton, Eino-backed mock tools, and a deterministic Chat/Agent skeleton. It validates request, tool, evidence, and answer contracts without calling a real LLM or backend.
+The project currently contains the Gin HTTP skeleton, Eino-backed mock tools, a deterministic Chat/Agent skeleton, and Redis session memory with a recent-message window and rolling summary.
 
 ## Current Scope
 
@@ -19,12 +19,13 @@ Implemented:
 - Eino-backed mock tools for logs, metrics, traces, and knowledge
 - `POST /api/v1/chat` with deterministic tool routing
 - Evidence-aware answers and tool run summaries
+- Redis recent messages, versioned rolling summaries, and graceful memory degradation
 
 Not implemented yet:
 
 - Real `ChatModel`, Eino Graph, or production ReAct Agent logic
 - RAG ingestion and retrieval
-- Redis or MySQL integration
+- MySQL integration
 - Real logs, metrics, traces, or knowledge backends
 - Feedback and evaluation workflows
 
@@ -33,7 +34,7 @@ Not implemented yet:
 - Go 1.23 or newer
 - `make` for the convenience commands
 
-No external services are required for the current skeleton. Gin and Eino are the direct third-party runtime dependencies at this stage; their transitive modules are managed through `go.mod` and `go.sum`.
+The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests; responses include a `SESSION_MEMORY_UNAVAILABLE` limitation instead.
 
 ## Run Locally
 
@@ -71,6 +72,8 @@ curl -sS http://localhost:8080/api/v1/chat \
 ```
 
 This route uses deterministic mock evidence. See [HTTP API](docs/API.md) for the request, response, routing, and error contracts.
+
+Redis defaults to `localhost:6379`. Configure it through `configs/config.json` or `WATCHOPS_REDIS_*` environment variables. Session defaults are a 12-message window, a 12-message summary threshold, and a 24-hour TTL.
 
 Example response:
 
@@ -129,6 +132,7 @@ make fmt    # format Go source files
     ├── observability/          # Structured logging and OTel boundary
     ├── agent/eino/             # Eino tools and deterministic Agent runner
     ├── application/chat/       # Chat use-case orchestration
+    ├── memory/session/         # Redis session store and rolling summary
     ├── tools/                  # Contracts and deterministic mock tools
     └── transport/http/
         ├── handler/            # Thin Gin handlers
@@ -155,6 +159,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [ADR 0001: Framework and Technology Stack](docs/adr/0001-framework-and-stack.md)
 - [ADR 0002: Eino Tooling and WatchOps Tool Contracts](docs/adr/0002-eino-tooling.md)
 - [ADR 0003: Deterministic Chat and Agent Skeleton](docs/adr/0003-chat-agent-skeleton.md)
+- [ADR 0004: Redis Session Memory](docs/adr/0004-redis-session-memory.md)
 
 ## Originality
 
