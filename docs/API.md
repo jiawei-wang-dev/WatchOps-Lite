@@ -1,6 +1,16 @@
 # HTTP API
 
-The current API combines deterministic Chat orchestration, Redis session memory, Elasticsearch knowledge retrieval, and MySQL-backed feedback/eval seeds. Production LLM and observability integrations remain deferred.
+The current API combines deterministic Chat orchestration, Redis session memory, Elasticsearch knowledge retrieval, MySQL-backed feedback/eval seeds, and OpenTelemetry tracing. Production LLM orchestration and production collector deployment remain deferred.
+
+## Trace Correlation
+
+When telemetry is enabled and a span context is valid, every HTTP response includes:
+
+```http
+X-Trace-ID: 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+Incoming W3C `traceparent` and `baggage` headers are extracted so WatchOps-Lite can join an existing distributed trace. Chat responses also populate the existing top-level `trace_id` and `metadata.trace_id`. When telemetry is disabled, no trace header is added and the Chat `trace_id` remains empty.
 
 ## Health Check
 
@@ -91,12 +101,13 @@ Successful response shape:
       "warning_count": 0
     }
   ],
-  "trace_id": "",
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "metadata": {
     "session_context_loaded": false,
     "recent_message_count": 0,
     "summary_version": 0,
-    "session_memory_available": true
+    "session_memory_available": true,
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
   }
 }
 ```

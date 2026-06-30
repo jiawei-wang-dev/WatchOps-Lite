@@ -128,3 +128,30 @@ func TestLoadAppliesMySQLEnvironment(t *testing.T) {
 		t.Fatalf("MySQL config = %#v", cfg.MySQL)
 	}
 }
+
+func TestLoadAppliesTelemetryEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("WATCHOPS_TELEMETRY_ENABLED", "true")
+	t.Setenv("WATCHOPS_TELEMETRY_ENVIRONMENT", "test")
+	t.Setenv("WATCHOPS_TELEMETRY_OTLP_ENDPOINT", "collector:4317")
+	t.Setenv("WATCHOPS_TELEMETRY_INSECURE", "false")
+	t.Setenv("WATCHOPS_TELEMETRY_SAMPLE_RATIO", "0.5")
+	t.Setenv("WATCHOPS_TELEMETRY_EXPORT_TIMEOUT", "750ms")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Telemetry.Enabled ||
+		cfg.Telemetry.Environment != "test" ||
+		cfg.Telemetry.OTLPEndpoint != "collector:4317" ||
+		cfg.Telemetry.Insecure ||
+		cfg.Telemetry.SampleRatio != 0.5 ||
+		cfg.Telemetry.ExportTimeout.Value() != 750*time.Millisecond {
+		t.Fatalf("Telemetry config = %#v", cfg.Telemetry)
+	}
+}

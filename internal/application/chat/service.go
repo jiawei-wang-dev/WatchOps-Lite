@@ -9,7 +9,9 @@ import (
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var ErrExecution = errors.New("chat execution failed")
@@ -82,20 +84,39 @@ func NewService(
 }
 
 func (s *Service) Execute(ctx context.Context, command Command) (Result, error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"chat.execute",
+		attribute.String("request_id", command.RequestID),
+		attribute.String("session_id", command.SessionID),
+		attribute.Int("message_length", len(command.Message)),
+		attribute.String("time_context.from", command.TimeContext.From),
+		attribute.String("time_context.to", command.TimeContext.To),
+	)
+	defer span.End()
+
 	command.SessionID = strings.TrimSpace(command.SessionID)
 	command.Message = strings.TrimSpace(command.Message)
 
 	if command.SessionID == "" {
+		observability.MarkError(span, "chat validation failed")
 		return Result{}, &ValidationError{Field: "session_id", Message: "session_id is required"}
 	}
 	if command.Message == "" {
+		observability.MarkError(span, "chat validation failed")
 		return Result{}, &ValidationError{Field: "message", Message: "message is required"}
 	}
 	if err := command.TimeContext.Validate(); err != nil {
+		observability.MarkError(span, "chat validation failed")
 		return Result{}, &ValidationError{Field: "time_context", Message: err.Error()}
 	}
 
 	snapshot, memoryAvailable := s.loadContext(ctx, command.SessionID)
+	span.SetAttributes(
+		attribute.Bool("session_memory_available", memoryAvailable),
+		attribute.Int("recent_message_count", len(snapshot.RecentMessages)),
+		attribute.Int64("summary_version", snapshot.Summary.Version),
+	)
 	agentOutput, err := s.runner.Run(ctx, agenteino.AgentInput{
 		SessionSummary: snapshot.Summary,
 		RecentMessages: snapshot.RecentMessages,
@@ -103,6 +124,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 		TimeContext:    command.TimeContext,
 	})
 	if err != nil {
+		observability.MarkError(span, "agent execution failed")
 		return Result{}, fmt.Errorf("%w: %v", ErrExecution, err)
 	}
 	ensureAgentMetadata(&agentOutput)
@@ -111,15 +133,20 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	if !memoryAvailable {
 		appendMemoryLimitation(&agentOutput)
 	} else if err := s.persistContext(ctx, command, snapshot, agentOutput); err != nil {
+		span.SetAttributes(attribute.Bool("session_memory_available", false))
 		agentOutput.Metadata["session_memory_available"] = false
 		appendMemoryLimitation(&agentOutput)
 	}
 
+	traceID := observability.TraceID(ctx)
+	if traceID != "" {
+		agentOutput.Metadata["trace_id"] = traceID
+	}
 	return Result{
 		RequestID: command.RequestID,
 		SessionID: command.SessionID,
 		Agent:     agentOutput,
-		TraceID:   "",
+		TraceID:   traceID,
 	}, nil
 }
 
@@ -127,17 +154,33 @@ func (s *Service) loadContext(
 	ctx context.Context,
 	sessionID string,
 ) (session.ContextSnapshot, bool) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"session.load_context",
+		attribute.String("session_id", sessionID),
+	)
+	defer span.End()
+
 	if s.store == nil {
+		span.SetAttributes(attribute.Bool("memory_available", false))
+		observability.MarkError(span, "session memory unavailable")
 		return emptySnapshot(), false
 	}
 
 	snapshot, err := s.store.LoadContext(ctx, sessionID)
 	if err != nil {
+		span.SetAttributes(attribute.Bool("memory_available", false))
+		observability.MarkError(span, "session memory load failed")
 		return emptySnapshot(), false
 	}
 	if snapshot.RecentMessages == nil {
 		snapshot.RecentMessages = []session.Message{}
 	}
+	span.SetAttributes(
+		attribute.Bool("memory_available", true),
+		attribute.Int("recent_message_count", len(snapshot.RecentMessages)),
+		attribute.Int64("summary_version", snapshot.Summary.Version),
+	)
 	return snapshot, true
 }
 
@@ -147,6 +190,14 @@ func (s *Service) persistContext(
 	snapshot session.ContextSnapshot,
 	agentOutput agenteino.AgentOutput,
 ) error {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"session.persist_context",
+		attribute.String("session_id", command.SessionID),
+		attribute.Bool("summary_updated", false),
+	)
+	defer span.End()
+
 	userMessage := session.Message{
 		Role:      session.RoleUser,
 		Content:   command.Message,
@@ -173,32 +224,58 @@ func (s *Service) persistContext(
 
 	if len(combined) > s.summaryThreshold && len(combined) > s.recentWindowSize {
 		if s.summarizer == nil {
+			observability.MarkError(span, "session summarizer unavailable")
 			return errors.New("session summarizer is unavailable")
 		}
 
 		overflowCount := len(combined) - s.recentWindowSize
-		updated, err := s.summarizer.Summarize(
+		summaryContext, summarySpan := observability.StartSpan(
 			ctx,
+			"session.update_summary",
+			attribute.String("session_id", command.SessionID),
+			attribute.Int("message_count", overflowCount),
+			attribute.Int64("summary_version", snapshot.Summary.Version),
+		)
+		updated, err := s.summarizer.Summarize(
+			summaryContext,
 			snapshot.Summary,
 			combined[:overflowCount],
 		)
 		if err != nil {
+			observability.MarkError(summarySpan, "session summary failed")
+			summarySpan.End()
+			observability.MarkError(span, "session persistence failed")
 			return err
 		}
 		if err := s.store.UpdateSummary(
-			ctx,
+			summaryContext,
 			command.SessionID,
 			updated,
 			snapshot.Summary.Version,
 		); err != nil {
+			observability.MarkError(summarySpan, "session summary persistence failed")
+			summarySpan.End()
+			observability.MarkError(span, "session persistence failed")
 			return err
 		}
+		summarySpan.SetAttributes(attribute.Bool("summary_updated", true))
+		summarySpan.End()
+		span.SetAttributes(attribute.Bool("summary_updated", true))
 	}
 
 	if err := s.store.AppendMessage(ctx, command.SessionID, userMessage); err != nil {
+		observability.MarkError(span, "session persistence failed")
 		return err
 	}
-	return s.store.AppendMessage(ctx, command.SessionID, assistantMessage)
+	if err := s.store.AppendMessage(ctx, command.SessionID, assistantMessage); err != nil {
+		observability.MarkError(span, "session persistence failed")
+		return err
+	}
+	span.SetAttributes(
+		attribute.Bool("memory_available", true),
+		attribute.Int("recent_message_count", len(combined)),
+	)
+	return nil
 }
 
 func assistantMemoryContent(output agenteino.AgentOutput) string {

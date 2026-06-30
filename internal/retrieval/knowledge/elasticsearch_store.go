@@ -12,7 +12,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const maxResponseSize = 8 << 20
@@ -33,7 +35,19 @@ func NewElasticsearchStore(client elasticsearchplatform.Executor, index string) 
 	return &ElasticsearchStore{client: client, index: index}, nil
 }
 
-func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) error {
+func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"elasticsearch.ensure_index",
+		attribute.String("elasticsearch.index", s.index),
+	)
+	defer func() {
+		if resultErr != nil {
+			observability.MarkError(span, "Elasticsearch index operation failed")
+		}
+		span.End()
+	}()
+
 	response, err := s.client.Do(ctx, elasticsearchplatform.Request{
 		Method: http.MethodHead,
 		Path:   "/" + url.PathEscape(s.index),
@@ -84,7 +98,20 @@ func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) error {
 	return nil
 }
 
-func (s *ElasticsearchStore) IndexChunks(ctx context.Context, chunks []Chunk) error {
+func (s *ElasticsearchStore) IndexChunks(ctx context.Context, chunks []Chunk) (resultErr error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"elasticsearch.bulk_index",
+		attribute.String("elasticsearch.index", s.index),
+		attribute.Int("chunk_count", len(chunks)),
+	)
+	defer func() {
+		if resultErr != nil {
+			observability.MarkError(span, "Elasticsearch bulk indexing failed")
+		}
+		span.End()
+	}()
+
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -134,7 +161,24 @@ func (s *ElasticsearchStore) IndexChunks(ctx context.Context, chunks []Chunk) er
 	return nil
 }
 
-func (s *ElasticsearchStore) Search(ctx context.Context, query SearchQuery) ([]SearchResult, error) {
+func (s *ElasticsearchStore) Search(
+	ctx context.Context,
+	query SearchQuery,
+) (searchResults []SearchResult, resultErr error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"elasticsearch.search",
+		attribute.String("elasticsearch.index", s.index),
+		attribute.Int("query_length", len(query.Query)),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("result_count", len(searchResults)))
+		if resultErr != nil {
+			observability.MarkError(span, "Elasticsearch search failed")
+		}
+		span.End()
+	}()
+
 	boolQuery := map[string]any{
 		"must": []any{map[string]any{
 			"multi_match": map[string]any{
@@ -206,7 +250,23 @@ func (s *ElasticsearchStore) Search(ctx context.Context, query SearchQuery) ([]S
 	return results, nil
 }
 
-func (s *ElasticsearchStore) GetDocument(ctx context.Context, documentID string) (DocumentInfo, error) {
+func (s *ElasticsearchStore) GetDocument(
+	ctx context.Context,
+	documentID string,
+) (documentInfo DocumentInfo, resultErr error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"elasticsearch.get_document",
+		attribute.String("elasticsearch.index", s.index),
+		attribute.String("document_id", documentID),
+	)
+	defer func() {
+		if resultErr != nil {
+			observability.MarkError(span, "Elasticsearch document lookup failed")
+		}
+		span.End()
+	}()
+
 	body, err := json.Marshal(map[string]any{
 		"size": 1000,
 		"query": map[string]any{

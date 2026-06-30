@@ -12,7 +12,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 └── internal/
     ├── bootstrap/              # Dependency wiring and server lifecycle
     ├── config/                 # Configuration loading and validation
-    ├── observability/          # Structured logging and OTel lifecycle boundary
+    ├── observability/          # Structured logging and OTLP tracing lifecycle
     ├── agent/eino/             # Eino assembly for current mock tools
     ├── application/chat/       # Chat use-case validation and orchestration
     ├── memory/session/
@@ -40,7 +40,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `cmd/server` parses process-level inputs, initializes dependencies, and starts the application.
 - `internal/bootstrap` wires dependencies and owns HTTP server startup and graceful shutdown.
 - `internal/config` loads defaults, JSON configuration, and environment overrides.
-- `internal/observability` owns structured logging and the future OpenTelemetry SDK boundary.
+- `internal/observability` owns structured logging, the OpenTelemetry provider lifecycle, OTLP export, and safe tracing helpers.
 - `internal/agent/eino` exposes typed mock implementations through Eino's official Tool abstraction.
 - `internal/agent/eino` also contains the deterministic Phase 3 runner; full Graph/ReAct orchestration remains deferred.
 - `internal/application/chat` owns the Chat use case and does not depend on Gin.

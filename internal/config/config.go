@@ -101,10 +101,13 @@ type MySQLConfig struct {
 }
 
 type TelemetryConfig struct {
-	Enabled      bool    `json:"enabled"`
-	ServiceName  string  `json:"service_name"`
-	OTLPEndpoint string  `json:"otlp_endpoint"`
-	SampleRatio  float64 `json:"sample_ratio"`
+	Enabled       bool     `json:"enabled"`
+	ServiceName   string   `json:"service_name"`
+	Environment   string   `json:"environment"`
+	OTLPEndpoint  string   `json:"otlp_endpoint"`
+	Insecure      bool     `json:"insecure"`
+	SampleRatio   float64  `json:"sample_ratio"`
+	ExportTimeout Duration `json:"export_timeout"`
 }
 
 func Default() Config {
@@ -150,10 +153,13 @@ func Default() Config {
 			RequestTimeout:  Duration(3 * time.Second),
 		},
 		Telemetry: TelemetryConfig{
-			Enabled:      false,
-			ServiceName:  "watchops-lite",
-			OTLPEndpoint: "http://localhost:4318",
-			SampleRatio:  1,
+			Enabled:       false,
+			ServiceName:   "watchops-lite",
+			Environment:   "local",
+			OTLPEndpoint:  "localhost:4317",
+			Insecure:      true,
+			SampleRatio:   1,
+			ExportTimeout: Duration(3 * time.Second),
 		},
 	}
 }
@@ -210,6 +216,7 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("TELEMETRY_SERVICE_NAME", &cfg.Telemetry.ServiceName)
+	setString("TELEMETRY_ENVIRONMENT", &cfg.Telemetry.Environment)
 	setString("TELEMETRY_OTLP_ENDPOINT", &cfg.Telemetry.OTLPEndpoint)
 
 	durationValues := []struct {
@@ -228,6 +235,7 @@ func applyEnvironment(cfg *Config) error {
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
+		{"TELEMETRY_EXPORT_TIMEOUT", &cfg.Telemetry.ExportTimeout},
 	}
 	for _, item := range durationValues {
 		if err := setDuration(item.name, item.target); err != nil {
@@ -276,6 +284,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sTELEMETRY_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Telemetry.Enabled = parsed
+	}
+	if value, ok := lookup("TELEMETRY_INSECURE"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sTELEMETRY_INSECURE must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Telemetry.Insecure = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_SAMPLE_RATIO"); ok {
@@ -439,6 +454,12 @@ func (cfg Config) Validate() error {
 
 	if strings.TrimSpace(cfg.Telemetry.ServiceName) == "" {
 		return errors.New("telemetry.service_name is required")
+	}
+	if strings.TrimSpace(cfg.Telemetry.Environment) == "" {
+		return errors.New("telemetry.environment is required")
+	}
+	if cfg.Telemetry.ExportTimeout <= 0 {
+		return errors.New("telemetry.export_timeout must be greater than zero")
 	}
 	if cfg.Telemetry.SampleRatio < 0 || cfg.Telemetry.SampleRatio > 1 {
 		return errors.New("telemetry.sample_ratio must be between 0 and 1")

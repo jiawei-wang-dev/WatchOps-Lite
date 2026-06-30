@@ -11,11 +11,13 @@ import (
 
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/logs"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/traces"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type AgentRunner interface {
@@ -83,6 +85,18 @@ func NewDeterministicRunner(tools []einotool.InvokableTool) *DeterministicRunner
 }
 
 func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"agent.run",
+		attribute.String("runner.type", "deterministic"),
+		attribute.Int("recent_message_count", len(input.RecentMessages)),
+		attribute.Bool(
+			"has_summary",
+			input.SessionSummary.Version > 0 || input.SessionSummary.Content != "",
+		),
+		attribute.String("time_context.from", input.TimeContext.From),
+		attribute.String("time_context.to", input.TimeContext.To),
+	)
 	output := AgentOutput{
 		Conclusions:     []Conclusion{},
 		Evidence:        []common.EvidenceItem{},
@@ -98,8 +112,21 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 			"summary_version":      input.SessionSummary.Version,
 		},
 	}
+	defer func() {
+		span.SetAttributes(
+			attribute.Int("tool_run_count", len(output.ToolRuns)),
+			attribute.Int("evidence_count", len(output.Evidence)),
+			attribute.Int("limitation_count", len(output.Limitations)),
+		)
+		span.End()
+	}()
 
 	calls := planToolCalls(input)
+	selectedTools := make([]string, 0, len(calls))
+	for _, call := range calls {
+		selectedTools = append(selectedTools, call.name)
+	}
+	span.SetAttributes(attribute.StringSlice("selected_tools", selectedTools))
 	if len(calls) == 0 {
 		output.Limitations = append(output.Limitations, Limitation{
 			Code:    "MORE_CONTEXT_REQUIRED",

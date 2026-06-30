@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const DefaultTimeout = 2 * time.Second
@@ -23,12 +26,33 @@ func Execute(
 	ctx context.Context,
 	options ExecuteOptions,
 	operation func(context.Context) (ToolResult, error),
-) (ToolResult, error) {
+) (result ToolResult, resultErr error) {
 	startedAt := time.Now().UTC()
 	timeout := options.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	ctx, span := observability.StartSpan(
+		ctx,
+		"tool."+options.ToolName,
+		attribute.String("tool.name", options.ToolName),
+		attribute.Int64("tool.timeout_ms", timeout.Milliseconds()),
+	)
+	defer func() {
+		span.SetAttributes(
+			attribute.Bool("tool.success", result.Success),
+			attribute.Int("tool.evidence_count", len(result.Evidence)),
+			attribute.Int("tool.warning_count", len(result.Warnings)),
+			attribute.Int64("tool.duration_ms", result.DurationMS),
+		)
+		if result.Error != nil {
+			span.SetAttributes(attribute.String("tool.error_code", string(result.Error.Code)))
+		}
+		if resultErr != nil {
+			observability.MarkError(span, "tool execution failed")
+		}
+		span.End()
+	}()
 
 	executionContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

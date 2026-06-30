@@ -39,7 +39,12 @@ func run() int {
 		return 1
 	}
 	defer func() {
-		if err := telemetry.Shutdown(context.Background()); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(),
+			cfg.Telemetry.ExportTimeout.Value(),
+		)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdownCtx); err != nil {
 			logger.Error("failed to shut down OpenTelemetry", "error", err)
 		}
 	}()

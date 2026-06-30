@@ -215,23 +215,28 @@ Whether full request text is retained must be controlled by privacy policy and c
 
 ## 9. OpenTelemetry and Jaeger
 
-Recommended trace hierarchy:
+The application installs the official OpenTelemetry SDK and exports spans with OTLP over gRPC. Jaeger all-in-one accepts OTLP locally and provides the trace UI. Tracing is configurable and disabled by default.
+
+Implemented trace hierarchy:
 
 ```text
 http POST /api/v1/chat
 └── chat.execute
-    ├── context.load
-    │   ├── redis.recent.get
-    │   └── memory.search
+    ├── session.load_context
     ├── agent.run
-    │   ├── model.generate
     │   ├── tool.query_metrics
-    │   └── tool.query_logs
-    ├── answer.validate
-    └── context.persist
+    │   ├── tool.query_logs
+    │   ├── tool.query_traces
+    │   └── tool.search_knowledge
+    │       └── knowledge.search
+    │           └── elasticsearch.search
+    └── session.persist_context
+        └── session.update_summary
 ```
 
-Attributes contain only low-cardinality, non-sensitive values: model name, prompt version, tool name, status, token count, result count, and truncation state. User questions, raw logs, and credentials do not belong in span attributes.
+Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
+
+Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 
 Jaeger is the local trace visualization backend. Prometheus metrics may be added after the MVP and are not required for the tracing baseline.
 
@@ -275,3 +280,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0004: Redis Session Memory](adr/0004-redis-session-memory.md)
 - [ADR 0005: Elasticsearch Knowledge RAG](adr/0005-elasticsearch-rag.md)
 - [ADR 0006: MySQL Feedback and Eval Seed](adr/0006-feedback-eval-seed.md)
+- [ADR 0007: OpenTelemetry and Jaeger Tracing](adr/0007-opentelemetry-jaeger-tracing.md)

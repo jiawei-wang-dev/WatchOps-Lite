@@ -134,28 +134,31 @@ Exit criteria:
 
 Exit status: complete. Long-term memory, document metadata, redaction/review workflow, audit records, JSON export, automatic evaluation, scoring, and LLM judging remain deferred.
 
-## Phase 7: OpenTelemetry and Jaeger Tracing
+## Phase 7: OpenTelemetry and Jaeger Tracing — Completed
 
-Deliverables:
+Delivered:
 
 - OpenTelemetry SDK and OTLP exporter
-- OpenTelemetry Collector and Jaeger in Docker Compose
+- Local Jaeger all-in-one instructions with OTLP gRPC ingestion
+- Parent-based ratio sampling and service/environment resource attributes
+- W3C trace-context extraction and `X-Trace-ID` responses
 - Spans for:
   - Agent runs
-  - Context building
-  - RAG search and ranking
+  - Session context load, persistence, and summary updates
+  - RAG ingestion, search, and Elasticsearch calls
   - Tool execution
-  - Prompt rendering
-  - Model calls
-  - Feedback processing
+  - Feedback and eval processing
 - Safe trace attributes and redaction rules
-- Trace IDs returned from relevant API responses
+- Chat response trace IDs
+- No-op behavior when disabled and non-blocking exporter failures
 
 Exit criteria:
 
 - A Chat trace is visible end to end in Jaeger.
 - Tool timeout and fallback events are visible without exposing sensitive data.
 - Telemetry export failure does not block business requests.
+
+Exit status: complete. Prompt-rendering and model-call spans will be added when those runtime stages exist. Prometheus metrics, Grafana dashboards, alerting, advanced sampling, production collector deployment, and structured log correlation remain deferred.
 
 ## Milestone Dependencies
 
@@ -166,7 +169,7 @@ flowchart LR
     P3 --> P4["P4 Redis Context"]
     P4 --> P5["P5 Elasticsearch RAG (complete)"]
     P5 --> P6["P6 MySQL Feedback + Eval Seed (complete)"]
-    P6 --> P7["P7 OTel + Jaeger"]
+    P6 --> P7["P7 OTel + Jaeger (complete)"]
 ```
 
 ## Deferred Work

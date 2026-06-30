@@ -12,7 +12,8 @@ Implemented:
 - `GET /healthz`
 - JSON configuration with environment-variable overrides
 - JSON structured logging with request metadata
-- OpenTelemetry setup and shutdown placeholder
+- OpenTelemetry tracing with OTLP gRPC export and graceful shutdown
+- Request trace propagation through Chat, session memory, Agent, tools, RAG, feedback, and eval
 - Unit tests for configuration and health handling
 - Shared `ToolResult`, `ToolError`, and evidence contracts
 - Timeout and fallback execution wrapper
@@ -40,6 +41,8 @@ Not implemented yet:
 - `make` for the convenience commands
 
 The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests. Elasticsearch and MySQL are disabled by default. Disabled persistence endpoints return a structured `503` response.
+
+OpenTelemetry is also disabled by default. When enabled, an unavailable collector does not block business requests; export failures are logged.
 
 ## Run Locally
 
@@ -153,6 +156,32 @@ Example response:
 
 Stop the server with `Ctrl+C`. It handles `SIGINT` and `SIGTERM` with a bounded graceful shutdown.
 
+## Local Tracing with Jaeger
+
+Run Jaeger all-in-one with OTLP enabled:
+
+```bash
+docker run --rm --name watchops-jaeger \
+  -e COLLECTOR_OTLP_ENABLED=true \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  -p 4318:4318 \
+  jaegertracing/all-in-one:latest
+```
+
+Enable WatchOps-Lite tracing in another terminal:
+
+```bash
+export WATCHOPS_TELEMETRY_ENABLED=true
+export WATCHOPS_TELEMETRY_ENVIRONMENT=local
+export WATCHOPS_TELEMETRY_OTLP_ENDPOINT=localhost:4317
+export WATCHOPS_TELEMETRY_INSECURE=true
+export WATCHOPS_TELEMETRY_SAMPLE_RATIO=1
+make run
+```
+
+Send a Chat request, then open [http://localhost:16686](http://localhost:16686) and select the `watchops-lite` service. The response includes `X-Trace-ID`, and Chat responses also populate `trace_id`.
+
 ## Configuration
 
 Configuration precedence is:
@@ -174,7 +203,7 @@ make run
 
 See [.env.example](.env.example) for the complete initial environment-variable set. The server does not automatically load `.env`; export the variables through your shell or development environment.
 
-OpenTelemetry is currently a lifecycle placeholder. Enabling it records a structured warning but does not export telemetry until the SDK and OTLP exporter are introduced in a later task.
+Telemetry uses OTLP over gRPC. `sample_ratio` controls a parent-based trace-ID ratio sampler; `1` is appropriate for local development. Span attributes contain identifiers, counts, status, and timing—not message bodies, retrieved content, credentials, or raw backend errors.
 
 ## Developer Commands
 
@@ -195,7 +224,7 @@ make fmt    # format Go source files
 └── internal/
     ├── bootstrap/              # Application wiring and lifecycle
     ├── config/                 # Config loading and validation
-    ├── observability/          # Structured logging and OTel boundary
+    ├── observability/          # Structured logging and OTLP tracing
     ├── agent/eino/             # Eino tools and deterministic Agent runner
     ├── application/chat/       # Chat use-case orchestration
     ├── memory/session/         # Redis session store and rolling summary
@@ -233,6 +262,7 @@ The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BL
 - [ADR 0004: Redis Session Memory](docs/adr/0004-redis-session-memory.md)
 - [ADR 0005: Elasticsearch Knowledge RAG](docs/adr/0005-elasticsearch-rag.md)
 - [ADR 0006: MySQL Feedback and Eval Seed](docs/adr/0006-feedback-eval-seed.md)
+- [ADR 0007: OpenTelemetry and Jaeger Tracing](docs/adr/0007-opentelemetry-jaeger-tracing.md)
 
 ## Originality
 

@@ -19,6 +19,7 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	router := gin.New()
 	router.Use(
 		middleware.RequestLogger(logger),
+		middleware.TraceRequests(),
 		middleware.Recover(logger),
 	)
 

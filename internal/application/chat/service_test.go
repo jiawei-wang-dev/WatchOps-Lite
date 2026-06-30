@@ -11,6 +11,10 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 type fakeRunner struct {
@@ -104,6 +108,43 @@ func TestServicePreservesIDsAndAppendsMessages(t *testing.T) {
 		store.appended[1].Role != session.RoleAssistant ||
 		store.appended[0].RequestID != "req-01" {
 		t.Fatalf("appended messages = %#v, want role and request ID preserved", store.appended)
+	}
+}
+
+func TestServiceReturnsActiveTraceID(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(noop.NewTracerProvider())
+	})
+
+	ctx, rootSpan := provider.Tracer("test").Start(context.Background(), "test.root")
+	service := newTestService(
+		&fakeRunner{output: emptyAgentOutput()},
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		12,
+		12,
+	)
+	result, err := service.Execute(ctx, validCommand())
+	rootTraceID := rootSpan.SpanContext().TraceID().String()
+	rootSpan.End()
+
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.TraceID != rootTraceID || result.Agent.Metadata["trace_id"] != rootTraceID {
+		t.Fatalf("trace IDs: result=%q metadata=%v root=%q", result.TraceID, result.Agent.Metadata["trace_id"], rootTraceID)
+	}
+	names := map[string]bool{}
+	for _, span := range exporter.GetSpans() {
+		names[span.Name] = true
+	}
+	for _, expected := range []string{"chat.execute", "session.load_context", "session.persist_context"} {
+		if !names[expected] {
+			t.Fatalf("spans = %#v, missing %q", names, expected)
+		}
 	}
 }
 

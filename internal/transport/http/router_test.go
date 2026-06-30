@@ -17,6 +17,10 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http/dto"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 func TestRouterServesHealthCheck(t *testing.T) {
@@ -111,6 +115,67 @@ func TestRouterServesChatForErrorRateQuestion(t *testing.T) {
 	}
 
 	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
+}
+
+func TestRouterCreatesEndToEndChatTrace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(noop.NewTracerProvider())
+	})
+	router := newTestRouter(t)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/chat",
+		bytes.NewBufferString(`{
+			"session_id":"ses_trace",
+			"message":"Why did checkout error rate increase?",
+			"time_context":{
+				"from":"2026-06-30T00:00:00Z",
+				"to":"2026-06-30T00:20:00Z"
+			}
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response dto.ChatResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.TraceID == "" || recorder.Header().Get("X-Trace-ID") != response.TraceID {
+		t.Fatalf("header trace ID=%q response trace ID=%q", recorder.Header().Get("X-Trace-ID"), response.TraceID)
+	}
+
+	names := map[string]bool{}
+	for _, span := range exporter.GetSpans() {
+		names[span.Name] = true
+		if got := span.SpanContext.TraceID().String(); got != response.TraceID {
+			t.Fatalf("span %q trace ID = %q, want %q", span.Name, got, response.TraceID)
+		}
+	}
+	for _, expected := range []string{
+		"HTTP POST /api/v1/chat",
+		"chat.execute",
+		"session.load_context",
+		"agent.run",
+		"tool.query_metrics",
+		"tool.query_logs",
+		"session.persist_context",
+	} {
+		if !names[expected] {
+			t.Fatalf("spans = %#v, missing %q", names, expected)
+		}
+	}
 }
 
 func TestRouterRejectsInvalidChatRequest(t *testing.T) {
