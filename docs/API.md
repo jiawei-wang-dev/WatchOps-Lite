@@ -2,6 +2,27 @@
 
 The current API combines configurable Eino ReAct or deterministic Chat execution, Redis session memory, Elasticsearch knowledge retrieval, MySQL-backed feedback/eval seeds, and OpenTelemetry tracing.
 
+## Local MVP Demo
+
+Start the Compose dependencies and application, then run the complete API sequence:
+
+```bash
+docker compose up -d --wait
+cp configs/config.example.json configs/config.local.json
+make run CONFIG=configs/config.local.json
+```
+
+In another terminal:
+
+```bash
+./scripts/demo_seed_knowledge.sh
+./scripts/demo_chat.sh
+./scripts/demo_feedback.sh
+./scripts/demo_eval_case.sh
+```
+
+The scripts use `http://localhost:8080` by default, require `curl` and Python 3, and do not require jq. Chat and feedback response IDs are retained under `/tmp/watchops-lite-demo` so the next API call can preserve provenance.
+
 ## Trace Correlation
 
 When telemetry is enabled and a span context is valid, every HTTP response includes:

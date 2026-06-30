@@ -1,7 +1,9 @@
-.PHONY: run test lint fmt
+.PHONY: run test lint fmt verify
+
+CONFIG ?= configs/config.json
 
 run:
-	go run ./cmd/server
+	go run ./cmd/server -config $(CONFIG)
 
 test:
 	go test ./...
@@ -11,3 +13,6 @@ lint:
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+
+verify:
+	./scripts/verify.sh

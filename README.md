@@ -1,80 +1,141 @@
-# WatchOps-Lite
+# WatchOps-Lite: Agentic RAG for Service Reliability
 
-WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
+A Go-based Agentic RAG assistant for service reliability analysis, combining Eino ReAct tool calling, Elasticsearch RAG, Redis session memory, MySQL feedback/eval seed, and OpenTelemetry tracing.
 
-The project currently contains the Gin HTTP API, an optional Eino ReAct Agent with deterministic fallback, Redis session memory, Elasticsearch-backed BM25 knowledge retrieval, MySQL-backed feedback/eval seeding, and OpenTelemetry tracing.
+WatchOps-Lite turns an incident question into a bounded investigation: it builds session context, selects read-only tools, gathers normalized evidence, and returns conclusions, inferences, recommendations, limitations, and tool-run metadata without treating unsupported model output as fact.
 
-## Current Scope
+## Architecture
 
-Implemented:
-
-- Gin HTTP server with graceful shutdown
-- `GET /healthz`
-- JSON configuration with environment-variable overrides
-- JSON structured logging with request metadata
-- OpenTelemetry tracing with OTLP gRPC export and graceful shutdown
-- Request trace propagation through Chat, session memory, Agent, tools, RAG, feedback, and eval
-- Unit tests for configuration and health handling
-- Shared `ToolResult`, `ToolError`, and evidence contracts
-- Timeout and fallback execution wrapper
-- Eino-backed mock tools for logs, metrics, traces, and knowledge
-- `POST /api/v1/chat` with configurable Eino ReAct or deterministic execution
-- Versioned Eino PromptTemplate and OpenAI-compatible ChatModel integration
-- Official Eino ReAct Graph tool calling over the four existing tools
-- Evidence-ID validation and safe structured-output parsing
-- Startup and per-request deterministic fallback when the LLM is unavailable
-- Evidence-aware answers and tool run summaries
-- Redis recent messages, versioned rolling summaries, and graceful memory degradation
-- Plain-text/Markdown knowledge ingestion with deterministic paragraph-first chunking
-- Elasticsearch chunk indexing and BM25 knowledge search
-- Real `search_knowledge` evidence with explicit mock fallback when Elasticsearch is unavailable
-- Upvote/downvote feedback persistence with answer and evidence snapshots
-- Manual good-case and bad-case eval seeding from reviewed feedback
-
-Not implemented yet:
-
-- Real logs, metrics, or traces backends
-- Embeddings, vector/hybrid retrieval, reranking, and RRF
-- Automatic eval runner, LLM judge, scoring, and prompt comparison
-- MySQL long-term memory, audit records, and document metadata
-
-## Requirements
-
-- Go 1.23 or newer
-- `make` for the convenience commands
-
-The HTTP server can start without external services. Redis is required for session continuity, but a Redis outage does not fail Chat requests. Elasticsearch and MySQL are disabled by default. Disabled persistence endpoints return a structured `503` response.
-
-OpenTelemetry is also disabled by default. When enabled, an unavailable collector does not block business requests; export failures are logged.
-
-## Run Locally
-
-Start the server with the default configuration:
-
-```bash
-make run
+```mermaid
+flowchart LR
+    C["SRE / API client"] --> G["Gin HTTP API"]
+    G --> A["Chat application service"]
+    A --> M["Redis context"]
+    A --> E["Eino ReAct Agent<br/>or deterministic fallback"]
+    E --> T["Eino tool calling"]
+    T --> L["query_logs"]
+    T --> P["query_metrics"]
+    T --> R["query_traces"]
+    T --> K["search_knowledge"]
+    K --> ES[("Elasticsearch BM25")]
+    G --> F["Feedback / eval seed"]
+    F --> DB[("MySQL")]
+    G -. spans .-> O["OpenTelemetry"]
+    E -. spans .-> O
+    O --> J["Jaeger"]
 ```
 
-Or run it directly:
+The default demo deliberately uses deterministic Agent routing and mock logs, metrics, and traces. Elasticsearch knowledge retrieval, Redis session memory, MySQL feedback/eval persistence, and Jaeger tracing are real local integrations. An OpenAI-compatible Eino `ChatModel` can be enabled separately.
+
+## MVP Features
+
+- Gin HTTP API with thin handlers, structured errors, request IDs, and graceful shutdown
+- Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
+- Deterministic Agent fallback that requires no API key
+- `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
+- Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
+- Tool schema validation, timeout boundaries, safe error normalization, and tracing
+- Evidence-aware output parsing that rejects invented evidence IDs
+- Redis recent-message sliding window and deterministic rolling summary
+- Elasticsearch chunk indexing and BM25 knowledge retrieval
+- MySQL upvote/downvote feedback and manual good/bad eval-case seeding
+- OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
+- Reproducible Docker Compose and scripted demo flow
+
+## Quick Start
+
+Requirements:
+
+- Go 1.23+
+- Docker with Docker Compose
+- `curl`
+- Python 3 for JSON-safe demo-file loading and response ID extraction
+
+Start Redis, Elasticsearch, MySQL, and Jaeger:
 
 ```bash
-go run ./cmd/server -config configs/config.json
+docker compose up -d --wait
+docker compose ps
 ```
 
-Check the health endpoint:
+Create an ignored local configuration from the committed example:
 
 ```bash
-curl -i http://localhost:8080/healthz
+cp configs/config.example.json configs/config.local.json
 ```
 
-Call the Chat endpoint:
+Start WatchOps-Lite:
 
 ```bash
-curl -sS http://localhost:8080/api/v1/chat \
+make run CONFIG=configs/config.local.json
+```
+
+Equivalent direct command:
+
+```bash
+go run ./cmd/server -config configs/config.local.json
+```
+
+Check readiness from another terminal:
+
+```bash
+curl --fail-with-body http://localhost:8080/healthz
+```
+
+The local config enables Redis, Elasticsearch, MySQL, and OpenTelemetry, while keeping `llm.enabled=false` and `agent.mode=deterministic`. No LLM key is required.
+
+To stop the dependencies:
+
+```bash
+docker compose down
+```
+
+Add `--volumes` only when you intentionally want to remove all local demo data.
+
+## Reproducible Demo
+
+With the application running, execute:
+
+```bash
+./scripts/demo_seed_knowledge.sh
+./scripts/demo_chat.sh
+./scripts/demo_feedback.sh
+./scripts/demo_eval_case.sh
+```
+
+The flow demonstrates:
+
+1. A checkout runbook is chunked and indexed in Elasticsearch.
+2. Chat loads Redis context and invokes metrics, logs, and knowledge tools.
+3. The response exposes evidence, limitations, `tool_runs`, and `trace_id`.
+4. A downvote is stored in MySQL.
+5. The feedback record seeds a reusable `bad_case`, which is then listed.
+
+Open [Jaeger](http://localhost:16686), select the `watchops-lite` service, and search for the trace ID returned by Chat. Demo response state is stored under `/tmp/watchops-lite-demo` by default. Override the API or state location with:
+
+```bash
+export WATCHOPS_API_BASE_URL=http://localhost:8080
+export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
+```
+
+Running the scripts again is safe for the services, although it creates additional knowledge, feedback, and eval records.
+
+## API Examples
+
+### Health
+
+```bash
+curl --fail-with-body http://localhost:8080/healthz
+```
+
+### Chat
+
+```bash
+curl --fail-with-body http://localhost:8080/api/v1/chat \
   -H 'Content-Type: application/json' \
   -d '{
-    "session_id": "ses_01",
-    "message": "Why did checkout error rate increase in the last 20 minutes?",
+    "session_id": "demo-checkout-session",
+    "message": "Why did checkout errors increase? Check metrics, logs, and the runbook.",
     "time_context": {
       "from": "2026-06-30T00:00:00Z",
       "to": "2026-06-30T00:20:00Z"
@@ -82,214 +143,164 @@ curl -sS http://localhost:8080/api/v1/chat \
   }'
 ```
 
-The default configuration uses the deterministic runner and mock observability tools. See [HTTP API](docs/API.md) for the request, response, Agent modes, and error contracts.
+### Ingest Knowledge
 
-Redis defaults to `localhost:6379`. Configure it through `configs/config.json` or `WATCHOPS_REDIS_*` environment variables. Session defaults are a 12-message window, a 12-message summary threshold, and a 24-hour TTL.
-
-To use real knowledge retrieval, run Elasticsearch 9.x locally and enable it:
+Use the JSON-safe seed script:
 
 ```bash
-export WATCHOPS_ELASTICSEARCH_ENABLED=true
-export WATCHOPS_ELASTICSEARCH_ADDRESSES=http://localhost:9200
-make run
+./scripts/demo_seed_knowledge.sh
 ```
 
-Ingest and search a runbook:
+Or call `POST /api/v1/knowledge/documents` with `title`, `source`, `content`, and optional `metadata`.
+
+### Search Knowledge
 
 ```bash
-curl -sS http://localhost:8080/api/v1/knowledge/documents \
+curl --fail-with-body http://localhost:8080/api/v1/knowledge/search \
   -H 'Content-Type: application/json' \
   -d '{
-    "title": "Checkout runbook",
-    "source": "manual",
-    "content": "Check upstream timeout saturation.\n\nCompare retry volume with latency.",
-    "metadata": {"service": "checkout"}
-  }'
-
-curl -sS http://localhost:8080/api/v1/knowledge/search \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"checkout timeout","limit":5}'
-```
-
-To persist feedback and eval seeds, create a MySQL database and enable the integration:
-
-```bash
-mysql -u root -p -e "
-  CREATE DATABASE IF NOT EXISTS watchops_lite CHARACTER SET utf8mb4;
-  CREATE USER IF NOT EXISTS 'watchops'@'%' IDENTIFIED BY 'watchops';
-  GRANT ALL PRIVILEGES ON watchops_lite.* TO 'watchops'@'%';
-"
-export WATCHOPS_MYSQL_ENABLED=true
-export 'WATCHOPS_MYSQL_DSN=watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true'
-make run
-```
-
-WatchOps-Lite creates the minimal `feedback` and `eval_cases` tables when MySQL is reachable. Submit a downvote and seed a bad case:
-
-```bash
-curl -sS http://localhost:8080/api/v1/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "request_id":"req-123",
-    "session_id":"ses_01",
-    "rating":"down",
-    "reason_tags":["missing_evidence"],
-    "comment":"The answer did not cite trace evidence."
-  }'
-
-curl -sS http://localhost:8080/api/v1/eval/cases \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "feedback_id":"fb_replace_me",
-    "case_type":"bad_case",
-    "input_message":"Why did checkout error rate increase?",
-    "expected_behavior":"Cite evidence and report missing trace data."
+    "query": "checkout payment upstream timeout",
+    "limit": 5,
+    "filters": {"service": "checkout"}
   }'
 ```
 
-Example response:
+### Create Feedback
 
-```json
-{
-  "status": "ok",
-  "service": "watchops-lite",
-  "time": "2026-06-30T00:00:00Z"
-}
+```bash
+curl --fail-with-body http://localhost:8080/api/v1/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "request_id": "replace-with-chat-request-id",
+    "session_id": "demo-checkout-session",
+    "rating": "down",
+    "reason_tags": ["needs_trace_confirmation"],
+    "comment": "The hypothesis still needs real trace confirmation."
+  }'
 ```
 
-Stop the server with `Ctrl+C`. It handles `SIGINT` and `SIGTERM` with a bounded graceful shutdown.
+### Create and List Eval Cases
 
-## Enable the Eino ReAct Agent
+```bash
+curl --fail-with-body http://localhost:8080/api/v1/eval/cases \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "feedback_id": "replace-with-feedback-id",
+    "case_type": "bad_case",
+    "input_message": "Why did checkout errors increase?",
+    "expected_behavior": "Cite evidence and state missing trace confirmation.",
+    "forbidden_patterns": ["The payment service is definitely the root cause."]
+  }'
 
-WatchOps-Lite supports OpenAI-compatible chat-completion providers through Eino:
+curl --fail-with-body \
+  'http://localhost:8080/api/v1/eval/cases?case_type=bad_case&limit=5'
+```
+
+See [docs/API.md](docs/API.md) for complete request, response, failure, and Agent-mode contracts.
+
+## Optional Eino ReAct Mode
+
+WatchOps-Lite supports OpenAI-compatible tool-calling models through Eino:
 
 ```bash
 export WATCHOPS_AGENT_MODE=eino_react
-export WATCHOPS_AGENT_MAX_ITERATIONS=6
-export WATCHOPS_AGENT_PROMPT_VERSION=watchops_agent_v1
 export WATCHOPS_LLM_ENABLED=true
 export WATCHOPS_LLM_BASE_URL=https://api.openai.com/v1
 export WATCHOPS_LLM_MODEL=your-tool-calling-model
 export WATCHOPS_LLM_API_KEY=replace-me
-make run
+make run CONFIG=configs/config.local.json
 ```
 
-`WATCHOPS_LLM_API_KEY_ENV` defaults to `WATCHOPS_LLM_API_KEY`; configuration stores only the environment-variable name, never the secret.
+`WATCHOPS_LLM_API_KEY_ENV` defaults to `WATCHOPS_LLM_API_KEY`; configuration stores the environment-variable name, not the secret. Missing startup configuration selects the deterministic runner. A request-time model failure also falls back cleanly and returns `AGENT_LLM_FALLBACK`.
 
-If LLM configuration or initialization is incomplete, startup selects the deterministic runner. If an LLM request fails later, that Chat request falls back to the deterministic runner and includes `AGENT_LLM_FALLBACK` plus `metadata.fallback_used=true`. Malformed model JSON does not become an unchecked answer: the response contains `AGENT_OUTPUT_PARSE_FAILED`.
-
-## Local Tracing with Jaeger
-
-Run Jaeger all-in-one with OTLP enabled:
-
-```bash
-docker run --rm --name watchops-jaeger \
-  -e COLLECTOR_OTLP_ENABLED=true \
-  -p 16686:16686 \
-  -p 4317:4317 \
-  -p 4318:4318 \
-  jaegertracing/all-in-one:latest
-```
-
-Enable WatchOps-Lite tracing in another terminal:
-
-```bash
-export WATCHOPS_TELEMETRY_ENABLED=true
-export WATCHOPS_TELEMETRY_ENVIRONMENT=local
-export WATCHOPS_TELEMETRY_OTLP_ENDPOINT=localhost:4317
-export WATCHOPS_TELEMETRY_INSECURE=true
-export WATCHOPS_TELEMETRY_SAMPLE_RATIO=1
-make run
-```
-
-Send a Chat request, then open [http://localhost:16686](http://localhost:16686) and select the `watchops-lite` service. The response includes `X-Trace-ID`, and Chat responses also populate `trace_id`.
-
-## Configuration
+## Configuration Modes
 
 Configuration precedence is:
 
 ```text
-defaults < JSON configuration file < environment variables
+defaults < JSON configuration file < WATCHOPS_* environment variables
 ```
 
-The default file is `configs/config.json`. Select another file with `-config` or `WATCHOPS_CONFIG_FILE`.
+- `configs/config.json`: dependency-light default; optional services and telemetry disabled
+- `configs/config.example.json`: full local Compose demo; LLM disabled
+- `configs/config.local.json`: ignored developer copy
+- `.env.example`: complete environment-variable reference; not loaded automatically
 
-Common overrides:
+The application remains runnable when optional Elasticsearch, MySQL, telemetry, or LLM integrations are disabled. Redis failures degrade Chat to single-turn behavior with an explicit limitation.
+
+## Development
 
 ```bash
-export WATCHOPS_SERVER_ADDRESS=:9090
-export WATCHOPS_LOG_LEVEL=debug
-export WATCHOPS_TELEMETRY_ENABLED=false
-make run
+make fmt
+go mod tidy
+go test ./...
+go vet ./...
+git diff --check
 ```
 
-See [.env.example](.env.example) for the complete initial environment-variable set. The server does not automatically load `.env`; export the variables through your shell or development environment.
-
-Telemetry uses OTLP over gRPC. `sample_ratio` controls a parent-based trace-ID ratio sampler; `1` is appropriate for local development. Span attributes contain identifiers, counts, status, and timing—not message bodies, retrieved content, credentials, or raw backend errors.
-
-## Developer Commands
+Run the combined gate:
 
 ```bash
-make run    # start the HTTP server
-make test   # run unit tests
-make lint   # run go vet
-make fmt    # format Go source files
+make verify
 ```
 
-## Initial Layout
+`scripts/verify.sh` checks formatting, confirms `go mod tidy` is stable, runs all tests and vet checks, and validates the Git diff.
+
+## Project Layout
 
 ```text
 .
 ├── cmd/server/                  # Process entry point
-├── configs/                    # Example runtime configuration
-├── docs/                       # Product and architecture documents
+├── configs/                    # Default and local-demo configuration
+├── demo/knowledge/             # Safe demonstration runbook
+├── docs/                       # Architecture, API, roadmap, and ADRs
+├── scripts/                    # Reproducible demo and verification scripts
 └── internal/
-    ├── bootstrap/              # Application wiring and lifecycle
-    ├── config/                 # Config loading and validation
-    ├── observability/          # Structured logging and OTLP tracing
-    ├── agent/eino/             # Eino ReAct, prompt/parser, tools, and fallback runner
+    ├── agent/eino/             # ReAct, prompt/parser, tools, and fallback
     ├── application/chat/       # Chat use-case orchestration
-    ├── memory/session/         # Redis session store and rolling summary
+    ├── bootstrap/              # Dependency wiring and lifecycle
+    ├── config/                 # Configuration loading and validation
+    ├── eval/                   # Eval-case policy and MySQL store
     ├── feedback/               # Feedback policy and MySQL store
-    ├── eval/                   # Manual eval-seed policy and MySQL store
-    ├── platform/elasticsearch/ # Official Elasticsearch client boundary
-    ├── platform/mysql/         # database/sql client and schema boundary
-    ├── retrieval/knowledge/    # Chunking, retrieval policy, and ES store
-    ├── tools/                  # Contracts and deterministic mock tools
-    └── transport/http/
-        ├── handler/            # Thin Gin handlers
-        └── middleware/         # Gin middleware
+    ├── memory/session/         # Redis context and rolling summary
+    ├── observability/          # Structured logs and OpenTelemetry
+    ├── platform/               # Elasticsearch and MySQL clients
+    ├── retrieval/knowledge/    # Chunking, BM25 policy, and ES store
+    ├── tools/                  # WatchOps tool contracts and implementations
+    └── transport/http/         # Gin router, middleware, DTOs, handlers
 ```
 
-The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BLUEPRINT.md). Directories for future features will be created only when their implementation begins.
+## Current Limitations
 
-## Design Principles
+- Knowledge retrieval is BM25 only; embeddings, hybrid retrieval, RRF, and reranking are deferred.
+- Session summarization is deterministic; an LLM summary model with deterministic fallback is deferred.
+- Logs, metrics, and traces use deterministic fixtures until production adapters are added.
+- Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
+- Prometheus application metrics and Grafana dashboards are not included.
+- The LLM Agent is optional and disabled by default.
+- MySQL currently stores feedback and eval cases, not long-term memory, document metadata, or audit records.
 
-1. Evidence first: distinguish observed facts, inferences, and recommendations.
-2. Clear boundaries: domain logic does not depend on transports or vendor SDKs.
-3. Safe by default: future tools are read-only and their inputs are bounded.
-4. Replaceable integrations: infrastructure connects through explicit ports.
-5. Evaluation-ready: production feedback will become reviewed regression material.
+## Roadmap
+
+- LLM session summary model with deterministic fallback
+- Hybrid BM25/vector retrieval with evaluation-driven RRF and reranking
+- Production Prometheus, log, and trace query adapters
+- Automatic eval runner and release comparison reports
+- Prometheus application metrics and Grafana dashboards
 
 ## Design Documents
 
 - [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
-- [HTTP API](docs/API.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Project Structure](docs/STRUCTURE.md)
+- [HTTP API](docs/API.md)
 - [Roadmap](docs/ROADMAP.md)
-- [ADR 0001: Framework and Technology Stack](docs/adr/0001-framework-and-stack.md)
-- [ADR 0002: Eino Tooling and WatchOps Tool Contracts](docs/adr/0002-eino-tooling.md)
-- [ADR 0003: Deterministic Chat and Agent Skeleton](docs/adr/0003-chat-agent-skeleton.md)
-- [ADR 0004: Redis Session Memory](docs/adr/0004-redis-session-memory.md)
-- [ADR 0005: Elasticsearch Knowledge RAG](docs/adr/0005-elasticsearch-rag.md)
-- [ADR 0006: MySQL Feedback and Eval Seed](docs/adr/0006-feedback-eval-seed.md)
-- [ADR 0007: OpenTelemetry and Jaeger Tracing](docs/adr/0007-opentelemetry-jaeger-tracing.md)
+- [Project Structure](docs/STRUCTURE.md)
 - [ADR 0008: Eino ReAct Agent](docs/adr/0008-eino-react-agent.md)
+- [ADR 0009: MVP Demo Packaging](docs/adr/0009-mvp-demo-packaging.md)
 
 ## Originality
 
-WatchOps-Lite is implemented from its own product requirements. It does not copy source code, project structure, prompts, comments, or documentation from Pilot or any training-camp project.
+WatchOps-Lite is independently designed from its product requirements. It does not copy Pilot or training-camp project source code, structure, prompts, comments, or documentation.
 
 ## License
 

@@ -47,6 +47,21 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLocalDemoExampleIsValid(t *testing.T) {
+	path := filepath.Join("..", "..", "configs", "config.example.json")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(%q) error = %v", path, err)
+	}
+	if !cfg.Elasticsearch.Enabled || !cfg.MySQL.Enabled || !cfg.Telemetry.Enabled {
+		t.Fatalf("local demo dependencies are not enabled: %#v", cfg)
+	}
+	if cfg.LLM.Enabled || cfg.Agent.Mode != "deterministic" {
+		t.Fatalf("local demo must not require an LLM: Agent=%#v LLM=%#v", cfg.Agent, cfg.LLM)
+	}
+}
+
 func TestLoadAppliesRedisAndSessionEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {

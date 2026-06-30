@@ -112,7 +112,7 @@ Exit criteria:
 - Elasticsearch failures are sanitized and do not prevent application startup.
 - Existing Chat and health behavior remains intact.
 
-Exit status: complete. Durable ingestion status, deletion, deduplication, access control, file extraction, and Docker Compose Elasticsearch provisioning remain future extensions.
+Exit status: complete. Phase 9 subsequently added local Docker Compose provisioning. Durable ingestion status, deletion, deduplication, access control, and file extraction remain future extensions.
 
 ## Phase 6: MySQL Feedback and Eval Seed — Completed
 
@@ -181,6 +181,25 @@ Exit criteria:
 
 Exit status: complete. Multi-agent workflows, planning agents, LLM session summarization, automatic eval execution, and advanced token/cost budgets remain deferred.
 
+## Phase 9: MVP Demo Packaging — Completed
+
+Delivered:
+
+- Docker Compose for Redis, Elasticsearch, MySQL, and Jaeger
+- Full local example configuration with deterministic Agent mode and no LLM key
+- Checkout reliability runbook seed data
+- Reproducible knowledge, Chat, feedback, and eval-case scripts
+- Combined formatting, module, test, vet, and diff verification script
+- GitHub-ready README, final API examples, architecture updates, and ADR 0009
+
+Exit criteria:
+
+- A new contributor can start local dependencies and the application from documented commands.
+- The demo proves ingestion, retrieval, Agent tools, Redis context, feedback/eval persistence, and tracing.
+- Advanced services remain clearly identified as deferred rather than implied by the MVP.
+
+Exit status: complete. The repository is packaged as a local portfolio demo; production hardening remains outside this phase.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -192,6 +211,7 @@ flowchart LR
     P5 --> P6["P6 MySQL Feedback + Eval Seed (complete)"]
     P6 --> P7["P7 OTel + Jaeger (complete)"]
     P7 --> P8["P8 Eino ReAct Agent (complete)"]
+    P8 --> P9["P9 MVP Demo Packaging (complete)"]
 ```
 
 ## Deferred Work

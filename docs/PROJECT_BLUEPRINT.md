@@ -28,15 +28,15 @@ A user asks, “Why did the checkout service error rate increase over the last 2
 
 ### B. Knowledge Retrieval
 
-A user uploads a Markdown, plain-text, or PDF runbook. The system extracts, chunks, and indexes its content in Elasticsearch. Later, `search_knowledge` returns quoted excerpts with source locations. Embeddings can be added when vector or hybrid retrieval is introduced.
+A user submits Markdown or plain-text runbook content. The system chunks and indexes it in Elasticsearch. Later, `search_knowledge` returns source-attributed excerpts. File extraction and embeddings can be added after the MVP.
 
 ### C. Follow-up Questions
 
-A user asks, “How did we resolve a similar issue last time?” The system combines recent Redis messages and the session summary with relevant, confirmed long-term memories from MySQL.
+A user asks a follow-up question. The MVP combines recent Redis messages with a deterministic rolling session summary. MySQL long-term memory remains a future extension.
 
 ### D. Feedback Reuse
 
-A liked, evidence-rich answer becomes a positive eval candidate. A disliked answer with a reason becomes a bad-case candidate. After redaction and review, approved cases are added to `agent_eval_cases.json` for regression testing.
+Upvotes and downvotes are stored with answer provenance. A user can manually create a compatible good or bad eval case from reviewed feedback. Redaction, review state, JSON export, and automatic regression execution remain future work.
 
 ## 3. Scope and Boundaries
 
@@ -44,12 +44,12 @@ A liked, evidence-rich answer becomes a positive eval candidate. A disliked answ
 
 - Go HTTP server built with Gin and a versioned REST API
 - Chat requests using a bounded, Eino-based ReAct-style Agent and Graph orchestration
-- RAG document upload, chunk-based Elasticsearch indexing, status, and search
+- JSON-based plain-text/Markdown ingestion, chunk indexing, metadata lookup, and BM25 search
 - Logs, metrics, traces, and knowledge-search tools
 - Redis session summaries and recent messages
-- MySQL long-term memory, document metadata, feedback, eval candidates, and audit records
+- MySQL feedback and manually seeded eval cases
 - OpenTelemetry tracing, Jaeger visualization for local development, and structured logging
-- JSON evaluation data and a CLI evaluation entry point
+- Docker Compose, demo data, scripted API flow, and a local verification command
 
 ### 3.2 Excluded from the MVP
 
@@ -248,15 +248,14 @@ Response:
 Endpoints:
 
 - `POST /api/v1/knowledge/documents`: upload a document
-- `GET /api/v1/knowledge/documents/{id}`: inspect processing status
+- `GET /api/v1/knowledge/documents/{id}`: reconstruct document metadata from indexed chunks
 - `POST /api/v1/knowledge/search`: perform explicit retrieval
-- `DELETE /api/v1/knowledge/documents/{id}`: logically delete and asynchronously remove an index
 
-Initial processing stages: validate → extract → normalize → chunk → Elasticsearch index → update status.
+MVP processing stages: validate → normalize → chunk → synchronous Elasticsearch index.
 
 The first MVP may use a simplified BM25 retrieval path. The indexing and retrieval contracts must leave room for embeddings, vector search, hybrid retrieval, Reciprocal Rank Fusion (RRF), and reranking without changing the Chat use case.
 
-Each chunk records its `document_id`, title, section position, content hash, source, access scope, and update time. Every retrieval result must locate its original source.
+Each chunk records its generated identity, document ID, title, chunk index, source, metadata, content, and creation time.
 
 ### 5.3 Tools
 
@@ -279,23 +278,19 @@ Redis stores:
 
 MySQL stores:
 
-- `sessions`
-- `memories`
-- `knowledge_documents`
 - `feedback`
-- `eval_candidates`
-- `audit_records`
+- `eval_cases`
 
-Elasticsearch stores chunk content and the fields required for BM25, vector, hybrid, and filtered retrieval. MySQL remains the source of truth for document state, feedback, long-term memory, eval candidates, and audit information.
+Elasticsearch stores chunk content and fields required for BM25 and metadata filtering. MySQL currently stores feedback and eval cases; long-term memory, document lifecycle metadata, and audit records are deferred.
 
 ## 6. Common API Conventions
 
 - Prefix: `/api/v1`
 - JSON fields: `snake_case`
 - Time: UTC RFC 3339
-- IDs: ULID or UUIDv7
+- IDs: type-prefixed cryptographically random identifiers
 - Request correlation: accept or generate `X-Request-ID`
-- Idempotent upload: support `Idempotency-Key`
+- Idempotent upload keys remain a post-MVP extension
 - Error envelope:
 
 ```json
@@ -309,70 +304,40 @@ Elasticsearch stores chunk content and the fields required for BM25, vector, hyb
 }
 ```
 
-Initial error codes: `INVALID_ARGUMENT`, `UNAUTHORIZED`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `DEPENDENCY_UNAVAILABLE`, `TOOL_TIMEOUT`, and `INTERNAL`.
+Current public error codes include `INVALID_ARGUMENT`, `NOT_FOUND`, `DEPENDENCY_UNAVAILABLE`, and `INTERNAL`; tool limitations retain structured tool-specific codes such as `TOOL_TIMEOUT`.
 
-## 7. Recommended Go Project Layout
+## 7. Current Go Project Layout
 
 ```text
 WatchOps-Lite/
-├── cmd/
-│   ├── server/                 # HTTP entry point; wiring and startup only
-│   └── eval/                   # Offline Agent evaluation command
-├── api/
-│   └── openapi/                # OpenAPI contract
-├── configs/                    # Local sample configuration; no secrets
-├── deployments/
-│   ├── docker/                 # Container build assets
-│   ├── otel/                   # Local Collector configuration
-│   └── jaeger/                 # Local trace visualization configuration
-├── docs/
-├── evals/
-│   ├── agent_eval_cases.json
-│   └── fixtures/               # Redacted, deterministic tool responses
+├── cmd/server/                 # HTTP entry point; startup only
+├── configs/                    # Default and full local-demo configuration
+├── demo/knowledge/             # Safe demo runbook
+├── docs/                       # Architecture, API, roadmap, and ADRs
+├── scripts/                    # Reproducible demo and verification
 ├── internal/
+│   ├── agent/eino/             # ReAct, prompt/parser, tools, and fallback
+│   ├── application/chat/       # Chat use case
 │   ├── bootstrap/              # Dependency wiring and lifecycle
 │   ├── config/                 # Configuration loading and validation
-│   ├── domain/                 # Entities, value objects, and ports
-│   ├── application/
-│   │   ├── chat/               # Chat use cases
-│   │   ├── knowledge/          # Document and retrieval use cases
-│   │   └── feedback/           # Feedback use cases
-│   ├── agent/
-│   │   ├── eino/               # Eino Tool assembly; Graph/Agent later
-│   │   ├── orchestrator/       # Eino Graph/ReAct orchestration and stop rules
-│   │   ├── prompt/             # Versioned templates and rendering
-│   │   ├── context/            # Summary, window, and token budget
-│   │   ├── harness/            # Timeout, fallback, and structured errors
-│   │   └── loop/               # Feedback-to-eval candidates
+│   ├── eval/                   # Eval-case policy and MySQL store
+│   ├── feedback/               # Feedback policy and MySQL store
+│   ├── memory/session/         # Redis context and deterministic summary
+│   ├── observability/          # Structured logs and OpenTelemetry
+│   ├── platform/               # Elasticsearch and MySQL clients
+│   ├── retrieval/knowledge/    # Chunking, BM25 policy, and ES store
 │   ├── tools/
-│   │   ├── common/             # ToolResult, ToolError, evidence, execution policy
+│   │   ├── common/             # Results, errors, evidence, execution policy
 │   │   ├── logs/
 │   │   ├── metrics/
 │   │   ├── traces/
 │   │   └── knowledge/
-│   ├── retrieval/
-│   │   ├── chunker/
-│   │   ├── embedding/
-│   │   └── search/             # Retrieval and ranking ports
-│   ├── memory/
-│   │   ├── session/            # Redis implementation
-│   │   └── longterm/           # MySQL implementation
-│   ├── transport/http/
+│   └── transport/http/
 │   │   ├── handler/            # Thin Gin handlers
 │   │   ├── middleware/         # Gin middleware
 │   │   └── dto/                # HTTP request/response types
-│   ├── platform/
-│   │   ├── elasticsearch/
-│   │   ├── mysql/
-│   │   ├── redis/
-│   │   └── httpclient/
-│   └── observability/          # OTel, Jaeger export, logs, optional metrics
-├── migrations/                 # MySQL migrations
-├── test/
-│   ├── integration/
-│   └── contract/
 ├── .env.example
-├── compose.yaml
+├── docker-compose.yml
 ├── go.mod
 └── Makefile
 ```
@@ -380,27 +345,26 @@ WatchOps-Lite/
 Layout rules:
 
 - `cmd` contains no business logic.
-- `internal/domain` does not import database, HTTP, or model-vendor SDKs.
 - `application` orchestrates use cases; `platform` implements external dependencies.
 - Gin remains in the transport layer; handlers delegate immediately to application use cases.
-- Eino remains behind the Agent orchestration boundary; domain policy does not depend directly on Eino types.
+- Eino remains behind the Agent boundary; application and HTTP contracts do not depend on Eino types.
 - Tool domain inputs remain separate from backend query languages.
 - Do not create `pkg` until a stable API is genuinely reusable outside this project.
-- Prompt templates and eval fixtures are product assets and require version review.
+- New packages are created only when their implementation begins.
 
 ## 8. Configuration
 
 Configuration precedence is defaults < configuration file < environment variables. All values are validated once at startup; invalid settings are never silently corrected at runtime.
 
-Recommended groups:
+Implemented groups:
 
-- `server`: address, timeouts, and body limits
+- `server`: address and HTTP lifecycle timeouts
 - `mysql`, `redis`, and `elasticsearch`
-- `llm` and `embedding`
-- `tools.logs`, `tools.metrics`, and `tools.traces`
-- `agent`: maximum steps, token budget, and tool concurrency
+- `llm`: provider, endpoint, model, key environment name, temperature, and timeout
+- `agent`: mode, maximum iterations, timeout, and prompt version
 - `session`: window size, summary threshold, and TTL
-- `telemetry`: service name, OTLP endpoint, Jaeger settings, and sampling ratio
+- `knowledge`: chunk-size bound
+- `telemetry`: service name, environment, OTLP endpoint, and sampling ratio
 
 Secrets enter through environment variables or a secret manager. Example files contain placeholders only.
 
@@ -411,22 +375,21 @@ Secrets enter through environment variables or a secret manager. Example files c
 - Redact sensitive values from logs, prompts, and trace attributes.
 - Apply connect, read, and overall deadlines to every dependency.
 - Bound Agent iterations, tool calls, and total execution time.
-- Let users delete sessions and long-term memory, with auditable deletion.
+- Add session and future long-term-memory deletion before production deployment.
 - Treat tool output as untrusted model input to resist indirect prompt injection.
 - Never present a tool error as normal evidence.
 
 ## 10. MVP Acceptance Criteria
 
-- A multi-turn Chat stores observable summaries and recent messages in Redis.
-- A document can be indexed as chunks in Elasticsearch and retrieved through `search_knowledge` with source locations.
-- Chat execution uses the Eino-based ReAct-style Agent or Eino Graph workflow according to the use case.
-- All four tools enforce schema validation, timeouts, and structured errors.
-- If one logs, metrics, or traces backend fails, the answer still presents available evidence and limitations.
-- A Chat root span contains context building, RAG search, tool execution, prompt rendering, model call, and feedback-processing child spans where applicable.
+- A multi-turn Chat stores recent messages and deterministic rolling summaries in Redis.
+- Plain-text or Markdown content is indexed as chunks and retrieved through Elasticsearch BM25.
+- Chat can use the bounded Eino ReAct Agent or deterministic fallback through the same interface.
+- All four tools expose schemas, bounded execution, structured errors, normalized evidence, and traces.
+- Chat returns evidence-aware sections, tool runs, safe limitations, and a trace ID.
+- Feedback and manually seeded good/bad eval cases persist in MySQL.
 - Local traces can be inspected in Jaeger.
-- Likes and dislikes persist and can be exported as redacted eval candidates.
-- `agent_eval_cases.json` runs through a CLI and emits a machine-readable report.
-- Critical domain and use-case logic has unit tests; external adapters have contract tests.
+- Docker Compose and scripts reproduce ingestion → Chat → feedback → eval seed.
+- `make verify` checks formatting, module stability, tests, vet, and diff whitespace.
 
 ## 11. Framework and Technology Choices
 
@@ -540,7 +503,9 @@ The initial tools are:
 
 ### 11.7 Local Deployment: Docker Compose
 
-Docker Compose is the standard local deployment mechanism. As each phase is implemented, the local stack can add Elasticsearch, Redis, MySQL, an OpenTelemetry Collector, and Jaeger. Services are added only when the corresponding feature exists; the Compose file should not simulate unimplemented business modules.
+Docker Compose starts Redis, Elasticsearch, MySQL, and Jaeger on their standard local ports. The Go server runs on the host for a short edit-run-debug loop and uses `configs/config.local.json`, copied from the committed example.
+
+The demo keeps the LLM disabled and selects the deterministic Agent by default, so no external key is required. Eino ReAct mode remains opt-in.
 
 Prometheus metrics are a post-MVP enhancement and are not required in the initial Compose stack.
 

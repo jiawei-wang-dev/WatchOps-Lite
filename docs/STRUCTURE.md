@@ -7,8 +7,11 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 ```text
 .
 ├── cmd/server/                  # Process entry point
-├── configs/                    # Example runtime configuration
+├── configs/                    # Default and full local-demo configuration
+├── demo/knowledge/             # Safe demo runbook
 ├── docs/                       # Product and architecture documentation
+├── scripts/                    # Demo flow and verification gate
+├── docker-compose.yml          # Redis, Elasticsearch, MySQL, and Jaeger
 └── internal/
     ├── bootstrap/              # Dependency wiring and server lifecycle
     ├── config/                 # Configuration loading and validation

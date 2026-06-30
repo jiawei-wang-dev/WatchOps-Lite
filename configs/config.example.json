@@ -1,0 +1,70 @@
+{
+  "server": {
+    "address": ":8080",
+    "read_header_timeout": "5s",
+    "read_timeout": "15s",
+    "write_timeout": "15s",
+    "idle_timeout": "60s",
+    "shutdown_timeout": "10s"
+  },
+  "log": {
+    "level": "info"
+  },
+  "redis": {
+    "address": "localhost:6379",
+    "username": "",
+    "password": "",
+    "db": 0,
+    "dial_timeout": "2s",
+    "read_timeout": "2s",
+    "write_timeout": "2s"
+  },
+  "session": {
+    "recent_window_size": 12,
+    "summary_threshold": 12,
+    "ttl": "24h"
+  },
+  "elasticsearch": {
+    "enabled": true,
+    "addresses": ["http://localhost:9200"],
+    "username": "",
+    "password": "",
+    "knowledge_index": "watchops_knowledge",
+    "request_timeout": "5s"
+  },
+  "knowledge": {
+    "chunk_max_size": 1200
+  },
+  "mysql": {
+    "enabled": true,
+    "dsn": "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",
+    "max_open_conns": 10,
+    "max_idle_conns": 5,
+    "conn_max_lifetime": "30m",
+    "request_timeout": "5s"
+  },
+  "agent": {
+    "mode": "deterministic",
+    "max_iterations": 6,
+    "timeout": "30s",
+    "prompt_version": "watchops_agent_v1"
+  },
+  "llm": {
+    "enabled": false,
+    "provider": "openai_compatible",
+    "base_url": "",
+    "api_key_env": "WATCHOPS_LLM_API_KEY",
+    "model": "",
+    "temperature": 0.2,
+    "request_timeout": "30s"
+  },
+  "telemetry": {
+    "enabled": true,
+    "service_name": "watchops-lite",
+    "environment": "local",
+    "otlp_endpoint": "localhost:4317",
+    "insecure": true,
+    "sample_ratio": 1.0,
+    "export_timeout": "3s"
+  }
+}

@@ -114,35 +114,32 @@ Each message contains role, content, timestamp, sequence, and request ID. Summar
 
 ### 5.2 Context Budget
 
-The system does not prune by raw character count alone. The Context Builder assigns soft limits to each information class and handles overflow in this order:
+The current context implementation bounds recent messages and moves older messages into a deterministic rolling summary. Future relevance and token budgeting can extend this order:
 
-1. Remove low-relevance long-term memories.
-2. Shorten RAG chunks while retaining source references.
-3. Move older recent messages into the summary.
+1. Preserve the current question, system boundaries, and critical evidence.
+2. Move older recent messages into the summary.
+3. Shorten RAG chunks while retaining source references.
 4. Compress tool output into statistics and representative samples.
-5. Preserve the current question, system boundaries, and critical evidence.
+5. Remove low-relevance future long-term memories.
 
 ## 6. RAG Architecture
 
 ### 6.1 Ingestion Path
 
 ```text
-Upload -> Validate -> Extract -> Normalize -> Chunk
-       -> Elasticsearch Index -> Mark Ready
+JSON document -> Validate -> Normalize -> Chunk
+              -> Elasticsearch bulk index (refresh=wait_for)
 ```
 
-Document states are `pending` → `processing` → `ready`. A failed job enters `failed` with a safe error code. Duplicate content can be detected from tenant, source, and content hash.
-
-The MVP may accept uploads synchronously and process them asynchronously. A small `JobQueue` interface separates scheduling from processing. The first implementation may use a database job table and later move to a dedicated message system.
+The MVP accepts plain-text or Markdown content synchronously. Elasticsearch stores the chunks, source metadata, and generated document identity. Durable ingestion states, duplicate detection, file extraction, deletion, and asynchronous jobs are deferred.
 
 ### 6.2 Retrieval Path
 
-1. Normalize the query.
-2. Apply tenant, document-state, and access-scope filters.
+1. Validate and normalize the query.
+2. Apply supported metadata filters.
 3. Retrieve BM25 candidates from Elasticsearch.
-4. Add vector retrieval and hybrid fusion when embeddings are introduced.
-5. Add RRF and reranking when evaluation data demonstrates value.
-6. Assign immutable evidence IDs while retaining source positions.
+4. Convert returned chunks into source-attributed evidence.
+5. Add vector retrieval, fusion, RRF, and reranking only after the MVP.
 
 Elasticsearch query construction remains in the platform adapter and never enters the Agent or HTTP layers.
 
@@ -188,18 +185,14 @@ The model emits domain parameters such as service, environment, time range, and 
 
 ## 8. Persistence
 
-Suggested MySQL tables:
+The MVP creates two MySQL tables:
 
 | Table | Purpose | Important fields |
 | --- | --- | --- |
-| `sessions` | Session index and deletion state | id, user_id, created_at, deleted_at |
-| `memories` | Long-term memory | content, source_type, confidence, expires_at |
-| `knowledge_documents` | Document processing state | source, content_hash, status, error_code |
 | `feedback` | Raw user feedback | request_id, rating, reason, prompt_version |
 | `eval_cases` | Manually seeded good and bad cases | feedback_id, case_type, expected_behavior |
-| `audit_records` | Durable security and workflow audit | action, resource_type, resource_id, created_at |
 
-Whether full request text is retained must be controlled by privacy policy and configuration. The default should favor hashes, summaries, and reproducibility metadata over indefinite raw-content storage.
+Long-term memory, durable document metadata, review state, and audit records remain planned rather than implied by the current schema.
 
 ## 9. OpenTelemetry and Jaeger
 
@@ -228,7 +221,7 @@ Attributes contain only operational values such as request/session/document IDs,
 
 Jaeger is the local trace visualization backend. Prometheus metrics may be added after the MVP and are not required for the tracing baseline.
 
-Key metrics:
+Potential post-MVP metrics:
 
 - Chat latency and success rate
 - Per-tool latency, timeout rate, and fallback rate
@@ -243,10 +236,10 @@ Key metrics:
 | Dependency | Behavior when unavailable |
 | --- | --- |
 | Redis | Process a single turn and clearly report loss of short-term continuity |
-| MySQL | Reject operations requiring durable persistence; Chat degrades or fails according to policy |
+| MySQL | Feedback and eval APIs return a structured dependency error; Chat is unaffected |
 | Elasticsearch | Knowledge APIs return a structured dependency error; the Agent tool reports explicit mock fallback evidence |
 | Logs/Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
-| Model | Fail quickly with a retryable dependency error |
+| Model | Use the deterministic runner at startup or for the failed request |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
 
 ## 11. Test Boundaries
@@ -254,9 +247,9 @@ Key metrics:
 - Unit tests: domain rules, context pruning, evidence validation, fallback selection, and stop conditions.
 - Golden tests: prompt rendering and structured response templates.
 - Contract tests: four tool adapters and their external API fixtures.
-- Integration tests: Elasticsearch, MySQL, and Redis lifecycles.
-- End-to-end tests: upload → retrieve → Chat → feedback.
-- Eval: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
+- Local demo: Compose-backed upload → retrieve → Chat → feedback → eval seed.
+- Future integration tests: disposable Elasticsearch, MySQL, and Redis lifecycles.
+- Future eval runner: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
 
 CI uses redacted fixtures or containers and never depends on real production endpoints.
 
@@ -269,3 +262,5 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0005: Elasticsearch Knowledge RAG](adr/0005-elasticsearch-rag.md)
 - [ADR 0006: MySQL Feedback and Eval Seed](adr/0006-feedback-eval-seed.md)
 - [ADR 0007: OpenTelemetry and Jaeger Tracing](adr/0007-opentelemetry-jaeger-tracing.md)
+- [ADR 0008: Eino ReAct Agent](adr/0008-eino-react-agent.md)
+- [ADR 0009: MVP Demo Packaging](adr/0009-mvp-demo-packaging.md)
