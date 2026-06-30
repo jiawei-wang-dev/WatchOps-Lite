@@ -1,0 +1,19 @@
+{
+  "server": {
+    "address": ":8080",
+    "read_header_timeout": "5s",
+    "read_timeout": "15s",
+    "write_timeout": "15s",
+    "idle_timeout": "60s",
+    "shutdown_timeout": "10s"
+  },
+  "log": {
+    "level": "info"
+  },
+  "telemetry": {
+    "enabled": false,
+    "service_name": "watchops-lite",
+    "otlp_endpoint": "http://localhost:4318",
+    "sample_ratio": 1.0
+  }
+}

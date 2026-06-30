@@ -28,7 +28,7 @@ A user asks, “Why did the checkout service error rate increase over the last 2
 
 ### B. Knowledge Retrieval
 
-A user uploads a Markdown, plain-text, or PDF runbook. The system extracts, chunks, embeds, and indexes its content. Later, `search_knowledge` returns quoted excerpts with source locations.
+A user uploads a Markdown, plain-text, or PDF runbook. The system extracts, chunks, and indexes its content in Elasticsearch. Later, `search_knowledge` returns quoted excerpts with source locations. Embeddings can be added when vector or hybrid retrieval is introduced.
 
 ### C. Follow-up Questions
 
@@ -42,13 +42,13 @@ A liked, evidence-rich answer becomes a positive eval candidate. A disliked answ
 
 ### 3.1 Included in the MVP
 
-- Go HTTP server and versioned REST API
-- Chat requests, with synchronous responses first and streaming reserved
-- RAG document upload, status, and search
+- Go HTTP server built with Gin and a versioned REST API
+- Chat requests using a bounded, Eino-based ReAct-style Agent and Graph orchestration
+- RAG document upload, chunk-based Elasticsearch indexing, status, and search
 - Logs, metrics, traces, and knowledge-search tools
 - Redis session summaries and recent messages
-- MySQL long-term memory, document metadata, feedback, and eval candidates
-- OpenTelemetry traces, basic metrics, and structured logging
+- MySQL long-term memory, document metadata, feedback, eval candidates, and audit records
+- OpenTelemetry tracing, Jaeger visualization for local development, and structured logging
 - JSON evaluation data and a CLI evaluation entry point
 
 ### 3.2 Excluded from the MVP
@@ -127,6 +127,8 @@ type Tool interface {
     Execute(ctx context.Context, input json.RawMessage) (ToolResult, error)
 }
 ```
+
+The Agent adapts this interface to Eino's Tool abstraction, but the Eino-facing type does not replace the WatchOps-Lite domain contract. The orchestration loop uses a bounded, Eino-based ReAct-style Agent: reason about the next step, call a validated tool when evidence is required, observe the result, and stop when the answer or execution budget is complete. Eino Graph is used where the workflow benefits from explicit nodes, transitions, and execution state.
 
 The harness provides:
 
@@ -212,7 +214,7 @@ Suggested `agent_eval_cases.json` format:
 
 ### 5.1 Chat
 
-Responsibilities: request validation, session loading, Agent execution, evidence assembly, context persistence, and response delivery.
+Responsibilities: request validation, session loading, Eino-based Agent execution, evidence assembly, context persistence, and response delivery. Gin owns routing, middleware, request binding, validation entry points, and response formatting. Eino owns Agent workflow orchestration, prompt rendering, model invocation, tool calling, and graph-style execution. Handlers translate HTTP requests into application commands and must not contain business logic.
 
 `POST /api/v1/chat`
 
@@ -254,7 +256,9 @@ Endpoints:
 - `POST /api/v1/knowledge/search`: perform explicit retrieval
 - `DELETE /api/v1/knowledge/documents/{id}`: logically delete and asynchronously remove an index
 
-Processing stages: validate → extract → normalize → chunk → embed → vector upsert → update status.
+Initial processing stages: validate → extract → normalize → chunk → Elasticsearch index → update status.
+
+The first MVP may use a simplified BM25 retrieval path. The indexing and retrieval contracts must leave room for embeddings, vector search, hybrid retrieval, Reciprocal Rank Fusion (RRF), and reranking without changing the Chat use case.
 
 Each chunk records its `document_id`, title, section position, content hash, source, access scope, and update time. Every retrieval result must locate its original source.
 
@@ -265,7 +269,7 @@ Each chunk records its `document_id`, title, section position, content hash, sou
 | `query_logs` | Search and aggregate logs | Bounded time range, result count, and labels | Loki HTTP API |
 | `query_metrics` | Query time-series metrics | Allowlisted metrics and functions | Prometheus HTTP API |
 | `query_traces` | Find traces and important spans | Bounded services, time range, and result count | Tempo HTTP API |
-| `search_knowledge` | Retrieve runbooks and postmortems | Top-k, score threshold, and access filters | `VectorStore` |
+| `search_knowledge` | Retrieve runbooks and postmortems | Top-k, score threshold, and access filters | Elasticsearch |
 
 Tools are read-only by default. The model produces constrained domain parameters, and adapters construct backend queries. Arbitrary LogQL or PromQL must not pass directly from the model to a backend.
 
@@ -284,8 +288,9 @@ MySQL stores:
 - `knowledge_documents`
 - `feedback`
 - `eval_candidates`
+- `audit_records`
 
-The vector index stores only vectors and filtering metadata required for retrieval. MySQL remains the source of truth for document state and audit information.
+Elasticsearch stores chunk content and the fields required for BM25, vector, hybrid, and filtered retrieval. MySQL remains the source of truth for document state, feedback, long-term memory, eval candidates, and audit information.
 
 ## 6. Common API Conventions
 
@@ -322,7 +327,8 @@ WatchOps-Lite/
 ├── configs/                    # Local sample configuration; no secrets
 ├── deployments/
 │   ├── docker/                 # Container build assets
-│   └── otel/                   # Local Collector configuration
+│   ├── otel/                   # Local Collector configuration
+│   └── jaeger/                 # Local trace visualization configuration
 ├── docs/
 ├── evals/
 │   ├── agent_eval_cases.json
@@ -336,7 +342,7 @@ WatchOps-Lite/
 │   │   ├── knowledge/          # Document and retrieval use cases
 │   │   └── feedback/           # Feedback use cases
 │   ├── agent/
-│   │   ├── orchestrator/       # Single-Agent state machine and stop rules
+│   │   ├── orchestrator/       # Eino Graph/ReAct orchestration and stop rules
 │   │   ├── prompt/             # Versioned templates and rendering
 │   │   ├── context/            # Summary, window, and token budget
 │   │   ├── harness/            # Timeout, fallback, and structured errors
@@ -350,19 +356,20 @@ WatchOps-Lite/
 │   ├── retrieval/
 │   │   ├── chunker/
 │   │   ├── embedding/
-│   │   └── vectorstore/
+│   │   └── search/             # Retrieval and ranking ports
 │   ├── memory/
 │   │   ├── session/            # Redis implementation
 │   │   └── longterm/           # MySQL implementation
 │   ├── transport/http/
-│   │   ├── handler/
-│   │   ├── middleware/
-│   │   └── dto/
+│   │   ├── handler/            # Thin Gin handlers
+│   │   ├── middleware/         # Gin middleware
+│   │   └── dto/                # HTTP request/response types
 │   ├── platform/
+│   │   ├── elasticsearch/
 │   │   ├── mysql/
 │   │   ├── redis/
 │   │   └── httpclient/
-│   └── observability/          # OTel, logs, and metrics
+│   └── observability/          # OTel, Jaeger export, logs, optional metrics
 ├── migrations/                 # MySQL migrations
 ├── test/
 │   ├── integration/
@@ -378,6 +385,8 @@ Layout rules:
 - `cmd` contains no business logic.
 - `internal/domain` does not import database, HTTP, or model-vendor SDKs.
 - `application` orchestrates use cases; `platform` implements external dependencies.
+- Gin remains in the transport layer; handlers delegate immediately to application use cases.
+- Eino remains behind the Agent orchestration boundary; domain policy does not depend directly on Eino types.
 - Tool domain inputs remain separate from backend query languages.
 - Do not create `pkg` until a stable API is genuinely reusable outside this project.
 - Prompt templates and eval fixtures are product assets and require version review.
@@ -389,12 +398,12 @@ Configuration precedence is defaults < configuration file < environment variable
 Recommended groups:
 
 - `server`: address, timeouts, and body limits
-- `mysql`, `redis`, and `vector_store`
+- `mysql`, `redis`, and `elasticsearch`
 - `llm` and `embedding`
 - `tools.logs`, `tools.metrics`, and `tools.traces`
 - `agent`: maximum steps, token budget, and tool concurrency
 - `session`: window size, summary threshold, and TTL
-- `telemetry`: service name, OTLP endpoint, and sampling ratio
+- `telemetry`: service name, OTLP endpoint, Jaeger settings, and sampling ratio
 
 Secrets enter through environment variables or a secret manager. Example files contain placeholders only.
 
@@ -412,10 +421,118 @@ Secrets enter through environment variables or a secret manager. Example files c
 ## 10. MVP Acceptance Criteria
 
 - A multi-turn Chat stores observable summaries and recent messages in Redis.
-- A document can be uploaded and retrieved through `search_knowledge` with source locations.
+- A document can be indexed as chunks in Elasticsearch and retrieved through `search_knowledge` with source locations.
+- Chat execution uses the Eino-based ReAct-style Agent or Eino Graph workflow according to the use case.
 - All four tools enforce schema validation, timeouts, and structured errors.
 - If one logs, metrics, or traces backend fails, the answer still presents available evidence and limitations.
-- A Chat root span contains model, context, retrieval, and tool child spans.
+- A Chat root span contains context building, RAG search, tool execution, prompt rendering, model call, and feedback-processing child spans where applicable.
+- Local traces can be inspected in Jaeger.
 - Likes and dislikes persist and can be exported as redacted eval candidates.
 - `agent_eval_cases.json` runs through a CLI and emits a machine-readable report.
 - Critical domain and use-case logic has unit tests; external adapters have contract tests.
+
+## 11. Framework and Technology Choices
+
+WatchOps-Lite uses mature, widely adopted frameworks for infrastructure and orchestration when they provide reliable building blocks. It does not rebuild established components without a project-specific reason. Frameworks remain implementation tools, not the owners of domain policy or package boundaries.
+
+### 11.1 Web Framework: Gin
+
+Gin is the HTTP web framework for WatchOps-Lite. GoFrame will not be used.
+
+Gin is responsible for:
+
+- Routing and route groups
+- HTTP middleware
+- Request binding
+- Validation entry points
+- HTTP response formatting
+
+Gin handlers remain thin. They validate and translate transport data, invoke application use cases, and map results into HTTP responses. Business rules, Agent orchestration, retrieval policy, storage decisions, and tool behavior stay outside handlers.
+
+### 11.2 Agent Framework: Eino
+
+Eino is the main Agent and LLM orchestration framework for WatchOps-Lite. The core runtime uses an Eino-based ReAct-style Agent for iterative tool calling and Eino Graph when a workflow benefits from explicit nodes, branches, state transitions, or reusable execution stages.
+
+Eino is responsible for:
+
+- `ChatModel` integration and model invocation
+- `PromptTemplate` rendering
+- `Graph` construction and graph-style execution
+- ReAct-style Agent execution
+- Framework-level tool calling
+
+The HTTP and Agent layers have separate responsibilities: Gin owns routing, middleware, request binding, validation entry points, and HTTP responses; Eino owns Agent workflow orchestration, prompt rendering, model invocation, tool calling, and graph-style execution.
+
+WatchOps-Lite still owns its orchestration policy, stop conditions, evidence rules, context budget, prompt content, application boundaries, and domain interfaces. Eino types are adapted at the Agent boundary rather than propagated throughout the domain. No Pilot project structure, prompts, comments, source code, or documentation will be copied.
+
+### 11.3 RAG Stack: Elasticsearch
+
+Elasticsearch is the initial knowledge retrieval backend. Documents are normalized and split into independently addressable chunks before indexing. Each chunk retains its document identity, source location, access metadata, content hash, and update time.
+
+The retrieval roadmap is incremental:
+
+1. Start with a simplified chunk-based BM25 search pipeline.
+2. Add embeddings and vector search when the corpus and evaluation cases justify them.
+3. Support hybrid lexical and vector retrieval.
+4. Fuse ranked result sets with RRF where appropriate.
+5. Add reranking behind a replaceable interface.
+
+Elasticsearch-specific clients and query construction stay in the platform adapter. Application and Agent layers depend on WatchOps-Lite retrieval interfaces so ranking strategies can evolve without rewriting Chat orchestration.
+
+### 11.4 Storage
+
+Redis stores short-lived session memory:
+
+- Recent messages in a sliding window
+- Rolling structured session summaries
+- Optional idempotency keys and short-lived coordination locks
+
+MySQL stores durable business data:
+
+- Long-term memory
+- Feedback
+- Document metadata and ingestion status
+- Eval candidates and review state
+- Audit records
+
+Elasticsearch is the knowledge retrieval index, while MySQL is the source of truth for document lifecycle and durable business metadata.
+
+### 11.5 Observability
+
+OpenTelemetry is the tracing standard. Jaeger provides local trace ingestion and visualization. Prometheus metrics are an optional post-MVP enhancement rather than an MVP dependency.
+
+Every important Agent step creates a span, including:
+
+- Context building
+- RAG search and ranking
+- Tool execution
+- Prompt rendering
+- Model calls
+- Feedback processing
+
+Spans record safe operational metadata such as component name, duration, status, result count, prompt version, model name, and truncation state. Raw user content, retrieved sensitive text, credentials, and unbounded tool output must not be stored as span attributes.
+
+### 11.6 Tool System
+
+WatchOps-Lite owns a unified domain-level `Tool` interface and `Tool Registry`. An Eino adapter exposes registered WatchOps-Lite tools through Eino's Tool abstraction, but Eino tool types do not replace the domain contract.
+
+Every tool must provide:
+
+- Input schema validation
+- An execution timeout
+- Structured errors
+- OpenTelemetry spans
+- Output size limits and truncation metadata
+
+The initial tools are:
+
+- `query_logs`
+- `query_metrics`
+- `query_traces`
+- `search_knowledge`
+
+### 11.7 Independence Principle
+
+Use established frameworks for transport, infrastructure, telemetry, and orchestration. In particular, use Gin for the HTTP layer and Eino for the Agent orchestration layer. Do not reinvent mature components unless a documented WatchOps-Lite requirement demands it.
+
+At the same time, WatchOps-Lite keeps its architecture, package structure, prompts, documentation, evaluation policy, and business logic independently designed. It is not a rewrite, fork, or renamed copy of Pilot. It is an original portfolio project that applies related technical ideas to an independently specified Agentic RAG assistant for service reliability analysis.

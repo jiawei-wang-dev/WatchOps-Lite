@@ -1,80 +1,134 @@
 # WatchOps-Lite
 
-WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. It retrieves operational knowledge, queries logs, metrics, and traces, and produces evidence-backed findings.
+WatchOps-Lite is an Agentic RAG assistant for service reliability analysis. Its long-term goal is to combine operational knowledge with logs, metrics, and traces, then produce evidence-backed findings for on-call engineers and SRE teams.
 
-> Current status: design phase. The repository does not yet contain the full business implementation.
+The project is currently at the initial skeleton stage. It contains a runnable Go HTTP server, layered configuration, structured logging, and an OpenTelemetry integration boundary. RAG, Agent orchestration, persistence, and observability tools are intentionally not implemented yet.
 
-## Goals
+## Current Scope
 
-- Provide a unified Chat API for incident analysis.
-- Upload, chunk, index, and retrieve operational knowledge through RAG.
-- Let the Agent invoke `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge` when needed.
-- Store session summaries and recent messages in Redis, and long-term memory and feedback in MySQL.
-- Trace model, retrieval, and tool activity with OpenTelemetry.
-- Turn positive and negative feedback into reusable regression evaluation cases.
+Implemented:
 
-## Four Agent Engineering Disciplines
+- Gin HTTP server with graceful shutdown
+- `GET /healthz`
+- JSON configuration with environment-variable overrides
+- JSON structured logging with request metadata
+- OpenTelemetry setup and shutdown placeholder
+- Unit tests for configuration and health handling
 
-| Discipline | WatchOps-Lite implementation |
-| --- | --- |
-| Prompt Engineering | Versioned output templates, evidence-bound claims, and explicit handling of insufficient information |
-| Context Engineering | Redis session summaries, a sliding message window, layered context, pruning, and token budgets |
-| Harness Engineering | Tool validation, timeouts, bounded retries, fallbacks, and structured errors |
-| Loop Engineering | Positive cases from likes, bad cases from dislikes, human review, and offline eval reuse |
+Not implemented yet:
 
-## MVP Scope
+- Chat or Agent logic
+- RAG ingestion and retrieval
+- Redis or MySQL integration
+- Logs, metrics, traces, or knowledge tools
+- Feedback and evaluation workflows
 
-- Go HTTP server
-- Chat API
-- RAG document upload and search
-- Four reliability-analysis tools
-- Redis short-term session context
-- MySQL long-term memory
-- User feedback loop
-- OpenTelemetry tracing
-- Offline `agent_eval_cases.json`
+## Requirements
 
-The recommended infrastructure is MySQL, Redis, a vector database implementing the `VectorStore` interface, and observability backends compatible with the Loki, Prometheus, and Tempo APIs. Vendor choices stay outside the domain layer.
+- Go 1.23 or newer
+- `make` for the convenience commands
 
-## Design Documents
+No external services are required for the initial skeleton. Gin is the only direct third-party runtime dependency at this stage; its transitive modules are managed through `go.mod` and `go.sum`.
 
-- [Project blueprint](docs/PROJECT_BLUEPRINT.md)
-- [System architecture](docs/ARCHITECTURE.md)
-- [Development roadmap](docs/ROADMAP.md)
+## Run Locally
 
-## Planned Local Development
-
-After the scaffolding phase, the intended developer experience is:
+Start the server with the default configuration:
 
 ```bash
-cp .env.example .env
-docker compose up -d
-go run ./cmd/server
+make run
 ```
 
-The planned default endpoints are:
+Or run it directly:
+
+```bash
+go run ./cmd/server -config configs/config.json
+```
+
+Check the health endpoint:
+
+```bash
+curl -i http://localhost:8080/healthz
+```
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "service": "watchops-lite",
+  "time": "2026-06-30T00:00:00Z"
+}
+```
+
+Stop the server with `Ctrl+C`. It handles `SIGINT` and `SIGTERM` with a bounded graceful shutdown.
+
+## Configuration
+
+Configuration precedence is:
 
 ```text
-GET  http://localhost:8080/healthz
-POST http://localhost:8080/api/v1/chat
+defaults < JSON configuration file < environment variables
 ```
 
-These commands describe the target state and are not runnable during the current design phase.
+The default file is `configs/config.json`. Select another file with `-config` or `WATCHOPS_CONFIG_FILE`.
+
+Common overrides:
+
+```bash
+export WATCHOPS_SERVER_ADDRESS=:9090
+export WATCHOPS_LOG_LEVEL=debug
+export WATCHOPS_TELEMETRY_ENABLED=false
+make run
+```
+
+See [.env.example](.env.example) for the complete initial environment-variable set. The server does not automatically load `.env`; export the variables through your shell or development environment.
+
+OpenTelemetry is currently a lifecycle placeholder. Enabling it records a structured warning but does not export telemetry until the SDK and OTLP exporter are introduced in a later task.
+
+## Developer Commands
+
+```bash
+make run    # start the HTTP server
+make test   # run unit tests
+make lint   # run go vet
+make fmt    # format Go source files
+```
+
+## Initial Layout
+
+```text
+.
+├── cmd/server/                  # Process entry point
+├── configs/                    # Example runtime configuration
+├── docs/                       # Product and architecture documents
+└── internal/
+    ├── bootstrap/              # Application wiring and lifecycle
+    ├── config/                 # Config loading and validation
+    ├── observability/          # Structured logging and OTel boundary
+    └── transport/http/
+        ├── handler/            # Thin Gin handlers
+        └── middleware/         # Gin middleware
+```
+
+The complete planned layout is documented in [Project Blueprint](docs/PROJECT_BLUEPRINT.md). Directories for future features will be created only when their implementation begins.
 
 ## Design Principles
 
 1. Evidence first: distinguish observed facts, inferences, and recommendations.
-2. Clear boundaries: domain logic does not depend on HTTP, databases, or model SDKs.
-3. Safe by default: tools are read-only, inputs are bounded, and sensitive values are redacted.
-4. Replaceable integrations: model, vector store, and observability providers connect through ports.
-5. Evaluation-ready: production feedback becomes stable offline regression material.
+2. Clear boundaries: domain logic does not depend on transports or vendor SDKs.
+3. Safe by default: future tools are read-only and their inputs are bounded.
+4. Replaceable integrations: infrastructure connects through explicit ports.
+5. Evaluation-ready: production feedback will become reviewed regression material.
 
-## Non-goals
+## Design Documents
 
-- Directly executing production changes, deployments, scaling, or deletion.
-- Replacing alerting platforms, incident command processes, or human approval.
-- Copying source code, layouts, prompts, comments, or documentation from training or other projects.
-- Multi-agent collaboration and complex workflow orchestration in the MVP.
+- [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Roadmap](docs/ROADMAP.md)
+
+## Originality
+
+WatchOps-Lite is implemented from its own product requirements. It does not copy source code, project structure, prompts, comments, or documentation from Pilot or any training-camp project.
 
 ## License
 
