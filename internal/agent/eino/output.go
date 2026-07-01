@@ -4,8 +4,20 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
+
+func aggregateAgentEvidence(
+	candidates []evidence.Candidate,
+) ([]common.EvidenceItem, map[string]int) {
+	aggregation := evidence.Aggregate(candidates)
+	result := make([]common.EvidenceItem, 0, len(aggregation.Items))
+	for _, item := range aggregation.Items {
+		result = append(result, common.FromEvidenceItem(item))
+	}
+	return result, aggregation.GroupCounts()
+}
 
 type answerDraft struct {
 	Conclusions     []draftEvidenceStatement `json:"conclusions"`

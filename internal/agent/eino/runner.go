@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -139,6 +140,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 
 	successfulTools := make(map[string][]string, len(calls))
 	mockEvidenceUsed := false
+	evidenceCandidates := make([]evidence.Candidate, 0, len(calls))
 	for _, call := range calls {
 		result, run, toolErr := r.invoke(ctx, call)
 		output.ToolRuns = append(output.ToolRuns, run)
@@ -152,7 +154,12 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 			continue
 		}
 
-		output.Evidence = append(output.Evidence, result.Evidence...)
+		for _, item := range result.Evidence {
+			evidenceCandidates = append(evidenceCandidates, evidence.Candidate{
+				Item:      common.ToEvidenceItem(item),
+				LatencyMS: result.DurationMS,
+			})
+		}
 		if mode, ok := result.Metadata["mode"].(string); ok &&
 			strings.HasPrefix(mode, "mock") {
 			mockEvidenceUsed = true
@@ -165,6 +172,9 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		output.Conclusions = append(output.Conclusions, conclusionFor(call.name, evidenceIDs))
 		output.Recommendations = append(output.Recommendations, recommendationFor(call.name, evidenceIDs))
 	}
+	output.Evidence, output.Metadata["evidence_groups"] = aggregateAgentEvidence(
+		evidenceCandidates,
+	)
 
 	if metricEvidence, metricsOK := successfulTools[metrics.Name]; metricsOK {
 		if logEvidence, logsOK := successfulTools[logs.Name]; logsOK {

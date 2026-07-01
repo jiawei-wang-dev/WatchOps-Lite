@@ -34,6 +34,14 @@ func TestDeterministicRunnerRoutesErrorRateQuestion(t *testing.T) {
 	if len(output.Evidence) != 2 || len(output.Conclusions) != 2 {
 		t.Fatalf("output = %#v, want two evidence-backed conclusions", output)
 	}
+	groups, ok := output.Metadata["evidence_groups"].(map[string]int)
+	if !ok || groups["metrics"] != 1 || groups["logs"] != 1 {
+		t.Fatalf("evidence groups = %#v, want metrics and logs", output.Metadata["evidence_groups"])
+	}
+	if output.Evidence[0].SourceType != "metrics" ||
+		output.Evidence[1].SourceType != "logs" {
+		t.Fatalf("evidence order = %#v, want source-grouped tool order", output.Evidence)
+	}
 	for _, conclusion := range output.Conclusions {
 		if len(conclusion.EvidenceIDs) == 0 {
 			t.Fatalf("conclusion has no evidence IDs: %#v", conclusion)

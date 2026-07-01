@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
@@ -45,31 +46,7 @@ func ExecuteRuntime(
 func FromRuntimeResult(result toolruntime.Result) (ToolResult, error) {
 	evidence := make([]EvidenceItem, 0, len(result.Evidence))
 	for _, item := range result.Evidence {
-		var timeRange *TimeRange
-		if item.TimeRange != nil {
-			timeRange = &TimeRange{
-				From: item.TimeRange.From,
-				To:   item.TimeRange.To,
-			}
-		}
-		metadata := cloneMap(item.Metadata)
-		if item.TraceID != "" {
-			if metadata == nil {
-				metadata = map[string]any{}
-			}
-			metadata["trace_id"] = item.TraceID
-		}
-		evidence = append(evidence, EvidenceItem{
-			ID:         item.ID,
-			SourceType: string(item.Source),
-			SourceName: item.SourceName,
-			TimeRange:  timeRange,
-			Content:    item.Content,
-			ResourceID: item.ResourceID,
-			Score:      item.Score,
-			Confidence: item.Confidence,
-			Metadata:   metadata,
-		})
+		evidence = append(evidence, FromEvidenceItem(item))
 	}
 	warnings := make([]ToolWarning, 0, len(result.Warnings))
 	for _, warning := range result.Warnings {
@@ -94,6 +71,57 @@ func FromRuntimeResult(result toolruntime.Result) (ToolResult, error) {
 	}
 	commonResult.Error = FromRuntimeError(result.Error)
 	return commonResult, commonResult.Error
+}
+
+func FromEvidenceItem(item evidence.Item) EvidenceItem {
+	var timeRange *TimeRange
+	if item.TimeRange != nil {
+		timeRange = &TimeRange{
+			From: item.TimeRange.From,
+			To:   item.TimeRange.To,
+		}
+	}
+	metadata := cloneMap(item.Metadata)
+	if item.TraceID != "" {
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		metadata["trace_id"] = item.TraceID
+	}
+	return EvidenceItem{
+		ID:         item.ID,
+		SourceType: string(item.Source),
+		SourceName: item.SourceName,
+		TimeRange:  timeRange,
+		Content:    item.Content,
+		ResourceID: item.ResourceID,
+		Score:      item.Score,
+		Confidence: item.Confidence,
+		Metadata:   metadata,
+	}
+}
+
+func ToEvidenceItem(item EvidenceItem) evidence.Item {
+	var timeRange *evidence.TimeRange
+	if item.TimeRange != nil {
+		timeRange = &evidence.TimeRange{
+			From: item.TimeRange.From,
+			To:   item.TimeRange.To,
+		}
+	}
+	traceID, _ := item.Metadata["trace_id"].(string)
+	return evidence.Normalize(evidence.Item{
+		ID:         item.ID,
+		Source:     evidence.Source(item.SourceType),
+		SourceName: item.SourceName,
+		Content:    item.Content,
+		Score:      item.Score,
+		TimeRange:  timeRange,
+		TraceID:    traceID,
+		ResourceID: item.ResourceID,
+		Confidence: item.Confidence,
+		Metadata:   cloneMap(item.Metadata),
+	}, evidence.Source(item.SourceType))
 }
 
 func ToRuntimeError(toolName string, err error) error {

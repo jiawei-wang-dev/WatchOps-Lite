@@ -50,6 +50,10 @@ func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResul
 	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
+func (t *SearchTool) Runtime() *toolruntime.Runtime {
+	return t.runtime
+}
+
 func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Result, error) {
 	if toolErr := validate(input); toolErr != nil {
 		return toolruntime.Result{}, toolErr

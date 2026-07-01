@@ -35,6 +35,10 @@ func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult,
 	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
+func (t *MockTool) Runtime() *toolruntime.Runtime {
+	return t.runtime
+}
+
 func mockOperation(ctx context.Context, value any) (toolruntime.Result, error) {
 	input, ok := value.(Input)
 	if !ok {

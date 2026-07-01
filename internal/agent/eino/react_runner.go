@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
@@ -123,7 +124,9 @@ func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, e
 		observability.MarkError(span, "Eino ReAct execution failed")
 		return AgentOutput{}, fmt.Errorf("Eino ReAct execution failed")
 	}
-	evidence, toolRuns, toolLimitations := collectToolResults(future.GetMessages())
+	evidenceItems, evidenceGroups, toolRuns, toolLimitations := collectToolResults(
+		future.GetMessages(),
+	)
 	executedToolNames := make([]string, 0, len(toolRuns))
 	for _, run := range toolRuns {
 		executedToolNames = append(executedToolNames, run.Tool)
@@ -140,17 +143,18 @@ func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, e
 	)
 	output := parseAgentOutput(
 		content,
-		evidence,
+		evidenceItems,
 		toolRuns,
 		toolLimitations,
 		map[string]any{
-			"agent_mode":     "eino_react",
-			"fallback_used":  false,
-			"prompt_version": r.config.PromptVersion,
-			"model":          r.config.ModelName,
-			"max_iterations": r.config.MaxIterations,
-			"tool_count":     len(toolRuns),
-			"tool_names":     executedToolNames,
+			"agent_mode":      "eino_react",
+			"fallback_used":   false,
+			"prompt_version":  r.config.PromptVersion,
+			"model":           r.config.ModelName,
+			"max_iterations":  r.config.MaxIterations,
+			"tool_count":      len(toolRuns),
+			"tool_names":      executedToolNames,
+			"evidence_groups": evidenceGroups,
 			"session_context_loaded": len(input.RecentMessages) > 0 ||
 				input.SessionSummary.Version > 0 ||
 				input.SessionSummary.Content != "",
@@ -174,13 +178,13 @@ func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, e
 
 func collectToolResults(iterator *react.Iterator[*schema.Message]) (
 	[]common.EvidenceItem,
+	map[string]int,
 	[]ToolRun,
 	[]Limitation,
 ) {
-	evidence := []common.EvidenceItem{}
+	candidates := []evidence.Candidate{}
 	toolRuns := []ToolRun{}
 	limitations := []Limitation{}
-	seenEvidence := map[string]struct{}{}
 	for {
 		message, hasNext, err := iterator.Next()
 		if err != nil || !hasNext {
@@ -223,16 +227,14 @@ func collectToolResults(iterator *react.Iterator[*schema.Message]) (
 		}
 		toolRuns = append(toolRuns, run)
 		for _, item := range result.Evidence {
-			if item.ID != "" {
-				if _, exists := seenEvidence[item.ID]; exists {
-					continue
-				}
-				seenEvidence[item.ID] = struct{}{}
-			}
-			evidence = append(evidence, item)
+			candidates = append(candidates, evidence.Candidate{
+				Item:      common.ToEvidenceItem(item),
+				LatencyMS: result.DurationMS,
+			})
 		}
 	}
-	return evidence, toolRuns, limitations
+	evidenceItems, evidenceGroups := aggregateAgentEvidence(candidates)
+	return evidenceItems, evidenceGroups, toolRuns, limitations
 }
 
 type agentTool struct {
