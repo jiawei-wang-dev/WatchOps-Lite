@@ -243,6 +243,28 @@ Exit criteria:
 
 Exit status: complete.
 
+## Upgrade 1.3: Jaeger-backed Traces Tool — Completed
+
+Delivered:
+
+- Configurable `mock` or `jaeger` traces backend
+- Exact trace-ID lookup and bounded service/time/operation search
+- Minimal Jaeger Query API parsing for spans, processes, references, tags, timing, and errors
+- Error-first, duration-descending span evidence ranking
+- Real trace evidence with trace/span metadata
+- Explicit mock fallback, no-data warning, or structured dependency error
+- Reproducible trace-correlation demo script
+- `traces.query` and `jaeger.query` tracing
+
+Exit criteria:
+
+- `query_traces` returns Jaeger evidence when configured and available.
+- Backend failure does not block startup.
+- Fallback behavior is explicit and testable.
+- A demo Chat response can include real metrics, logs, knowledge, and trace evidence.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -257,12 +279,13 @@ flowchart LR
     P8 --> P9["P9 MVP Demo Packaging (complete)"]
     P9 --> U11["Upgrade 1.1 ES Logs (complete)"]
     U11 --> U12["Upgrade 1.2 Prometheus Metrics (complete)"]
+    U12 --> U13["Upgrade 1.3 Jaeger Traces (complete)"]
 ```
 
 ## Deferred Work
 
 - Prometheus instrumentation for WatchOps-Lite application health and tool SLIs
-- Production trace backend
+- Advanced trace critical-path, dependency-graph, and anomaly analytics
 - MySQL long-term memory, audit records, and document lifecycle metadata
 - Eval-case review/export and automatic regression runner
 - Multi-agent orchestration

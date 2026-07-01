@@ -303,6 +303,7 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 			arguments: traces.Input{
 				Service:   service,
 				TimeRange: input.TimeContext,
+				TraceID:   inferTraceID(message),
 			},
 		})
 	}
@@ -318,6 +319,29 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 	}
 
 	return calls
+}
+
+func inferTraceID(message string) string {
+	parts := strings.FieldsFunc(message, func(character rune) bool {
+		return !unicode.IsLetter(character) && !unicode.IsDigit(character)
+	})
+	for _, part := range parts {
+		if len(part) != 32 {
+			continue
+		}
+		valid := true
+		for _, character := range part {
+			if !((character >= '0' && character <= '9') ||
+				(character >= 'a' && character <= 'f')) {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return part
+		}
+	}
+	return ""
 }
 
 func inferService(message string) string {
@@ -394,7 +418,7 @@ func conclusionFor(toolName string, evidenceIDs []string) Conclusion {
 	case logs.Name:
 		text = "Log evidence contains events matching the requested service and time range."
 	case traces.Name:
-		text = "Mock trace evidence identifies a slow database span."
+		text = "Trace evidence identifies the slowest or error-marked spans."
 	case knowledge.Name:
 		text = "Knowledge evidence contains a relevant diagnostic procedure."
 	}

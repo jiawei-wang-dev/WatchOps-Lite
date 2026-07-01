@@ -14,6 +14,7 @@ type Input struct {
 	Service   string           `json:"service" jsonschema:"required,description=Service name"`
 	TimeRange common.TimeRange `json:"time_range" jsonschema:"required,description=Time range to search"`
 	TraceID   string           `json:"trace_id,omitempty" jsonschema:"description=Optional trace identifier"`
+	Operation string           `json:"operation,omitempty" jsonschema:"description=Optional operation name filter"`
 }
 
 type MockTool struct {
@@ -37,36 +38,43 @@ func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult,
 			return common.ToolResult{}, toolErr
 		}
 
-		traceID := strings.TrimSpace(input.TraceID)
-		if traceID == "" {
-			traceID = "mock-trace-001"
-		}
-		confidence := 0.9
+		return mockResult(input), nil
+	})
+}
 
-		return common.ToolResult{
-			Evidence: []common.EvidenceItem{
-				{
-					ID:         "trace-evidence-001",
-					SourceType: "traces",
-					SourceName: "mock-traces",
-					TimeRange:  &input.TimeRange,
-					Content:    "Mock trace shows span db.checkout taking 1.4s, accounting for most request latency.",
-					ResourceID: traceID,
-					Confidence: &confidence,
-					Metadata: map[string]any{
-						"service":   strings.TrimSpace(input.Service),
-						"span_name": "db.checkout",
-					},
+func mockResult(input Input) common.ToolResult {
+	traceID := strings.TrimSpace(input.TraceID)
+	if traceID == "" {
+		traceID = "mock-trace-001"
+	}
+	confidence := 0.9
+	return common.ToolResult{
+		Evidence: []common.EvidenceItem{
+			{
+				ID:         "trace-evidence-001",
+				SourceType: "traces",
+				SourceName: "mock-traces",
+				TimeRange:  &input.TimeRange,
+				Content:    "Mock trace shows span db.checkout taking 1.4s, accounting for most request latency.",
+				ResourceID: traceID,
+				Confidence: &confidence,
+				Metadata: map[string]any{
+					"service":   strings.TrimSpace(input.Service),
+					"span_name": "db.checkout",
 				},
 			},
-			Payload: map[string]any{
-				"trace_id":       traceID,
-				"slow_span_ms":   1400,
-				"total_trace_ms": 1650,
-			},
-			Metadata: map[string]any{"mode": "mock"},
-		}, nil
-	})
+		},
+		Payload: map[string]any{
+			"trace_id":       traceID,
+			"slow_span_ms":   1400,
+			"total_trace_ms": 1650,
+		},
+		Metadata: map[string]any{
+			"mode":          "mock",
+			"backend":       "mock",
+			"fallback_used": false,
+		},
+	}
 }
 
 func validate(input Input) *common.ToolError {

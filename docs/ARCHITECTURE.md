@@ -21,6 +21,7 @@ flowchart LR
     RAG --> ES[("Elasticsearch")]
     LOGS --> ES
     METRICS --> PROM[("Prometheus")]
+    TRACES --> JAEGER
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
     API -. spans .-> OTEL["OpenTelemetry"]
@@ -206,6 +207,16 @@ If the index or Elasticsearch is unavailable, configured mock fallback returns e
 
 If Prometheus is unavailable, configured mock fallback returns explicit `METRICS_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. Prometheus availability is checked at query time and never blocks application startup.
 
+### 7.5 Jaeger Traces
+
+`query_traces` accepts a service, time range, optional trace ID, and optional operation. When `traces.backend=jaeger`, exact trace IDs use `GET /api/traces/{traceID}`; otherwise the adapter constructs a bounded `GET /api/traces` request with service, start/end microseconds, operation, and limit.
+
+`internal/retrieval/traces` parses the minimal Jaeger response required by WatchOps-Lite: trace/span IDs, parent reference, operation, process service, start time, duration, tags, and error status. It ranks error-marked spans first and then duration descending. Exact trace-ID lookup does not discard spans merely because the tool's service hint differs from the process service.
+
+The tool maps each selected span to an `EvidenceItem` with source `jaeger`, trace resource identity, bounded summary content, and trace ID, span ID, operation, service, duration, error, and start-time metadata. Raw Jaeger responses and span tags are not copied into evidence or telemetry.
+
+If Jaeger is unavailable, configured mock fallback returns explicit `TRACES_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. An available Jaeger instance with no matching spans returns `TRACES_NO_DATA`, not invented evidence.
+
 ## 8. Persistence
 
 The MVP creates two MySQL tables:
@@ -235,6 +246,8 @@ http POST /api/v1/chat
     │   │   └── logs.search
     │   │       └── elasticsearch.logs.search
     │   ├── tool.query_traces
+    │   │   └── traces.query
+    │   │       └── jaeger.query
     │   └── tool.search_knowledge
     │       └── knowledge.search
     │           └── elasticsearch.search
@@ -267,7 +280,7 @@ Potential post-MVP metrics:
 | Elasticsearch | Knowledge APIs return a structured dependency error; logs and knowledge tools use their configured mock fallback |
 | Logs | Return real Elasticsearch evidence, explicit mock fallback, or structured unavailability according to configuration |
 | Prometheus | Metrics tool uses explicit mock fallback or structured unavailability according to configuration |
-| Traces | A single-tool failure does not stop the Agent; expose the limitation |
+| Jaeger | Trace tool uses explicit mock fallback or structured unavailability according to configuration |
 | Model | Use the deterministic runner at startup or for the failed request |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
 
@@ -275,9 +288,9 @@ Potential post-MVP metrics:
 
 - Unit tests: domain rules, context pruning, evidence validation, fallback selection, and stop conditions.
 - Golden tests: prompt rendering and structured response templates.
-- Contract tests: four tool adapters and their external API fixtures.
-- Local demo: Compose-backed upload → logs/metrics evidence → Chat → feedback → eval seed.
-- Future integration tests: disposable Elasticsearch, Prometheus, MySQL, and Redis lifecycles.
+- Contract tests: four tool adapters and their external API fixtures, including Prometheus and Jaeger response parsing.
+- Local demo: Compose-backed upload → logs/metrics/traces evidence → Chat → feedback → eval seed.
+- Future integration tests: disposable Elasticsearch, Prometheus, Jaeger, MySQL, and Redis lifecycles.
 - Future eval runner: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
 
 CI uses redacted fixtures or containers and never depends on real production endpoints.

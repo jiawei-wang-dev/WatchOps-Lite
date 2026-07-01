@@ -1,6 +1,6 @@
 # WatchOps-Lite Demo Verification
 
-> Verification date: `[YYYY-MM-DD]`
+> Verification date: `2026-07-01`
 >
 > Final full local run: 2026-07-01 (Australia/Melbourne)
 
@@ -8,7 +8,7 @@
 
 Status: **Fully verified locally.**
 
-The complete demo passed with Redis, Elasticsearch, Prometheus, the Go demo metrics exporter, MySQL, Jaeger, and the Go application running together. Knowledge ingestion and BM25 search, real log and metric retrieval, deterministic Agent tool execution, evidence attribution, Redis session memory, MySQL feedback/eval persistence, OpenTelemetry export, Jaeger trace visualization, and the repository quality gate were all verified.
+The complete demo passed with Redis, Elasticsearch, Prometheus, the Go demo metrics exporter, MySQL, Jaeger, and the Go application running together. Knowledge ingestion and BM25 search, real log, metric, and trace retrieval, deterministic Agent tool execution, evidence attribution, Redis session memory, MySQL feedback/eval persistence, OpenTelemetry export, Jaeger trace visualization, and the repository quality gate were all verified.
 
 An earlier attempt was blocked by Docker Hub TLS handshake timeouts. After the Docker proxy/network configuration was corrected, `docker compose up -d --wait` completed successfully and the full flow below passed.
 
@@ -57,10 +57,10 @@ curl -i http://localhost:8080/healthz
 Observed: passed.
 
 - HTTP status: `200 OK`
-- `X-Request-Id`: `req-1782845856079-1`
-- `X-Trace-Id`: `b933e4acd3ffba8c6424098c60db5d94`
+- `X-Request-Id`: `req-1782886045099-16`
+- `X-Trace-Id`: `2cf23231f25fe0df954875b77c55d86d`
 - service status: `ok`
-- response time: `2026-06-30T18:57:36.080192Z`
+- response time: `2026-07-01T06:07:25.099136Z`
 
 ## Final Full Local Run
 
@@ -73,7 +73,7 @@ Observed: passed.
 Observed: passed.
 
 ```text
-document_id: doc_3238de720ea4732ed7219b66
+document_id: doc_59235efa1dd832f3c1d21f36
 chunk_count: 2
 ```
 
@@ -157,6 +157,42 @@ Tool runs:
 - `doc_3238de720ea4732ed7219b66_chunk_0001`
 
 The response did not present the payment dependency as a confirmed root cause. It correlated the metric and log evidence while describing upstream timeouts only as a plausible contributor.
+
+### Four-source Trace Demo
+
+```bash
+./scripts/demo_traces.sh
+```
+
+Observed: passed.
+
+```json
+{
+  "queried_trace_id": "956f1003e3cd8e768148b3c8875ab59a",
+  "chat_trace_id": "34c0a148e6f876887e8ceacdf1b7594d",
+  "source_names": [
+    "elasticsearch-logs",
+    "jaeger",
+    "prometheus",
+    "watchops-lite-demo"
+  ],
+  "jaeger_evidence_count": 10,
+  "status": "verified"
+}
+```
+
+The second Chat response invoked all four tools successfully:
+
+| Tool | Success | Evidence count | Warnings |
+| --- | --- | --- | --- |
+| `query_metrics` | true | 1 | 0 |
+| `query_logs` | true | 2 | 0 |
+| `query_traces` | true | 10 | 0 |
+| `search_knowledge` | true | 3 | 0 |
+
+Jaeger evidence described observed operations and durations, including the `HTTP POST /api/v1/chat`, `chat.execute`, and `agent.run` spans. The response made no unsupported root-cause claim and returned no limitation because every selected backend succeeded.
+
+Fallback coverage also passed in the unit suite: Jaeger unavailability returns `mock-traces` with `TRACES_FALLBACK` when enabled, returns `TOOL_DEPENDENCY_UNAVAILABLE` when disabled, and does not block application construction.
 
 ### Feedback Demo
 
@@ -307,8 +343,9 @@ http://localhost:16686
 Observed: passed.
 
 - service: `watchops-lite`
-- trace ID: `9df0c1f254cffbe547fc944e821871d0`
-- total spans: `14`
+- trace ID: `34c0a148e6f876887e8ceacdf1b7594d`
+- queried evidence trace ID: `956f1003e3cd8e768148b3c8875ab59a`
+- total spans: `17`
 - service count: `1`
 - depth: `6`
 
@@ -324,6 +361,9 @@ The trace tree contained:
 - `tool.query_logs`
 - `logs.search`
 - `elasticsearch.logs.search`
+- `tool.query_traces`
+- `traces.query`
+- `jaeger.query`
 - `tool.search_knowledge`
 - `knowledge.search`
 - `elasticsearch.search`
@@ -352,6 +392,7 @@ Observed: passed.
 - [x] knowledge ingestion showing `document_id` and `chunk_count`
 - [x] logs ingestion showing six indexed events and Chat evidence from `elasticsearch-logs`
 - [x] Prometheus showing a scraped checkout metric and Chat evidence from `prometheus`
+- [x] four-source Chat response showing Jaeger trace evidence with real metrics, logs, and knowledge
 - [x] Chat response showing `trace_id`, evidence, limitations, and `tool_runs`
 - [x] knowledge search showing checkout runbook chunks and scores
 - [x] feedback creation showing `feedback_id`
@@ -381,6 +422,7 @@ In another terminal:
 ./scripts/demo_seed_logs.sh
 ./scripts/demo_metrics.sh
 ./scripts/demo_chat.sh
+./scripts/demo_traces.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
 
@@ -399,4 +441,4 @@ docker compose down
 
 ## Final Conclusion
 
-**WatchOps-Lite MVP is fully verified locally and ready for GitHub publication.**
+**WatchOps-Lite MVP and observability upgrades 1.1–1.3 are fully verified locally and ready for GitHub publication.**

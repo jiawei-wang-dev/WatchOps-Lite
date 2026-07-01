@@ -30,11 +30,12 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── retrieval/knowledge/    # Chunking, retrieval service, and ES-backed store
     ├── retrieval/logs/         # Bounded log search and Elasticsearch store
     ├── retrieval/metrics/      # Allowlisted queries and Prometheus HTTP client
+    ├── retrieval/traces/       # Bounded trace search and Jaeger Query API client
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
     │   ├── logs/               # Elasticsearch query_logs with mock fallback
     │   ├── metrics/            # Prometheus query_metrics with mock fallback
-    │   ├── traces/             # Deterministic query_traces mock
+    │   ├── traces/             # Jaeger query_traces with mock fallback
     │   └── knowledge/          # Elasticsearch search tool with mock fallback
     └── transport/http/
         ├── handler/            # Thin Gin handlers
@@ -58,6 +59,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, retrieval policy, and Elasticsearch query construction.
 - `internal/retrieval/logs` owns log-event models, bounded search policy, and Elasticsearch query construction.
 - `internal/retrieval/metrics` owns metric samples, allowlisted query selection, and Prometheus response parsing.
+- `internal/retrieval/traces` owns trace/span models, bounded ranking, and Jaeger response parsing.
 - `internal/feedback` owns feedback validation and persistence contracts.
 - `internal/eval` owns manual good-case/bad-case seeding and feedback-rating compatibility.
 - `internal/platform/mysql` owns MySQL driver, connection-pool settings, and schema initialization.

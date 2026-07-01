@@ -20,6 +20,7 @@ import (
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
+	retrievaltraces "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/traces"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 	"github.com/redis/go-redis/v9"
 )
@@ -115,6 +116,27 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		}
 	}
 
+	var tracesSearcher *retrievaltraces.Service
+	if strings.EqualFold(cfg.Traces.Backend, "jaeger") {
+		tracesStore, err := retrievaltraces.NewJaegerClient(
+			cfg.Traces.BaseURL,
+			cfg.Traces.RequestTimeout.Value(),
+		)
+		if err != nil {
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		tracesSearcher, err = retrievaltraces.NewService(tracesStore)
+		if err != nil {
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+	}
+
 	toolConfig := agenteino.MockToolsConfig{
 		LogsBackend:           cfg.Logs.Backend,
 		LogsIndex:             cfg.Logs.Index,
@@ -126,6 +148,13 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		MetricsFallbackToMock: cfg.Metrics.FallbackToMock,
 		MetricsTimeout:        cfg.Metrics.RequestTimeout.Value(),
 		MetricsSearcher:       metricsSearcher,
+		TracesBackend:         cfg.Traces.Backend,
+		TracesBaseURL:         cfg.Traces.BaseURL,
+		TracesDefaultService:  cfg.Traces.DefaultService,
+		TracesDefaultLimit:    cfg.Traces.DefaultLimit,
+		TracesFallbackToMock:  cfg.Traces.FallbackToMock,
+		TracesTimeout:         cfg.Traces.RequestTimeout.Value(),
+		TracesSearcher:        tracesSearcher,
 	}
 	if strings.EqualFold(cfg.Logs.Backend, "elasticsearch") {
 		toolConfig.LogsTimeout = cfg.Elasticsearch.RequestTimeout.Value()

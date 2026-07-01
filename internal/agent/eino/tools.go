@@ -25,7 +25,13 @@ type MockToolsConfig struct {
 	MetricsFallbackToMock bool
 	MetricsTimeout        time.Duration
 	MetricsSearcher       metrics.Searcher
+	TracesBackend         string
+	TracesBaseURL         string
+	TracesDefaultService  string
+	TracesDefaultLimit    int
+	TracesFallbackToMock  bool
 	TracesTimeout         time.Duration
+	TracesSearcher        traces.Searcher
 	KnowledgeTimeout      time.Duration
 	KnowledgeSearcher     knowledge.Searcher
 }
@@ -72,10 +78,21 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		return nil, fmt.Errorf("build %s tool: %w", metrics.Name, err)
 	}
 
+	tracesExecutor := traces.NewMockTool(config.TracesTimeout).Execute
+	if strings.EqualFold(config.TracesBackend, "jaeger") {
+		tracesExecutor = traces.NewSearchTool(config.TracesSearcher, traces.SearchToolConfig{
+			Backend:        config.TracesBackend,
+			BaseURL:        config.TracesBaseURL,
+			DefaultService: config.TracesDefaultService,
+			DefaultLimit:   config.TracesDefaultLimit,
+			FallbackToMock: config.TracesFallbackToMock,
+			Timeout:        config.TracesTimeout,
+		}).Execute
+	}
 	tracesTool, err := toolutils.InferTool(
 		traces.Name,
 		"Query distributed traces for slow spans and request-path evidence.",
-		traces.NewMockTool(config.TracesTimeout).Execute,
+		tracesExecutor,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build %s tool: %w", traces.Name, err)

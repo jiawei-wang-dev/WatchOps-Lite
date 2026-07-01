@@ -126,3 +126,21 @@ func TestNewContinuesWhenPrometheusMetricsAreUnavailable(t *testing.T) {
 		t.Fatalf("close Redis client: %v", err)
 	}
 }
+
+func TestNewContinuesWhenJaegerTracesAreUnavailable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Traces.Backend = "jaeger"
+	cfg.Traces.BaseURL = "http://127.0.0.1:1"
+	cfg.Traces.RequestTimeout = config.Duration(20 * time.Millisecond)
+	cfg.Traces.FallbackToMock = true
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	app, err := New(cfg, logger)
+	if err != nil {
+		t.Fatalf("New() error = %v, want resilient trace startup", err)
+	}
+
+	if err := app.redisClient.Close(); err != nil {
+		t.Fatalf("close Redis client: %v", err)
+	}
+}

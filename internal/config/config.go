@@ -47,6 +47,7 @@ type Config struct {
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
 	Logs          LogsConfig          `json:"logs"`
 	Metrics       MetricsConfig       `json:"metrics"`
+	Traces        TracesConfig        `json:"traces"`
 	MySQL         MySQLConfig         `json:"mysql"`
 	Agent         AgentConfig         `json:"agent"`
 	LLM           LLMConfig           `json:"llm"`
@@ -109,6 +110,15 @@ type MetricsConfig struct {
 	DefaultStep    Duration          `json:"default_step"`
 	RequestTimeout Duration          `json:"request_timeout"`
 	Queries        map[string]string `json:"queries"`
+}
+
+type TracesConfig struct {
+	Backend        string   `json:"backend"`
+	BaseURL        string   `json:"base_url"`
+	FallbackToMock bool     `json:"fallback_to_mock"`
+	DefaultLimit   int      `json:"default_limit"`
+	RequestTimeout Duration `json:"request_timeout"`
+	DefaultService string   `json:"default_service"`
 }
 
 type MySQLConfig struct {
@@ -200,6 +210,14 @@ func Default() Config {
 				"payment_dependency_latency": "watchops_payment_dependency_latency_seconds",
 			},
 		},
+		Traces: TracesConfig{
+			Backend:        "mock",
+			BaseURL:        "http://localhost:16686",
+			FallbackToMock: true,
+			DefaultLimit:   10,
+			RequestTimeout: Duration(3 * time.Second),
+			DefaultService: "watchops-lite",
+		},
 		MySQL: MySQLConfig{
 			Enabled:         false,
 			DSN:             "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",
@@ -287,6 +305,9 @@ func applyEnvironment(cfg *Config) error {
 	setString("LOGS_INDEX", &cfg.Logs.Index)
 	setString("METRICS_BACKEND", &cfg.Metrics.Backend)
 	setString("METRICS_BASE_URL", &cfg.Metrics.BaseURL)
+	setString("TRACES_BACKEND", &cfg.Traces.Backend)
+	setString("TRACES_BASE_URL", &cfg.Traces.BaseURL)
+	setString("TRACES_DEFAULT_SERVICE", &cfg.Traces.DefaultService)
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("AGENT_MODE", &cfg.Agent.Mode)
 	setString("AGENT_PROMPT_VERSION", &cfg.Agent.PromptVersion)
@@ -314,6 +335,7 @@ func applyEnvironment(cfg *Config) error {
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
 		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
+		{"TRACES_REQUEST_TIMEOUT", &cfg.Traces.RequestTimeout},
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
@@ -335,6 +357,7 @@ func applyEnvironment(cfg *Config) error {
 		{"SESSION_SUMMARY_THRESHOLD", &cfg.Session.SummaryThreshold},
 		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
 		{"LOGS_DEFAULT_LIMIT", &cfg.Logs.DefaultLimit},
+		{"TRACES_DEFAULT_LIMIT", &cfg.Traces.DefaultLimit},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
 		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
 		{"AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations},
@@ -368,6 +391,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sMETRICS_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Metrics.FallbackToMock = parsed
+	}
+	if value, ok := lookup("TRACES_FALLBACK_TO_MOCK"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sTRACES_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Traces.FallbackToMock = parsed
 	}
 	metricQueryEnvironment := map[string]string{
 		"METRICS_QUERY_CHECKOUT_ERROR_RATE":        "checkout_error_rate",
@@ -573,6 +603,23 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(query) == "" {
 			return errors.New("metrics.queries must not contain empty names or expressions")
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Traces.Backend)) {
+	case "mock", "jaeger":
+	default:
+		return errors.New("traces.backend must be mock or jaeger")
+	}
+	if strings.TrimSpace(cfg.Traces.BaseURL) == "" {
+		return errors.New("traces.base_url is required")
+	}
+	if cfg.Traces.DefaultLimit < 1 || cfg.Traces.DefaultLimit > 100 {
+		return errors.New("traces.default_limit must be between 1 and 100")
+	}
+	if cfg.Traces.RequestTimeout <= 0 {
+		return errors.New("traces.request_timeout must be greater than zero")
+	}
+	if strings.TrimSpace(cfg.Traces.DefaultService) == "" {
+		return errors.New("traces.default_service is required")
 	}
 	if cfg.Elasticsearch.Enabled {
 		if len(cfg.Elasticsearch.Addresses) == 0 {

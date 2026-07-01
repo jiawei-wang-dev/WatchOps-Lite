@@ -66,6 +66,9 @@ func TestLocalDemoExampleIsValid(t *testing.T) {
 	if cfg.Metrics.Backend != "prometheus" || !cfg.Metrics.FallbackToMock {
 		t.Fatalf("local demo metrics config = %#v, want Prometheus with mock fallback", cfg.Metrics)
 	}
+	if cfg.Traces.Backend != "jaeger" || !cfg.Traces.FallbackToMock {
+		t.Fatalf("local demo traces config = %#v, want Jaeger with mock fallback", cfg.Traces)
+	}
 }
 
 func TestDefaultLogsConfigurationUsesMock(t *testing.T) {
@@ -137,6 +140,45 @@ func TestLoadAppliesMetricsEnvironment(t *testing.T) {
 		cfg.Metrics.RequestTimeout.Value() != 750*time.Millisecond ||
 		cfg.Metrics.Queries["checkout_error_rate"] != "custom_checkout_error_rate" {
 		t.Fatalf("Metrics config = %#v", cfg.Metrics)
+	}
+}
+
+func TestDefaultTracesConfigurationUsesMock(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Traces.Backend != "mock" ||
+		cfg.Traces.BaseURL != "http://localhost:16686" ||
+		!cfg.Traces.FallbackToMock ||
+		cfg.Traces.DefaultLimit != 10 ||
+		cfg.Traces.RequestTimeout.Value() != 3*time.Second ||
+		cfg.Traces.DefaultService != "watchops-lite" {
+		t.Fatalf("Traces config = %#v", cfg.Traces)
+	}
+}
+
+func TestLoadAppliesTracesEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCHOPS_TRACES_BACKEND", "jaeger")
+	t.Setenv("WATCHOPS_TRACES_BASE_URL", "http://jaeger:16686")
+	t.Setenv("WATCHOPS_TRACES_FALLBACK_TO_MOCK", "false")
+	t.Setenv("WATCHOPS_TRACES_DEFAULT_LIMIT", "25")
+	t.Setenv("WATCHOPS_TRACES_REQUEST_TIMEOUT", "750ms")
+	t.Setenv("WATCHOPS_TRACES_DEFAULT_SERVICE", "watchops-api")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Traces.Backend != "jaeger" ||
+		cfg.Traces.BaseURL != "http://jaeger:16686" ||
+		cfg.Traces.FallbackToMock ||
+		cfg.Traces.DefaultLimit != 25 ||
+		cfg.Traces.RequestTimeout.Value() != 750*time.Millisecond ||
+		cfg.Traces.DefaultService != "watchops-api" {
+		t.Fatalf("Traces config = %#v", cfg.Traces)
 	}
 }
 

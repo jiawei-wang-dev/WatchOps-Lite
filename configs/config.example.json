@@ -54,6 +54,14 @@
       "payment_dependency_latency": "watchops_payment_dependency_latency_seconds"
     }
   },
+  "traces": {
+    "backend": "jaeger",
+    "base_url": "http://localhost:16686",
+    "fallback_to_mock": true,
+    "default_limit": 10,
+    "request_timeout": "3s",
+    "default_service": "watchops-lite"
+  },
   "mysql": {
     "enabled": true,
     "dsn": "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",

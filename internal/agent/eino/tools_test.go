@@ -9,6 +9,7 @@ import (
 
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
+	retrievaltraces "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/traces"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -40,6 +41,22 @@ func (metricsSearcherStub) Query(
 		Service:   request.Service,
 		Labels:    map[string]string{"environment": "demo"},
 		Query:     "watchops_checkout_error_rate",
+	}}, nil
+}
+
+type tracesSearcherStub struct{}
+
+func (tracesSearcherStub) Search(
+	_ context.Context,
+	query retrievaltraces.Query,
+) ([]retrievaltraces.Span, error) {
+	return []retrievaltraces.Span{{
+		TraceID:    "trace-001",
+		SpanID:     "span-001",
+		Service:    query.Service,
+		Operation:  "agent.run",
+		StartTime:  query.To,
+		DurationMS: 125,
 	}}, nil
 }
 
@@ -243,4 +260,48 @@ func TestEinoToolInvocationUsesConfiguredPrometheusMetrics(t *testing.T) {
 		return
 	}
 	t.Fatal("query_metrics tool not found")
+}
+
+func TestEinoToolInvocationUsesConfiguredJaegerTraces(t *testing.T) {
+	tools, err := BuildMockToolsWithConfig(MockToolsConfig{
+		TracesBackend:        "jaeger",
+		TracesBaseURL:        "http://localhost:16686",
+		TracesDefaultService: "watchops-lite",
+		TracesDefaultLimit:   10,
+		TracesFallbackToMock: true,
+		TracesSearcher:       tracesSearcherStub{},
+	})
+	if err != nil {
+		t.Fatalf("BuildMockToolsWithConfig() error = %v", err)
+	}
+
+	for _, assembledTool := range tools {
+		info, infoErr := assembledTool.Info(context.Background())
+		if infoErr != nil {
+			t.Fatalf("tool Info() error = %v", infoErr)
+		}
+		if info.Name != "query_traces" {
+			continue
+		}
+		output, invokeErr := assembledTool.InvokableRun(context.Background(), `{
+			"service":"watchops-lite",
+			"trace_id":"trace-001",
+			"time_range":{
+				"from":"2026-07-01T05:00:00Z",
+				"to":"2026-07-01T05:20:00Z"
+			}
+		}`)
+		if invokeErr != nil {
+			t.Fatalf("InvokableRun() error = %v", invokeErr)
+		}
+		var result common.ToolResult
+		if err := json.Unmarshal([]byte(output), &result); err != nil {
+			t.Fatalf("decode tool output: %v", err)
+		}
+		if len(result.Evidence) != 1 || result.Evidence[0].SourceName != "jaeger" {
+			t.Fatalf("result = %#v", result)
+		}
+		return
+	}
+	t.Fatal("query_traces tool not found")
 }

@@ -96,3 +96,12 @@ func TestDeterministicRunnerReportsLoadedSessionContext(t *testing.T) {
 		t.Fatalf("metadata = %#v, want loaded session context details", output.Metadata)
 	}
 }
+
+func TestInferTraceID(t *testing.T) {
+	const traceID = "9df0c1f254cffbe547fc944e821871d0"
+	message := "Check trace " + traceID + " and explain the slow spans."
+
+	if actual := inferTraceID(message); actual != traceID {
+		t.Fatalf("inferTraceID() = %q, want %q", actual, traceID)
+	}
+}
