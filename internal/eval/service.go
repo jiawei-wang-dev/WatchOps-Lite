@@ -24,18 +24,31 @@ type FeedbackReader interface {
 
 type Service struct {
 	store          Store
+	runStore       RunStore
 	feedbackReader FeedbackReader
+	caseExecutor   CaseExecutor
 	now            func() time.Time
 	newID          func() (string, error)
 }
 
 func NewService(store Store, feedbackReader FeedbackReader) (*Service, error) {
+	return NewServiceWithRunner(store, feedbackReader, nil)
+}
+
+func NewServiceWithRunner(
+	store Store,
+	feedbackReader FeedbackReader,
+	caseExecutor CaseExecutor,
+) (*Service, error) {
 	if store == nil || feedbackReader == nil {
 		return nil, fmt.Errorf("%w: store and feedback reader are required", ErrInvalidArgument)
 	}
+	runStore, _ := store.(RunStore)
 	return &Service{
 		store:          store,
+		runStore:       runStore,
 		feedbackReader: feedbackReader,
+		caseExecutor:   caseExecutor,
 		now:            func() time.Time { return time.Now().UTC() },
 		newID:          generateCaseID,
 	}, nil

@@ -305,6 +305,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement Stage 3: Rule-based Eval Runner — Completed
+
+Delivered:
+
+- Synchronous bounded execution of stored eval cases through ChatService
+- Deterministic evidence, tool-run, limitation, structure, tool-error, and forbidden-pattern checks
+- Durable `eval_runs` and `eval_case_results`
+- Run creation, summary, and result HTTP endpoints
+- Reproducible `demo_eval_run.sh`
+- `eval.run`, `eval.case.execute`, and `eval.case.check` spans
+
+Exit criteria:
+
+- Existing feedback and eval-case APIs remain compatible.
+- Run reports persist pass/fail counts and per-case reasons.
+- No LLM judge or prompt A/B interpretation is introduced.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -322,6 +341,7 @@ flowchart LR
     U12 --> U13["Upgrade 1.3 Jaeger Traces (complete)"]
     U13 --> S1["Stage 1 LLM Summary (complete)"]
     S1 --> S2["Stage 2 Hybrid Retrieval (complete)"]
+    S2 --> S3["Stage 3 Eval Runner (complete)"]
 ```
 
 ## Deferred Work
@@ -329,7 +349,7 @@ flowchart LR
 - Prometheus instrumentation for WatchOps-Lite application health and tool SLIs
 - Advanced trace critical-path, dependency-graph, and anomaly analytics
 - MySQL long-term memory, audit records, and document lifecycle metadata
-- Eval-case review/export and automatic regression runner
+- Eval-case review/export, release comparison, and optional future LLM judge
 - Multi-agent orchestration
 - Automated production changes
 - Model fine-tuning

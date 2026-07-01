@@ -17,12 +17,96 @@ type EvalExecutor interface {
 	List(context.Context, eval.ListQuery) ([]eval.Case, error)
 }
 
+type EvalRunExecutor interface {
+	Run(context.Context, eval.RunRequest) (eval.Run, error)
+	GetRun(context.Context, string) (eval.Run, error)
+	ListRunResults(context.Context, string) ([]eval.CaseResult, error)
+}
+
 type Eval struct {
-	executor EvalExecutor
+	executor    EvalExecutor
+	runExecutor EvalRunExecutor
 }
 
 func NewEval(executor EvalExecutor) *Eval {
-	return &Eval{executor: executor}
+	runExecutor, _ := executor.(EvalRunExecutor)
+	return &Eval{executor: executor, runExecutor: runExecutor}
+}
+
+func (h *Eval) CreateRun(c *gin.Context) {
+	if h.runExecutor == nil {
+		writeEvalError(c, eval.ErrUnavailable)
+		return
+	}
+	var request dto.CreateEvalRunRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "request body is invalid", c.GetString("request_id"))
+		return
+	}
+	run, err := h.runExecutor.Run(c.Request.Context(), eval.RunRequest{
+		CaseType: eval.CaseType(request.CaseType),
+		Limit:    request.Limit,
+	})
+	if err != nil {
+		writeEvalError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, mapEvalRun(run))
+}
+
+func (h *Eval) GetRun(c *gin.Context) {
+	if h.runExecutor == nil {
+		writeEvalError(c, eval.ErrUnavailable)
+		return
+	}
+	run, err := h.runExecutor.GetRun(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeEvalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, mapEvalRun(run))
+}
+
+func (h *Eval) ListRunResults(c *gin.Context) {
+	if h.runExecutor == nil {
+		writeEvalError(c, eval.ErrUnavailable)
+		return
+	}
+	results, err := h.runExecutor.ListRunResults(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeEvalError(c, err)
+		return
+	}
+	response := dto.ListEvalCaseResultsResponse{
+		Results: make([]dto.EvalCaseResultResponse, 0, len(results)),
+	}
+	for _, result := range results {
+		response.Results = append(response.Results, dto.EvalCaseResultResponse{
+			ResultID:       result.ID,
+			RunID:          result.RunID,
+			CaseID:         result.CaseID,
+			Passed:         result.Passed,
+			FailureReasons: result.FailureReasons,
+			RequestID:      result.RequestID,
+			TraceID:        result.TraceID,
+			DurationMS:     result.DurationMS,
+			CreatedAt:      result.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func mapEvalRun(run eval.Run) dto.EvalRunResponse {
+	return dto.EvalRunResponse{
+		RunID:       run.ID,
+		CaseType:    string(run.CaseType),
+		Status:      string(run.Status),
+		Total:       run.Total,
+		Passed:      run.Passed,
+		Failed:      run.Failed,
+		CreatedAt:   run.CreatedAt,
+		CompletedAt: run.CompletedAt,
+	}
 }
 
 func (h *Eval) Create(c *gin.Context) {
@@ -92,6 +176,8 @@ func writeEvalError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "INVALID_ARGUMENT", err.Error(), requestID)
 	case errors.Is(err, feedback.ErrNotFound):
 		writeError(c, http.StatusNotFound, "NOT_FOUND", "feedback was not found", requestID)
+	case errors.Is(err, eval.ErrNotFound):
+		writeError(c, http.StatusNotFound, "NOT_FOUND", "eval record was not found", requestID)
 	case errors.Is(err, eval.ErrUnavailable), errors.Is(err, feedback.ErrUnavailable):
 		writeError(c, http.StatusServiceUnavailable, "DEPENDENCY_UNAVAILABLE", "eval storage is unavailable", requestID)
 	default:

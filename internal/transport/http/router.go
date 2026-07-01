@@ -43,6 +43,9 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	evalHandler := handler.NewEval(dependencies.Eval)
 	api.POST("/eval/cases", evalHandler.Create)
 	api.GET("/eval/cases", evalHandler.List)
+	api.POST("/eval/runs", evalHandler.CreateRun)
+	api.GET("/eval/runs/:id", evalHandler.GetRun)
+	api.GET("/eval/runs/:id/results", evalHandler.ListRunResults)
 
 	return router
 }

@@ -238,6 +238,14 @@ The MVP creates two MySQL tables:
 
 Long-term memory, durable document metadata, review state, and audit records remain planned rather than implied by the current schema.
 
+### 8.1 Rule-based Eval Runs
+
+`POST /api/v1/eval/runs` synchronously loads a bounded set of stored cases, executes each through the existing ChatService boundary, and applies deterministic checks. Rules cover required evidence, tool runs, limitations, conclusions, recommendations, forbidden patterns, and unexpected tool errors for good cases.
+
+Run summaries are stored in `eval_runs`; per-case pass/fail reasons, request IDs, trace IDs, and durations are stored in `eval_case_results`. `expected_behavior` remains reviewer context and is not interpreted as free-form executable policy. LLM-as-judge and prompt A/B comparison are deferred.
+
+Tracing uses `eval.run`, `eval.case.execute`, and `eval.case.check`.
+
 ## 9. OpenTelemetry and Jaeger
 
 The application installs the official OpenTelemetry SDK and exports spans with OTLP over gRPC. Jaeger all-in-one accepts OTLP locally and provides the trace UI. Tracing is configurable and disabled by default.

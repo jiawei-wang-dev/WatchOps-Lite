@@ -31,4 +31,28 @@ var SchemaStatements = []string{
 		INDEX idx_eval_cases_feedback_id (feedback_id),
 		INDEX idx_eval_cases_case_type_created_at (case_type, created_at)
 	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+	`CREATE TABLE IF NOT EXISTS eval_runs (
+		id VARCHAR(64) PRIMARY KEY,
+		case_type VARCHAR(32) NOT NULL,
+		status VARCHAR(32) NOT NULL,
+		total INT NOT NULL,
+		passed INT NOT NULL,
+		failed INT NOT NULL,
+		created_at TIMESTAMP(6) NOT NULL,
+		completed_at TIMESTAMP(6) NULL,
+		INDEX idx_eval_runs_case_type_created_at (case_type, created_at)
+	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+	`CREATE TABLE IF NOT EXISTS eval_case_results (
+		id VARCHAR(64) PRIMARY KEY,
+		run_id VARCHAR(64) NOT NULL,
+		case_id VARCHAR(64) NOT NULL,
+		passed BOOLEAN NOT NULL,
+		failure_reasons LONGTEXT NOT NULL,
+		request_id VARCHAR(128) NOT NULL,
+		trace_id VARCHAR(64) NOT NULL,
+		duration_ms BIGINT NOT NULL,
+		created_at TIMESTAMP(6) NOT NULL,
+		INDEX idx_eval_case_results_run_id (run_id),
+		INDEX idx_eval_case_results_case_id (case_id)
+	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
 }

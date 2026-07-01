@@ -8,6 +8,7 @@ import (
 var (
 	ErrInvalidArgument = errors.New("invalid eval case")
 	ErrUnavailable     = errors.New("eval store unavailable")
+	ErrNotFound        = errors.New("eval record not found")
 )
 
 type CaseType string

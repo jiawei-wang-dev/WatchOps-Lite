@@ -265,11 +265,6 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	evalService, err := eval.NewService(evalStore, feedbackService)
-	if err != nil {
-		return nil, err
-	}
-
 	agentRunner := buildAgentRunner(
 		context.Background(),
 		cfg,
@@ -292,6 +287,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			SummaryThreshold: cfg.Session.SummaryThreshold,
 		},
 	)
+	evalService, err := eval.NewServiceWithRunner(
+		evalStore,
+		feedbackService,
+		newEvalCaseExecutor(chatService),
+	)
+	if err != nil {
+		return nil, err
+	}
 	router := httptransport.NewRouter(
 		logger,
 		cfg.Telemetry.ServiceName,

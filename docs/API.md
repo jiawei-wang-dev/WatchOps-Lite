@@ -408,3 +408,43 @@ GET /api/v1/eval/cases?case_type=bad_case&limit=20
 `case_type` is optional. `limit` defaults to 50 and must be between 1 and 100.
 
 Missing source feedback returns `404`. Validation failures return `400`. When MySQL is disabled or unavailable, feedback and eval endpoints return `503 DEPENDENCY_UNAVAILABLE`. Database errors are not exposed.
+
+## Eval Runs
+
+Start a synchronous bounded rule-based run:
+
+```http
+POST /api/v1/eval/runs
+Content-Type: application/json
+```
+
+```json
+{
+  "case_type": "bad_case",
+  "limit": 20
+}
+```
+
+Successful response:
+
+```json
+{
+  "run_id": "run_0123456789abcdef01234567",
+  "case_type": "bad_case",
+  "status": "completed",
+  "total": 10,
+  "passed": 8,
+  "failed": 2,
+  "created_at": "2026-07-01T06:00:00Z",
+  "completed_at": "2026-07-01T06:00:02Z"
+}
+```
+
+Retrieve the summary or per-case results:
+
+```http
+GET /api/v1/eval/runs/{run_id}
+GET /api/v1/eval/runs/{run_id}/results
+```
+
+Rules are deterministic. Cases require evidence and tool runs by default; metadata can set `require_limitation`, `require_conclusions`, `require_recommendations`, `require_evidence`, or `require_tool_runs`. Forbidden patterns use case-insensitive substring matching. LLM-as-judge is not used.

@@ -44,7 +44,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
 - Jaeger-backed `query_traces` with trace-ID or bounded service/time search and explicit mock fallback
-- MySQL upvote/downvote feedback and manual good/bad eval-case seeding
+- MySQL upvote/downvote feedback, good/bad eval cases, and synchronous rule-based eval runs
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
 - Reproducible Docker Compose and scripted demo flow
 
@@ -110,6 +110,7 @@ With the application running, execute:
 ./scripts/demo_traces.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
+./scripts/demo_eval_run.sh
 ```
 
 The flow demonstrates:
@@ -120,7 +121,7 @@ The flow demonstrates:
 4. The trace demo reuses a fresh Chat trace ID and verifies all four evidence sources together.
 5. The response exposes evidence, limitations, `tool_runs`, and `trace_id`.
 6. A downvote is stored in MySQL.
-7. The feedback record seeds a reusable `bad_case`, which is then listed.
+7. The feedback record seeds a reusable `bad_case`, which is executed by the rule-based eval runner.
 
 Open [Jaeger](http://localhost:16686), select the `watchops-lite` service, and search for the trace ID returned by Chat. Demo response state is stored under `/tmp/watchops-lite-demo` by default. Override the API or state location with:
 
@@ -300,7 +301,7 @@ make verify
 - Embeddings are optional; reranking remains deferred.
 - LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
-- Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
+- Eval cases are executed by deterministic rules; LLM-as-judge and prompt A/B testing remain deferred.
 - Prometheus application metrics and Grafana dashboards are not included.
 - The LLM Agent is optional and disabled by default.
 - MySQL currently stores feedback and eval cases, not long-term memory, document metadata, or audit records.
@@ -309,7 +310,7 @@ make verify
 
 - Evaluation-driven reranking and retrieval tuning
 - Advanced trace critical-path and service-graph analytics
-- Automatic eval runner and release comparison reports
+- Eval release comparison reports and optional LLM judge
 - Prometheus application metrics and Grafana dashboards
 
 ## Design Documents
@@ -326,6 +327,7 @@ make verify
 - [ADR 0012: Jaeger-backed Traces Tool](docs/adr/0012-jaeger-traces-tool.md)
 - [ADR 0013: LLM Session Summary](docs/adr/0013-llm-session-summary.md)
 - [ADR 0014: Hybrid Knowledge Retrieval](docs/adr/0014-hybrid-knowledge-retrieval.md)
+- [ADR 0015: Rule-based Eval Runner](docs/adr/0015-eval-runner.md)
 
 ## Originality
 
