@@ -20,7 +20,7 @@ flowchart LR
     L --> ES
     P --> PROM[("Prometheus")]
     R --> J
-    K --> ES[("Elasticsearch BM25")]
+    K --> ES[("Elasticsearch BM25 + vector")]
     G --> F["Feedback / eval seed"]
     F --> DB[("MySQL")]
     G -. spans .-> O["OpenTelemetry"]
@@ -40,7 +40,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
-- Elasticsearch chunk indexing and BM25 knowledge retrieval
+- Elasticsearch BM25, optional vector retrieval, and RRF hybrid fusion with BM25 fallback
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
 - Jaeger-backed `query_traces` with trace-ID or bounded service/time search and explicit mock fallback
@@ -286,7 +286,8 @@ make verify
     ├── memory/session/         # Redis context and rolling summary
     ├── observability/          # Structured logs and OpenTelemetry
     ├── platform/               # Elasticsearch and MySQL clients
-    ├── retrieval/knowledge/    # Chunking, BM25 policy, and ES store
+    ├── retrieval/embedding/    # Optional embedding provider abstraction
+    ├── retrieval/knowledge/    # Chunking, BM25/vector policy, RRF, and ES store
     ├── retrieval/logs/         # Bounded logs search and Elasticsearch store
     ├── retrieval/metrics/      # Allowlisted metrics policy and Prometheus client
     ├── retrieval/traces/       # Bounded trace policy and Jaeger Query API client
@@ -296,7 +297,7 @@ make verify
 
 ## Current Limitations
 
-- Knowledge retrieval is BM25 only; embeddings, hybrid retrieval, RRF, and reranking are deferred.
+- Embeddings are optional; reranking remains deferred.
 - LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
 - Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
@@ -306,7 +307,7 @@ make verify
 
 ## Roadmap
 
-- Hybrid BM25/vector retrieval with evaluation-driven RRF and reranking
+- Evaluation-driven reranking and retrieval tuning
 - Advanced trace critical-path and service-graph analytics
 - Automatic eval runner and release comparison reports
 - Prometheus application metrics and Grafana dashboards
@@ -324,6 +325,7 @@ make verify
 - [ADR 0011: Prometheus-backed Metrics Tool](docs/adr/0011-prometheus-metrics-tool.md)
 - [ADR 0012: Jaeger-backed Traces Tool](docs/adr/0012-jaeger-traces-tool.md)
 - [ADR 0013: LLM Session Summary](docs/adr/0013-llm-session-summary.md)
+- [ADR 0014: Hybrid Knowledge Retrieval](docs/adr/0014-hybrid-knowledge-retrieval.md)
 
 ## Originality
 

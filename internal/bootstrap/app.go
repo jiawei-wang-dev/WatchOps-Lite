@@ -34,6 +34,7 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
+	embeddingProvider := buildEmbeddingProvider(cfg, logger)
 	var elasticsearchClient *elasticsearchplatform.Client
 	knowledgeStore := retrievalknowledge.Store(retrievalknowledge.UnavailableStore{})
 	if cfg.Elasticsearch.Enabled {
@@ -47,14 +48,34 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			return nil, err
 		}
 		elasticsearchClient = client
-		store, err := retrievalknowledge.NewElasticsearchStore(client, cfg.Elasticsearch.KnowledgeIndex)
+		vectorDimension := 0
+		if embeddingProvider != nil {
+			vectorDimension = embeddingProvider.Dimension()
+		}
+		store, err := retrievalknowledge.NewElasticsearchStoreWithVector(
+			client,
+			cfg.Elasticsearch.KnowledgeIndex,
+			vectorDimension,
+		)
 		if err != nil {
 			_ = client.Close(context.Background())
 			return nil, err
 		}
 		knowledgeStore = store
 	}
-	knowledgeService, err := retrievalknowledge.NewService(knowledgeStore, cfg.Knowledge.ChunkMaxSize)
+	knowledgeService, err := retrievalknowledge.NewServiceWithConfig(
+		knowledgeStore,
+		embeddingProvider,
+		retrievalknowledge.ServiceConfig{
+			ChunkMaxSize:   cfg.Knowledge.ChunkMaxSize,
+			RetrievalMode:  cfg.Knowledge.RetrievalMode,
+			BM25TopK:       cfg.Knowledge.BM25TopK,
+			VectorTopK:     cfg.Knowledge.VectorTopK,
+			FinalTopK:      cfg.Knowledge.FinalTopK,
+			RRFK:           cfg.Knowledge.RRFK,
+			FallbackToBM25: cfg.Knowledge.FallbackToBM25,
+		},
+	)
 	if err != nil {
 		if elasticsearchClient != nil {
 			_ = elasticsearchClient.Close(context.Background())

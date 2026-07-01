@@ -64,7 +64,16 @@ func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResul
 		}
 
 		evidence := make([]common.EvidenceItem, 0, len(results))
+		warnings := []common.ToolWarning{}
+		retrievalMode := "bm25"
+		vectorFallback := false
 		for _, result := range results {
+			if result.RetrievalMode != "" {
+				retrievalMode = result.RetrievalMode
+			}
+			if fallback, _ := result.Metadata["vector_fallback"].(bool); fallback {
+				vectorFallback = true
+			}
 			score := result.Score
 			evidence = append(evidence, common.EvidenceItem{
 				ID:         result.ChunkID,
@@ -74,19 +83,35 @@ func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResul
 				ResourceID: result.DocumentID,
 				Score:      &score,
 				Metadata: map[string]any{
-					"title":    result.Title,
-					"chunk_id": result.ChunkID,
-					"metadata": result.Metadata,
+					"title":          result.Title,
+					"chunk_id":       result.ChunkID,
+					"document_id":    result.DocumentID,
+					"retrieval_mode": result.RetrievalMode,
+					"bm25_score":     result.BM25Score,
+					"vector_score":   result.VectorScore,
+					"rrf_score":      result.RRFScore,
+					"metadata":       result.Metadata,
 				},
+			})
+		}
+		if vectorFallback {
+			warnings = append(warnings, common.ToolWarning{
+				Code:    "KNOWLEDGE_VECTOR_FALLBACK",
+				Message: "Vector retrieval was unavailable; BM25 knowledge evidence was returned.",
 			})
 		}
 		return common.ToolResult{
 			Evidence: evidence,
+			Warnings: warnings,
 			Payload: map[string]any{
 				"query":          strings.TrimSpace(input.Query),
 				"returned_count": len(evidence),
 			},
-			Metadata: map[string]any{"mode": "elasticsearch"},
+			Metadata: map[string]any{
+				"mode":           "elasticsearch",
+				"retrieval_mode": retrievalMode,
+				"fallback_used":  vectorFallback,
+			},
 		}, nil
 	})
 }

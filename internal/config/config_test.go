@@ -271,6 +271,55 @@ func TestLoadAppliesElasticsearchEnvironment(t *testing.T) {
 	}
 }
 
+func TestDefaultKnowledgeRetrievalUsesBM25WithoutEmbeddings(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Knowledge.RetrievalMode != "bm25" ||
+		cfg.Knowledge.BM25TopK != 10 ||
+		cfg.Knowledge.VectorTopK != 10 ||
+		cfg.Knowledge.FinalTopK != 5 ||
+		cfg.Knowledge.RRFK != 60 ||
+		!cfg.Knowledge.FallbackToBM25 ||
+		cfg.Embedding.Enabled ||
+		cfg.Embedding.Dimension != 1536 {
+		t.Fatalf("Knowledge=%#v Embedding=%#v", cfg.Knowledge, cfg.Embedding)
+	}
+}
+
+func TestLoadAppliesKnowledgeAndEmbeddingEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCHOPS_KNOWLEDGE_RETRIEVAL_MODE", "hybrid")
+	t.Setenv("WATCHOPS_KNOWLEDGE_BM25_TOP_K", "12")
+	t.Setenv("WATCHOPS_KNOWLEDGE_VECTOR_TOP_K", "14")
+	t.Setenv("WATCHOPS_KNOWLEDGE_FINAL_TOP_K", "6")
+	t.Setenv("WATCHOPS_KNOWLEDGE_RRF_K", "70")
+	t.Setenv("WATCHOPS_KNOWLEDGE_FALLBACK_TO_BM25", "true")
+	t.Setenv("WATCHOPS_EMBEDDING_ENABLED", "true")
+	t.Setenv("WATCHOPS_EMBEDDING_BASE_URL", "http://embedding.test/v1")
+	t.Setenv("WATCHOPS_EMBEDDING_MODEL", "embed-test")
+	t.Setenv("WATCHOPS_EMBEDDING_DIMENSION", "8")
+	t.Setenv("WATCHOPS_EMBEDDING_REQUEST_TIMEOUT", "750ms")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Knowledge.RetrievalMode != "hybrid" ||
+		cfg.Knowledge.BM25TopK != 12 ||
+		cfg.Knowledge.VectorTopK != 14 ||
+		cfg.Knowledge.FinalTopK != 6 ||
+		cfg.Knowledge.RRFK != 70 ||
+		!cfg.Embedding.Enabled ||
+		cfg.Embedding.Model != "embed-test" ||
+		cfg.Embedding.Dimension != 8 ||
+		cfg.Embedding.RequestTimeout.Value() != 750*time.Millisecond {
+		t.Fatalf("Knowledge=%#v Embedding=%#v", cfg.Knowledge, cfg.Embedding)
+	}
+}
+
 func TestLoadAppliesMySQLEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {

@@ -29,6 +29,7 @@ type Chunk struct {
 	Index      int            `json:"chunk_index"`
 	Metadata   map[string]any `json:"metadata"`
 	CreatedAt  time.Time      `json:"created_at"`
+	Embedding  []float32      `json:"embedding,omitempty"`
 }
 
 type SearchQuery struct {
@@ -38,13 +39,23 @@ type SearchQuery struct {
 }
 
 type SearchResult struct {
-	ChunkID    string         `json:"chunk_id"`
-	DocumentID string         `json:"document_id"`
-	Title      string         `json:"title"`
-	Content    string         `json:"content"`
-	Source     string         `json:"source"`
-	Score      float64        `json:"score"`
-	Metadata   map[string]any `json:"metadata"`
+	ChunkID       string         `json:"chunk_id"`
+	DocumentID    string         `json:"document_id"`
+	Title         string         `json:"title"`
+	Content       string         `json:"content"`
+	Source        string         `json:"source"`
+	Score         float64        `json:"score"`
+	Metadata      map[string]any `json:"metadata"`
+	RetrievalMode string         `json:"retrieval_mode"`
+	BM25Score     *float64       `json:"bm25_score,omitempty"`
+	VectorScore   *float64       `json:"vector_score,omitempty"`
+	RRFScore      *float64       `json:"rrf_score,omitempty"`
+}
+
+type VectorSearchQuery struct {
+	Vector  []float32
+	Limit   int
+	Filters map[string]string
 }
 
 type DocumentInfo struct {

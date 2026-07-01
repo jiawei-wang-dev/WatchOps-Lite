@@ -39,7 +39,22 @@
     "request_timeout": "5s"
   },
   "knowledge": {
-    "chunk_max_size": 1200
+    "chunk_max_size": 1200,
+    "retrieval_mode": "bm25",
+    "bm25_top_k": 10,
+    "vector_top_k": 10,
+    "final_top_k": 5,
+    "rrf_k": 60,
+    "fallback_to_bm25": true
+  },
+  "embedding": {
+    "enabled": false,
+    "provider": "openai_compatible",
+    "base_url": "",
+    "api_key_env": "WATCHOPS_EMBEDDING_API_KEY",
+    "model": "",
+    "dimension": 1536,
+    "request_timeout": "10s"
   },
   "logs": {
     "backend": "elasticsearch",

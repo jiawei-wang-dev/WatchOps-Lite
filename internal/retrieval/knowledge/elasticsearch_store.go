@@ -20,11 +20,20 @@ import (
 const maxResponseSize = 8 << 20
 
 type ElasticsearchStore struct {
-	client elasticsearchplatform.Executor
-	index  string
+	client          elasticsearchplatform.Executor
+	index           string
+	vectorDimension int
 }
 
 func NewElasticsearchStore(client elasticsearchplatform.Executor, index string) (*ElasticsearchStore, error) {
+	return NewElasticsearchStoreWithVector(client, index, 0)
+}
+
+func NewElasticsearchStoreWithVector(
+	client elasticsearchplatform.Executor,
+	index string,
+	vectorDimension int,
+) (*ElasticsearchStore, error) {
 	if client == nil {
 		return nil, fmt.Errorf("%w: Elasticsearch client is required", ErrInvalidArgument)
 	}
@@ -32,7 +41,14 @@ func NewElasticsearchStore(client elasticsearchplatform.Executor, index string) 
 	if index == "" {
 		return nil, fmt.Errorf("%w: Elasticsearch index is required", ErrInvalidArgument)
 	}
-	return &ElasticsearchStore{client: client, index: index}, nil
+	if vectorDimension < 0 {
+		return nil, fmt.Errorf("%w: vector dimension must not be negative", ErrInvalidArgument)
+	}
+	return &ElasticsearchStore{
+		client:          client,
+		index:           index,
+		vectorDimension: vectorDimension,
+	}, nil
 }
 
 func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) {
@@ -57,25 +73,29 @@ func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) 
 	}
 	if response.StatusCode == http.StatusOK {
 		response.Body.Close()
-		return nil
+		return s.ensureVectorMapping(ctx)
 	}
 	if response.StatusCode != http.StatusNotFound {
 		return responseError(response, "check knowledge index")
 	}
 	response.Body.Close()
 
+	properties := map[string]any{
+		"chunk_id":    map[string]string{"type": "keyword"},
+		"document_id": map[string]string{"type": "keyword"},
+		"title":       map[string]string{"type": "text"},
+		"content":     map[string]string{"type": "text"},
+		"source":      map[string]string{"type": "keyword"},
+		"chunk_index": map[string]string{"type": "integer"},
+		"metadata":    map[string]any{"type": "object", "dynamic": true},
+		"created_at":  map[string]string{"type": "date"},
+	}
+	if s.vectorDimension > 0 {
+		properties["embedding"] = s.vectorMapping()
+	}
 	body, err := json.Marshal(map[string]any{
 		"mappings": map[string]any{
-			"properties": map[string]any{
-				"chunk_id":    map[string]string{"type": "keyword"},
-				"document_id": map[string]string{"type": "keyword"},
-				"title":       map[string]string{"type": "text"},
-				"content":     map[string]string{"type": "text"},
-				"source":      map[string]string{"type": "keyword"},
-				"chunk_index": map[string]string{"type": "integer"},
-				"metadata":    map[string]any{"type": "object", "dynamic": true},
-				"created_at":  map[string]string{"type": "date"},
-			},
+			"properties": properties,
 		},
 	})
 	if err != nil {
@@ -96,6 +116,41 @@ func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) 
 		return responseError(response, "create knowledge index")
 	}
 	return nil
+}
+
+func (s *ElasticsearchStore) ensureVectorMapping(ctx context.Context) error {
+	if s.vectorDimension == 0 {
+		return nil
+	}
+	body, err := json.Marshal(map[string]any{
+		"properties": map[string]any{"embedding": s.vectorMapping()},
+	})
+	if err != nil {
+		return fmt.Errorf("encode vector mapping: %w", err)
+	}
+	response, err := s.client.Do(ctx, elasticsearchplatform.Request{
+		Method:      http.MethodPut,
+		Path:        "/" + url.PathEscape(s.index) + "/_mapping",
+		Body:        bytes.NewReader(body),
+		ContentType: "application/json",
+	})
+	if err != nil {
+		return dependencyError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return responseError(response, "update knowledge vector mapping")
+	}
+	return nil
+}
+
+func (s *ElasticsearchStore) vectorMapping() map[string]any {
+	return map[string]any{
+		"type":       "dense_vector",
+		"dims":       s.vectorDimension,
+		"index":      true,
+		"similarity": "cosine",
+	}
 }
 
 func (s *ElasticsearchStore) IndexChunks(ctx context.Context, chunks []Chunk) (resultErr error) {
@@ -198,8 +253,9 @@ func (s *ElasticsearchStore) Search(
 	}
 
 	body, err := json.Marshal(map[string]any{
-		"size":  query.Limit,
-		"query": map[string]any{"bool": boolQuery},
+		"size":    query.Limit,
+		"query":   map[string]any{"bool": boolQuery},
+		"_source": map[string]any{"excludes": []string{"embedding"}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("encode search query: %w", err)
@@ -231,6 +287,96 @@ func (s *ElasticsearchStore) Search(
 		return nil, fmt.Errorf("decode search response: %w", err)
 	}
 
+	results := make([]SearchResult, 0, len(result.Hits.Hits))
+	for _, hit := range result.Hits.Hits {
+		chunkID := hit.Source.ID
+		if chunkID == "" {
+			chunkID = hit.ID
+		}
+		results = append(results, SearchResult{
+			ChunkID:    chunkID,
+			DocumentID: hit.Source.DocumentID,
+			Title:      hit.Source.Title,
+			Content:    hit.Source.Content,
+			Source:     hit.Source.Source,
+			Score:      hit.Score,
+			Metadata:   cloneMetadata(hit.Source.Metadata),
+		})
+	}
+	return results, nil
+}
+
+func (s *ElasticsearchStore) SearchVector(
+	ctx context.Context,
+	query VectorSearchQuery,
+) (searchResults []SearchResult, resultErr error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"elasticsearch.vector_search",
+		attribute.String("elasticsearch.index", s.index),
+		attribute.Int("vector_dimension", len(query.Vector)),
+	)
+	defer func() {
+		span.SetAttributes(attribute.Int("result_count", len(searchResults)))
+		if resultErr != nil {
+			observability.MarkError(span, "Elasticsearch vector search failed")
+		}
+		span.End()
+	}()
+	if s.vectorDimension <= 0 || len(query.Vector) != s.vectorDimension {
+		return nil, fmt.Errorf("%w: invalid query vector dimension", ErrInvalidArgument)
+	}
+
+	knn := map[string]any{
+		"field":          "embedding",
+		"query_vector":   query.Vector,
+		"k":              query.Limit,
+		"num_candidates": max(query.Limit*5, 100),
+	}
+	filters := []any{
+		map[string]any{"exists": map[string]string{"field": "embedding"}},
+	}
+	if len(query.Filters) > 0 {
+		for key, value := range query.Filters {
+			filters = append(filters, map[string]any{
+				"term": map[string]string{"metadata." + key + ".keyword": value},
+			})
+		}
+	}
+	knn["filter"] = map[string]any{"bool": map[string]any{"filter": filters}}
+	body, err := json.Marshal(map[string]any{
+		"size":    query.Limit,
+		"knn":     knn,
+		"_source": map[string]any{"excludes": []string{"embedding"}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode vector search query: %w", err)
+	}
+	response, err := s.client.Do(ctx, elasticsearchplatform.Request{
+		Method:      http.MethodPost,
+		Path:        "/" + url.PathEscape(s.index) + "/_search",
+		Body:        bytes.NewReader(body),
+		ContentType: "application/json",
+	})
+	if err != nil {
+		return nil, dependencyError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, responseError(response, "vector search knowledge")
+	}
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				ID     string  `json:"_id"`
+				Score  float64 `json:"_score"`
+				Source Chunk   `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := decodeJSON(response.Body, &result); err != nil {
+		return nil, fmt.Errorf("decode vector search response: %w", err)
+	}
 	results := make([]SearchResult, 0, len(result.Hits.Hits))
 	for _, hit := range result.Hits.Hits {
 		chunkID := hit.Source.ID

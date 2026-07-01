@@ -146,11 +146,15 @@ The MVP accepts plain-text or Markdown content synchronously. Elasticsearch stor
 
 1. Validate and normalize the query.
 2. Apply supported metadata filters.
-3. Retrieve BM25 candidates from Elasticsearch.
-4. Convert returned chunks into source-attributed evidence.
-5. Add vector retrieval, fusion, RRF, and reranking only after the MVP.
+3. Select `bm25`, `vector`, or `hybrid` mode.
+4. Generate a query embedding only when vector retrieval is enabled.
+5. Retrieve BM25 and/or Elasticsearch dense-vector candidates.
+6. Fuse hybrid candidates with reciprocal rank fusion (RRF).
+7. Convert returned chunks into source-attributed evidence with component scores.
 
-Elasticsearch query construction remains in the platform adapter and never enters the Agent or HTTP layers.
+Embeddings are optional. In hybrid mode, unavailable embedding or vector search falls back to BM25 with `KNOWLEDGE_VECTOR_FALLBACK`; existing chunks without vectors remain searchable. Vector-only mode reports unavailability instead of inventing results. Elasticsearch query construction remains in the adapter and never enters the Agent or HTTP layers.
+
+Trace spans include `knowledge.embedding`, `knowledge.search.bm25`, `knowledge.search.vector`, and `knowledge.search.hybrid_fusion`. Reranking is deferred until evaluation data justifies its cost.
 
 ## 7. Tool Harness
 

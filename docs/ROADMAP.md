@@ -284,6 +284,27 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement Stage 2: Hybrid Knowledge Retrieval — Completed
+
+Delivered:
+
+- Optional embedding provider abstraction with deterministic test provider and OpenAI-compatible implementation
+- Optional dense-vector chunk indexing
+- `bm25`, `vector`, and `hybrid` retrieval modes
+- Reciprocal rank fusion with BM25, vector, and RRF score metadata
+- Explicit BM25 fallback when vector retrieval is unavailable
+- Embedding, BM25, vector, and fusion tracing
+- Backward-compatible knowledge ingestion and search APIs
+
+Exit criteria:
+
+- BM25 remains the dependency-free default.
+- Existing chunks without embeddings remain searchable.
+- Hybrid vector failure does not break knowledge search when fallback is enabled.
+- Reranking remains deferred.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -300,6 +321,7 @@ flowchart LR
     U11 --> U12["Upgrade 1.2 Prometheus Metrics (complete)"]
     U12 --> U13["Upgrade 1.3 Jaeger Traces (complete)"]
     U13 --> S1["Stage 1 LLM Summary (complete)"]
+    S1 --> S2["Stage 2 Hybrid Retrieval (complete)"]
 ```
 
 ## Deferred Work

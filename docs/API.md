@@ -282,7 +282,11 @@ Successful response:
       "title": "Checkout runbook",
       "content": "Check upstream timeout saturation.",
       "source": "manual",
-      "score": 3.42,
+      "score": 0.0325,
+      "retrieval_mode": "hybrid",
+      "bm25_score": 3.42,
+      "vector_score": 0.91,
+      "rrf_score": 0.0325,
       "metadata": {
         "service": "checkout",
         "category": "runbook"
@@ -292,7 +296,7 @@ Successful response:
 }
 ```
 
-`limit` defaults to 5 and must be between 1 and 20. Retrieval is BM25/text only in this phase.
+`limit` defaults to the configured final result count and must be between 1 and 20. Retrieval mode is configured as `bm25`, `vector`, or `hybrid`. Hybrid mode uses RRF and can explicitly fall back to BM25 when embeddings are disabled or unavailable. Score component fields are omitted when they do not apply.
 
 ## Knowledge Document Metadata
 

@@ -94,6 +94,45 @@ func TestElasticsearchStoreMapsSearchHits(t *testing.T) {
 	}
 }
 
+func TestElasticsearchStoreBuildsVectorSearch(t *testing.T) {
+	executor := &executorStub{responses: []*http.Response{
+		response(http.StatusOK, `{
+			"hits":{"hits":[{
+				"_id":"doc_1_chunk_0000",
+				"_score":0.93,
+				"_source":{
+					"chunk_id":"doc_1_chunk_0000",
+					"document_id":"doc_1",
+					"title":"Runbook",
+					"content":"Check saturation",
+					"source":"manual",
+					"metadata":{"category":"runbook"}
+				}
+			}]}
+		}`),
+	}}
+	store, err := NewElasticsearchStoreWithVector(executor, "watchops_knowledge", 3)
+	if err != nil {
+		t.Fatalf("NewElasticsearchStoreWithVector() error = %v", err)
+	}
+
+	results, err := store.SearchVector(context.Background(), VectorSearchQuery{
+		Vector: []float32{0.1, 0.2, 0.3},
+		Limit:  5,
+	})
+	if err != nil {
+		t.Fatalf("SearchVector() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Score != 0.93 {
+		t.Fatalf("results = %#v", results)
+	}
+	searchBody, _ := io.ReadAll(executor.requests[0].Body)
+	if !strings.Contains(string(searchBody), `"knn"`) ||
+		!strings.Contains(string(searchBody), `"embedding"`) {
+		t.Fatalf("search body = %s", searchBody)
+	}
+}
+
 func response(status int, body string) *http.Response {
 	return &http.Response{
 		StatusCode: status,

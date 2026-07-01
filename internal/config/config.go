@@ -46,6 +46,7 @@ type Config struct {
 	Summary       SummaryConfig       `json:"summary"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
+	Embedding     EmbeddingConfig     `json:"embedding"`
 	Logs          LogsConfig          `json:"logs"`
 	Metrics       MetricsConfig       `json:"metrics"`
 	Traces        TracesConfig        `json:"traces"`
@@ -101,7 +102,23 @@ type ElasticsearchConfig struct {
 }
 
 type KnowledgeConfig struct {
-	ChunkMaxSize int `json:"chunk_max_size"`
+	ChunkMaxSize   int    `json:"chunk_max_size"`
+	RetrievalMode  string `json:"retrieval_mode"`
+	BM25TopK       int    `json:"bm25_top_k"`
+	VectorTopK     int    `json:"vector_top_k"`
+	FinalTopK      int    `json:"final_top_k"`
+	RRFK           int    `json:"rrf_k"`
+	FallbackToBM25 bool   `json:"fallback_to_bm25"`
+}
+
+type EmbeddingConfig struct {
+	Enabled        bool     `json:"enabled"`
+	Provider       string   `json:"provider"`
+	BaseURL        string   `json:"base_url"`
+	APIKeyEnv      string   `json:"api_key_env"`
+	Model          string   `json:"model"`
+	Dimension      int      `json:"dimension"`
+	RequestTimeout Duration `json:"request_timeout"`
 }
 
 type LogsConfig struct {
@@ -203,7 +220,20 @@ func Default() Config {
 			RequestTimeout: Duration(3 * time.Second),
 		},
 		Knowledge: KnowledgeConfig{
-			ChunkMaxSize: 1200,
+			ChunkMaxSize:   1200,
+			RetrievalMode:  "bm25",
+			BM25TopK:       10,
+			VectorTopK:     10,
+			FinalTopK:      5,
+			RRFK:           60,
+			FallbackToBM25: true,
+		},
+		Embedding: EmbeddingConfig{
+			Enabled:        false,
+			Provider:       "openai_compatible",
+			APIKeyEnv:      "WATCHOPS_EMBEDDING_API_KEY",
+			Dimension:      1536,
+			RequestTimeout: Duration(10 * time.Second),
 		},
 		Logs: LogsConfig{
 			Backend:        "mock",
@@ -317,6 +347,11 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_USERNAME", &cfg.Elasticsearch.Username)
 	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
+	setString("KNOWLEDGE_RETRIEVAL_MODE", &cfg.Knowledge.RetrievalMode)
+	setString("EMBEDDING_PROVIDER", &cfg.Embedding.Provider)
+	setString("EMBEDDING_BASE_URL", &cfg.Embedding.BaseURL)
+	setString("EMBEDDING_API_KEY_ENV", &cfg.Embedding.APIKeyEnv)
+	setString("EMBEDDING_MODEL", &cfg.Embedding.Model)
 	setString("LOGS_BACKEND", &cfg.Logs.Backend)
 	setString("LOGS_INDEX", &cfg.Logs.Index)
 	setString("METRICS_BACKEND", &cfg.Metrics.Backend)
@@ -350,6 +385,7 @@ func applyEnvironment(cfg *Config) error {
 		{"SESSION_TTL", &cfg.Session.TTL},
 		{"SUMMARY_TIMEOUT", &cfg.Summary.Timeout},
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
+		{"EMBEDDING_REQUEST_TIMEOUT", &cfg.Embedding.RequestTimeout},
 		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
 		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
 		{"TRACES_REQUEST_TIMEOUT", &cfg.Traces.RequestTimeout},
@@ -373,6 +409,11 @@ func applyEnvironment(cfg *Config) error {
 		{"SESSION_RECENT_WINDOW_SIZE", &cfg.Session.RecentWindowSize},
 		{"SESSION_SUMMARY_THRESHOLD", &cfg.Session.SummaryThreshold},
 		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
+		{"KNOWLEDGE_BM25_TOP_K", &cfg.Knowledge.BM25TopK},
+		{"KNOWLEDGE_VECTOR_TOP_K", &cfg.Knowledge.VectorTopK},
+		{"KNOWLEDGE_FINAL_TOP_K", &cfg.Knowledge.FinalTopK},
+		{"KNOWLEDGE_RRF_K", &cfg.Knowledge.RRFK},
+		{"EMBEDDING_DIMENSION", &cfg.Embedding.Dimension},
 		{"LOGS_DEFAULT_LIMIT", &cfg.Logs.DefaultLimit},
 		{"TRACES_DEFAULT_LIMIT", &cfg.Traces.DefaultLimit},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
@@ -394,6 +435,20 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sELASTICSEARCH_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Elasticsearch.Enabled = parsed
+	}
+	if value, ok := lookup("KNOWLEDGE_FALLBACK_TO_BM25"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sKNOWLEDGE_FALLBACK_TO_BM25 must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Knowledge.FallbackToBM25 = parsed
+	}
+	if value, ok := lookup("EMBEDDING_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sEMBEDDING_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Embedding.Enabled = parsed
 	}
 	if value, ok := lookup("SUMMARY_FALLBACK_TO_DETERMINISTIC"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -612,6 +667,44 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Knowledge.ChunkMaxSize <= 0 {
 		return errors.New("knowledge.chunk_max_size must be greater than zero")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Knowledge.RetrievalMode)) {
+	case "bm25", "vector", "hybrid":
+	default:
+		return errors.New("knowledge.retrieval_mode must be bm25, vector, or hybrid")
+	}
+	knowledgeLimits := []struct {
+		name  string
+		value int
+		max   int
+	}{
+		{"knowledge.bm25_top_k", cfg.Knowledge.BM25TopK, 100},
+		{"knowledge.vector_top_k", cfg.Knowledge.VectorTopK, 100},
+		{"knowledge.final_top_k", cfg.Knowledge.FinalTopK, 20},
+	}
+	for _, item := range knowledgeLimits {
+		if item.value < 1 || item.value > item.max {
+			return fmt.Errorf("%s must be between 1 and %d", item.name, item.max)
+		}
+	}
+	if cfg.Knowledge.RRFK <= 0 {
+		return errors.New("knowledge.rrf_k must be greater than zero")
+	}
+	if !strings.EqualFold(strings.TrimSpace(cfg.Embedding.Provider), "openai_compatible") {
+		return errors.New("embedding.provider must be openai_compatible")
+	}
+	if strings.TrimSpace(cfg.Embedding.APIKeyEnv) == "" {
+		return errors.New("embedding.api_key_env is required")
+	}
+	if cfg.Embedding.Dimension <= 0 {
+		return errors.New("embedding.dimension must be greater than zero")
+	}
+	if cfg.Embedding.RequestTimeout <= 0 {
+		return errors.New("embedding.request_timeout must be greater than zero")
+	}
+	if cfg.Embedding.Enabled &&
+		(strings.TrimSpace(cfg.Embedding.BaseURL) == "" || strings.TrimSpace(cfg.Embedding.Model) == "") {
+		return errors.New("embedding.base_url and embedding.model are required when embeddings are enabled")
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Logs.Backend)) {
 	case "mock", "elasticsearch":

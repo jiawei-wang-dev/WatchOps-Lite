@@ -28,6 +28,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── platform/elasticsearch/ # Official client configuration and request boundary
     ├── platform/mysql/         # database/sql pool and feedback/eval schema
     ├── retrieval/knowledge/    # Chunking, retrieval service, and ES-backed store
+    ├── retrieval/embedding/    # Optional deterministic/test and OpenAI-compatible embeddings
     ├── retrieval/logs/         # Bounded log search and Elasticsearch store
     ├── retrieval/metrics/      # Allowlisted queries and Prometheus HTTP client
     ├── retrieval/traces/       # Bounded trace search and Jaeger Query API client
@@ -56,7 +57,8 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/memory/session/redisstore` owns Redis key and transaction behavior.
 - `internal/memory/session/summary` owns deterministic rolling summarization.
 - `internal/platform/elasticsearch` owns official-client construction and bounded requests.
-- `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, retrieval policy, and Elasticsearch query construction.
+- `internal/retrieval/embedding` owns the optional provider boundary and vector generation.
+- `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, BM25/vector policy, RRF fusion, fallback, and Elasticsearch query construction.
 - `internal/retrieval/logs` owns log-event models, bounded search policy, and Elasticsearch query construction.
 - `internal/retrieval/metrics` owns metric samples, allowlisted query selection, and Prometheus response parsing.
 - `internal/retrieval/traces` owns trace/span models, bounded ranking, and Jaeger response parsing.

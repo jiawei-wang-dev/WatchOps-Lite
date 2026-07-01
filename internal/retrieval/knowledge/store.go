@@ -9,6 +9,10 @@ type Store interface {
 	GetDocument(context.Context, string) (DocumentInfo, error)
 }
 
+type VectorStore interface {
+	SearchVector(context.Context, VectorSearchQuery) ([]SearchResult, error)
+}
+
 type UnavailableStore struct{}
 
 func (UnavailableStore) EnsureIndex(context.Context) error {
