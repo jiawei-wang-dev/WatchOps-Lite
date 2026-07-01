@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -53,12 +54,13 @@ func mockResult(input Input) toolruntime.Result {
 	confidence := 0.95
 	service := strings.TrimSpace(input.Service)
 	return toolruntime.Result{
-		Evidence: []toolruntime.Evidence{
+		Evidence: []evidence.Item{
 			{
-				EvidenceID: "metric-evidence-001",
-				SourceType: toolruntime.SourceMetrics,
-				Source:     "mock-metrics",
-				TimeRange: &toolruntime.TimeRange{
+				ID:         "metric-evidence-001",
+				Type:       evidence.TypeMetricSample,
+				Source:     evidence.SourceMetrics,
+				SourceName: "mock-metrics",
+				TimeRange: &evidence.TimeRange{
 					From: input.TimeRange.From,
 					To:   input.TimeRange.To,
 				},

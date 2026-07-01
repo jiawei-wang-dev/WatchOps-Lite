@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 )
 
 const DefaultTimeout = 2 * time.Second
@@ -152,11 +154,25 @@ func finishSuccess(
 	result.FinishedAt = finishedAt
 	result.LatencyMS = finishedAt.Sub(startedAt).Milliseconds()
 	if result.Evidence == nil {
-		result.Evidence = []Evidence{}
+		result.Evidence = []evidence.Item{}
 	}
 	for index := range result.Evidence {
-		if result.Evidence[index].SourceType == "" {
-			result.Evidence[index].SourceType = config.SourceType
+		result.Evidence[index] = evidence.Normalize(
+			result.Evidence[index],
+			config.SourceType,
+		)
+		if err := evidence.Validate(result.Evidence[index]); err != nil {
+			return finishFailure(
+				config,
+				startedAt,
+				NewToolError(
+					ErrorCodeInternal,
+					config.ToolName,
+					"tool returned invalid evidence",
+					false,
+					map[string]any{"evidence_index": index},
+				),
+			)
 		}
 	}
 	if result.Warnings == nil {
@@ -178,7 +194,7 @@ func finishFailure(config Config, startedAt time.Time, toolError *ToolError) Res
 	return Result{
 		Tool:       config.ToolName,
 		SourceType: config.SourceType,
-		Evidence:   []Evidence{},
+		Evidence:   []evidence.Item{},
 		Warnings:   []Warning{},
 		Metadata:   map[string]any{"fallback_used": false},
 		Error:      toolError,

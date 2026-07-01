@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -73,7 +74,7 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]toolruntime.Evidence, 0, len(results))
+	evidenceItems := make([]evidence.Item, 0, len(results))
 	warnings := []toolruntime.Warning{}
 	retrievalMode := "bm25"
 	vectorFallback := false
@@ -85,10 +86,11 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 			vectorFallback = true
 		}
 		score := result.Score
-		evidence = append(evidence, toolruntime.Evidence{
-			EvidenceID: result.ChunkID,
-			SourceType: toolruntime.SourceKnowledge,
-			Source:     result.Source,
+		evidenceItems = append(evidenceItems, evidence.Item{
+			ID:         result.ChunkID,
+			Type:       evidence.TypeKnowledgeChunk,
+			Source:     evidence.SourceKnowledge,
+			SourceName: result.Source,
 			Content:    result.Content,
 			ResourceID: result.DocumentID,
 			Score:      &score,
@@ -111,11 +113,11 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 		})
 	}
 	return toolruntime.Result{
-		Evidence: evidence,
+		Evidence: evidenceItems,
 		Warnings: warnings,
 		Payload: map[string]any{
 			"query":          strings.TrimSpace(input.Query),
-			"returned_count": len(evidence),
+			"returned_count": len(evidenceItems),
 		},
 		Metadata: map[string]any{
 			"mode":           "elasticsearch",

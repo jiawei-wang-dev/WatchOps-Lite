@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievaltraces "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/traces"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
@@ -126,15 +127,16 @@ func (t *SearchTool) search(
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]toolruntime.Evidence, 0, len(spans))
+	evidenceItems := make([]evidence.Item, 0, len(spans))
 	for _, traceSpan := range spans {
 		startTime := traceSpan.StartTime.UTC()
 		endTime := startTime.Add(time.Duration(traceSpan.DurationMS * float64(time.Millisecond)))
-		evidence = append(evidence, toolruntime.Evidence{
-			EvidenceID: "jaeger-" + traceSpan.TraceID + "-" + traceSpan.SpanID,
-			SourceType: toolruntime.SourceTraces,
-			Source:     "jaeger",
-			TimeRange: &toolruntime.TimeRange{
+		evidenceItems = append(evidenceItems, evidence.Item{
+			ID:         "jaeger-" + traceSpan.TraceID + "-" + traceSpan.SpanID,
+			Type:       evidence.TypeTraceSpan,
+			Source:     evidence.SourceTraces,
+			SourceName: "jaeger",
+			TimeRange: &evidence.TimeRange{
 				From: startTime.Format(time.RFC3339Nano),
 				To:   endTime.Format(time.RFC3339Nano),
 			},
@@ -159,17 +161,17 @@ func (t *SearchTool) search(
 		})
 	}
 	warnings := []toolruntime.Warning{}
-	if len(evidence) == 0 {
+	if len(evidenceItems) == 0 {
 		warnings = append(warnings, toolruntime.Warning{
 			Code:    "TRACES_NO_DATA",
 			Message: "Jaeger returned no spans for the requested trace query.",
 		})
 	}
 	return toolruntime.Result{
-		Evidence: evidence,
+		Evidence: evidenceItems,
 		Warnings: warnings,
 		Payload: map[string]any{
-			"returned_count": len(evidence),
+			"returned_count": len(evidenceItems),
 		},
 		Metadata: map[string]any{
 			"mode":    "jaeger",

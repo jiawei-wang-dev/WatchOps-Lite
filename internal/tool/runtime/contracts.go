@@ -3,15 +3,17 @@ package runtime
 import (
 	"context"
 	"time"
+
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 )
 
-type SourceType string
+type SourceType = evidence.Source
 
 const (
-	SourceLogs      SourceType = "logs"
-	SourceMetrics   SourceType = "metrics"
-	SourceTraces    SourceType = "traces"
-	SourceKnowledge SourceType = "knowledge"
+	SourceLogs      = evidence.SourceLogs
+	SourceMetrics   = evidence.SourceMetrics
+	SourceTraces    = evidence.SourceTraces
+	SourceKnowledge = evidence.SourceKnowledge
 )
 
 const (
@@ -22,40 +24,22 @@ const (
 	ErrorCodeInternal              = "TOOL_INTERNAL"
 )
 
-type TimeRange struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
-type Evidence struct {
-	EvidenceID string         `json:"evidence_id"`
-	SourceType SourceType     `json:"source_type"`
-	Source     string         `json:"source,omitempty"`
-	Content    string         `json:"content"`
-	Score      *float64       `json:"score,omitempty"`
-	TimeRange  *TimeRange     `json:"time_range,omitempty"`
-	TraceID    string         `json:"trace_id,omitempty"`
-	ResourceID string         `json:"resource_id,omitempty"`
-	Confidence *float64       `json:"confidence,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
-
 type Warning struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
 type Result struct {
-	Tool       string         `json:"tool"`
-	SourceType SourceType     `json:"source_type"`
-	Evidence   []Evidence     `json:"evidence"`
-	Payload    map[string]any `json:"payload,omitempty"`
-	Warnings   []Warning      `json:"warnings"`
-	Metadata   map[string]any `json:"metadata"`
-	Error      *ToolError     `json:"error,omitempty"`
-	LatencyMS  int64          `json:"latency_ms"`
-	StartedAt  time.Time      `json:"started_at"`
-	FinishedAt time.Time      `json:"finished_at"`
+	Tool       string          `json:"tool"`
+	SourceType SourceType      `json:"source_type"`
+	Evidence   []evidence.Item `json:"evidence"`
+	Payload    map[string]any  `json:"payload,omitempty"`
+	Warnings   []Warning       `json:"warnings"`
+	Metadata   map[string]any  `json:"metadata"`
+	Error      *ToolError      `json:"error,omitempty"`
+	LatencyMS  int64           `json:"latency_ms"`
+	StartedAt  time.Time       `json:"started_at"`
+	FinishedAt time.Time       `json:"finished_at"`
 }
 
 type ToolError struct {

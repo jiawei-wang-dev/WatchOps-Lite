@@ -60,9 +60,9 @@ func FromRuntimeResult(result toolruntime.Result) (ToolResult, error) {
 			metadata["trace_id"] = item.TraceID
 		}
 		evidence = append(evidence, EvidenceItem{
-			ID:         item.EvidenceID,
-			SourceType: string(item.SourceType),
-			SourceName: item.Source,
+			ID:         item.ID,
+			SourceType: string(item.Source),
+			SourceName: item.SourceName,
 			TimeRange:  timeRange,
 			Content:    item.Content,
 			ResourceID: item.ResourceID,

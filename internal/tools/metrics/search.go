@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
@@ -117,18 +118,19 @@ func (t *SearchTool) search(
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]toolruntime.Evidence, 0, len(samples))
+	evidenceItems := make([]evidence.Item, 0, len(samples))
 	for index, sample := range samples {
 		timestamp := sample.Timestamp.UTC().Format(time.RFC3339Nano)
 		service := sample.Service
 		if service == "" {
 			service = strings.TrimSpace(input.Service)
 		}
-		evidence = append(evidence, toolruntime.Evidence{
-			EvidenceID: fmt.Sprintf("prometheus-%s-%d", evidenceIDPart(sample.Name), index+1),
-			SourceType: toolruntime.SourceMetrics,
-			Source:     "prometheus",
-			TimeRange: &toolruntime.TimeRange{
+		evidenceItems = append(evidenceItems, evidence.Item{
+			ID:         fmt.Sprintf("prometheus-%s-%d", evidenceIDPart(sample.Name), index+1),
+			Type:       evidence.TypeMetricSample,
+			Source:     evidence.SourceMetrics,
+			SourceName: "prometheus",
+			TimeRange: &evidence.TimeRange{
 				From: input.TimeRange.From,
 				To:   input.TimeRange.To,
 			},
@@ -150,17 +152,17 @@ func (t *SearchTool) search(
 		})
 	}
 	warnings := []toolruntime.Warning{}
-	if len(evidence) == 0 {
+	if len(evidenceItems) == 0 {
 		warnings = append(warnings, toolruntime.Warning{
 			Code:    "METRICS_NO_DATA",
 			Message: "Prometheus returned no samples for the selected query and time.",
 		})
 	}
 	return toolruntime.Result{
-		Evidence: evidence,
+		Evidence: evidenceItems,
 		Warnings: warnings,
 		Payload: map[string]any{
-			"returned_count": len(evidence),
+			"returned_count": len(evidenceItems),
 		},
 		Metadata: map[string]any{
 			"mode":    "prometheus",

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 )
 
 func TestRuntimeExecutesOperation(t *testing.T) {
@@ -13,7 +15,10 @@ func TestRuntimeExecutesOperation(t *testing.T) {
 		SourceType: SourceLogs,
 		Timeout:    time.Second,
 		Operation: func(context.Context, any) (Result, error) {
-			return Result{Evidence: []Evidence{{EvidenceID: "log-1"}}}, nil
+			return Result{Evidence: []evidence.Item{{
+				ID:      "log-1",
+				Content: "log evidence",
+			}}}, nil
 		},
 	})
 	if err != nil {
@@ -26,8 +31,8 @@ func TestRuntimeExecutesOperation(t *testing.T) {
 		result.SourceType != SourceLogs || len(result.Evidence) != 1 {
 		t.Fatalf("result = %#v, want successful normalized result", result)
 	}
-	if result.Evidence[0].SourceType != SourceLogs {
-		t.Fatalf("evidence source type = %q, want %q", result.Evidence[0].SourceType, SourceLogs)
+	if result.Evidence[0].Source != SourceLogs {
+		t.Fatalf("evidence source = %q, want %q", result.Evidence[0].Source, SourceLogs)
 	}
 }
 
@@ -40,7 +45,10 @@ func TestRuntimeUsesFallbackForOperationError(t *testing.T) {
 			return Result{}, errors.New("prometheus unavailable")
 		},
 		Fallback: func(context.Context, any) (Result, error) {
-			return Result{Evidence: []Evidence{{EvidenceID: "mock-metric-1"}}}, nil
+			return Result{Evidence: []evidence.Item{{
+				ID:      "mock-metric-1",
+				Content: "metric evidence",
+			}}}, nil
 		},
 		FallbackWarning: Warning{
 			Code:    "METRICS_FALLBACK",
@@ -72,7 +80,10 @@ func TestRuntimeUsesFallbackOnTimeout(t *testing.T) {
 			return Result{}, ctx.Err()
 		},
 		Fallback: func(context.Context, any) (Result, error) {
-			return Result{Evidence: []Evidence{{EvidenceID: "mock-trace-1"}}}, nil
+			return Result{Evidence: []evidence.Item{{
+				ID:      "mock-trace-1",
+				Content: "trace evidence",
+			}}}, nil
 		},
 	})
 	if err != nil {
@@ -116,5 +127,26 @@ func TestRuntimeDoesNotFallbackForInvalidArguments(t *testing.T) {
 	if fallbackCalled || result.Error == nil ||
 		result.Error.Code != ErrorCodeInvalidArgument {
 		t.Fatalf("result = %#v fallbackCalled=%t", result, fallbackCalled)
+	}
+}
+
+func TestRuntimeRejectsInvalidEvidence(t *testing.T) {
+	toolRuntime, err := New(Config{
+		ToolName:   "query_logs",
+		SourceType: SourceLogs,
+		Timeout:    time.Second,
+		Operation: func(context.Context, any) (Result, error) {
+			return Result{Evidence: []evidence.Item{{ID: "missing-content"}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result := toolRuntime.Execute(context.Background(), struct{}{})
+
+	if result.Error == nil || result.Error.Code != ErrorCodeInternal ||
+		result.Error.Message != "tool returned invalid evidence" {
+		t.Fatalf("result = %#v, want invalid evidence failure", result)
 	}
 }

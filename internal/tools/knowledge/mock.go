@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -55,11 +56,12 @@ func mockResult(input Input) toolruntime.Result {
 		category = "runbook"
 	}
 	return toolruntime.Result{
-		Evidence: []toolruntime.Evidence{
+		Evidence: []evidence.Item{
 			{
-				EvidenceID: "knowledge-evidence-001",
-				SourceType: toolruntime.SourceKnowledge,
-				Source:     "mock-runbooks",
+				ID:         "knowledge-evidence-001",
+				Type:       evidence.TypeKnowledgeChunk,
+				Source:     evidence.SourceKnowledge,
+				SourceName: "mock-runbooks",
 				Content:    "Mock runbook recommends checking upstream timeout saturation before increasing client retry limits.",
 				ResourceID: "runbook-checkout-timeouts",
 				Score:      &score,

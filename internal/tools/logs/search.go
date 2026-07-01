@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
@@ -123,15 +124,16 @@ func (t *SearchTool) search(
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]toolruntime.Evidence, 0, len(events))
+	evidenceItems := make([]evidence.Item, 0, len(events))
 	for _, event := range events {
 		timestamp := event.Timestamp.UTC().Format(time.RFC3339Nano)
 		content, truncated := conciseMessage(event.Message)
-		evidence = append(evidence, toolruntime.Evidence{
-			EvidenceID: event.ID,
-			SourceType: toolruntime.SourceLogs,
-			Source:     "elasticsearch-logs",
-			TimeRange: &toolruntime.TimeRange{
+		evidenceItems = append(evidenceItems, evidence.Item{
+			ID:         event.ID,
+			Type:       evidence.TypeLogEvent,
+			Source:     evidence.SourceLogs,
+			SourceName: "elasticsearch-logs",
+			TimeRange: &evidence.TimeRange{
 				From: timestamp,
 				To:   timestamp,
 			},
@@ -149,9 +151,9 @@ func (t *SearchTool) search(
 		})
 	}
 	return toolruntime.Result{
-		Evidence: evidence,
+		Evidence: evidenceItems,
 		Payload: map[string]any{
-			"returned_count": len(evidence),
+			"returned_count": len(evidenceItems),
 			"keywords":       input.Keywords,
 		},
 		Metadata: map[string]any{
