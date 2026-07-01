@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -24,6 +25,7 @@ func (r *FallbackRunner) Run(ctx context.Context, input AgentInput) (AgentOutput
 	if ctx.Err() != nil {
 		return AgentOutput{}, err
 	}
+	runtimemetrics.IncAgentFallback("llm_unavailable")
 
 	ctx, span := observability.StartSpan(
 		ctx,

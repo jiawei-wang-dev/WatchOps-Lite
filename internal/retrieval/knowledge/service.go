@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/embedding"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -183,6 +184,10 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 }
 
 func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult, error) {
+	started := time.Now()
+	defer func() {
+		runtimemetrics.ObserveRAGSearch(s.config.RetrievalMode, time.Since(started))
+	}()
 	ctx, span := observability.StartSpan(
 		ctx,
 		"knowledge.search",

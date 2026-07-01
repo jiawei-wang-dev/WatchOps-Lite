@@ -2,6 +2,7 @@ package httptransport
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http/handler"
@@ -13,6 +14,7 @@ type RouterDependencies struct {
 	Knowledge handler.KnowledgeExecutor
 	Feedback  handler.FeedbackExecutor
 	Eval      handler.EvalExecutor
+	Metrics   http.Handler
 }
 
 func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDependencies) *gin.Engine {
@@ -25,6 +27,9 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 
 	healthHandler := handler.NewHealth(serviceName)
 	router.GET("/healthz", healthHandler.Handle)
+	if dependencies.Metrics != nil {
+		router.GET("/metrics", gin.WrapH(dependencies.Metrics))
+	}
 
 	api := router.Group("/api/v1")
 	chatHandler := handler.NewChat(dependencies.Chat)

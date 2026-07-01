@@ -39,21 +39,22 @@ func (d Duration) Value() time.Duration {
 }
 
 type Config struct {
-	Server        ServerConfig        `json:"server"`
-	Log           LogConfig           `json:"log"`
-	Redis         RedisConfig         `json:"redis"`
-	Session       SessionConfig       `json:"session"`
-	Summary       SummaryConfig       `json:"summary"`
-	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
-	Knowledge     KnowledgeConfig     `json:"knowledge"`
-	Embedding     EmbeddingConfig     `json:"embedding"`
-	Logs          LogsConfig          `json:"logs"`
-	Metrics       MetricsConfig       `json:"metrics"`
-	Traces        TracesConfig        `json:"traces"`
-	MySQL         MySQLConfig         `json:"mysql"`
-	Agent         AgentConfig         `json:"agent"`
-	LLM           LLMConfig           `json:"llm"`
-	Telemetry     TelemetryConfig     `json:"telemetry"`
+	Server         ServerConfig         `json:"server"`
+	Log            LogConfig            `json:"log"`
+	Redis          RedisConfig          `json:"redis"`
+	Session        SessionConfig        `json:"session"`
+	Summary        SummaryConfig        `json:"summary"`
+	Elasticsearch  ElasticsearchConfig  `json:"elasticsearch"`
+	Knowledge      KnowledgeConfig      `json:"knowledge"`
+	Embedding      EmbeddingConfig      `json:"embedding"`
+	Logs           LogsConfig           `json:"logs"`
+	Metrics        MetricsConfig        `json:"metrics"`
+	Traces         TracesConfig         `json:"traces"`
+	MySQL          MySQLConfig          `json:"mysql"`
+	Agent          AgentConfig          `json:"agent"`
+	LLM            LLMConfig            `json:"llm"`
+	Telemetry      TelemetryConfig      `json:"telemetry"`
+	RuntimeMetrics RuntimeMetricsConfig `json:"runtime_metrics"`
 }
 
 type ServerConfig struct {
@@ -182,6 +183,10 @@ type TelemetryConfig struct {
 	ExportTimeout Duration `json:"export_timeout"`
 }
 
+type RuntimeMetricsConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
@@ -291,6 +296,9 @@ func Default() Config {
 			Insecure:      true,
 			SampleRatio:   1,
 			ExportTimeout: Duration(3 * time.Second),
+		},
+		RuntimeMetrics: RuntimeMetricsConfig{
+			Enabled: true,
 		},
 	}
 }
@@ -509,6 +517,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sLLM_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.LLM.Enabled = parsed
+	}
+	if value, ok := lookup("RUNTIME_METRICS_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sRUNTIME_METRICS_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.RuntimeMetrics.Enabled = parsed
 	}
 	if value, ok := lookup("LLM_TEMPERATURE"); ok {
 		parsed, err := strconv.ParseFloat(value, 64)

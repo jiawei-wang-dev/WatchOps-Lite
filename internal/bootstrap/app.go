@@ -14,6 +14,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/eval"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
@@ -34,6 +35,13 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
+	var metricsHandler http.Handler
+	runtimemetrics.SetDefault(nil)
+	if cfg.RuntimeMetrics.Enabled {
+		collector := runtimemetrics.New()
+		runtimemetrics.SetDefault(collector)
+		metricsHandler = collector.Handler()
+	}
 	embeddingProvider := buildEmbeddingProvider(cfg, logger)
 	var elasticsearchClient *elasticsearchplatform.Client
 	knowledgeStore := retrievalknowledge.Store(retrievalknowledge.UnavailableStore{})
@@ -303,6 +311,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			Knowledge: knowledgeService,
 			Feedback:  feedbackService,
 			Eval:      evalService,
+			Metrics:   metricsHandler,
 		},
 	)
 

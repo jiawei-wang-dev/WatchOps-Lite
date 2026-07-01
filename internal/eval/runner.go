@@ -9,12 +9,20 @@ import (
 	"time"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 const defaultRunLimit = 20
 
-func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
+func (s *Service) Run(ctx context.Context, request RunRequest) (result Run, resultErr error) {
+	defer func() {
+		status := "completed"
+		if resultErr != nil {
+			status = "failed"
+		}
+		runtimemetrics.IncEvalRun(status)
+	}()
 	ctx, span := observability.StartSpan(
 		ctx,
 		"eval.run",

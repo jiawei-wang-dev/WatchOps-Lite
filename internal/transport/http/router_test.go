@@ -16,6 +16,7 @@ import (
 	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http/dto"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -50,6 +51,50 @@ func TestRouterServesHealthCheck(t *testing.T) {
 	}
 	if body.Status != "ok" || body.Service != "watchops-lite" {
 		t.Fatalf("response = %#v, want healthy watchops-lite service", body)
+	}
+}
+
+func TestRouterServesRuntimeMetricsWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	collector := runtimemetrics.New()
+	runtimemetrics.SetDefault(collector)
+	t.Cleanup(func() { runtimemetrics.SetDefault(nil) })
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	router := NewRouter(
+		logger,
+		"watchops-lite",
+		RouterDependencies{Metrics: collector.Handler()},
+	)
+
+	healthRecorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		healthRecorder,
+		httptest.NewRequest(http.MethodGet, "/healthz", nil),
+	)
+	metricsRecorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		metricsRecorder,
+		httptest.NewRequest(http.MethodGet, "/metrics", nil),
+	)
+
+	if metricsRecorder.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d", metricsRecorder.Code, http.StatusOK)
+	}
+	if !bytes.Contains(metricsRecorder.Body.Bytes(), []byte("watchops_http_requests_total")) {
+		t.Fatalf("metrics response does not contain HTTP request metric: %s", metricsRecorder.Body.String())
+	}
+}
+
+func TestRouterOmitsRuntimeMetricsWhenDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	router := NewRouter(logger, "watchops-lite", RouterDependencies{})
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
 }
 

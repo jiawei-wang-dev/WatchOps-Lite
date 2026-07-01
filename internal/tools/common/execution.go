@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -39,6 +40,11 @@ func Execute(
 		attribute.Int64("tool.timeout_ms", timeout.Milliseconds()),
 	)
 	defer func() {
+		errorCode := ""
+		if result.Error != nil {
+			errorCode = string(result.Error.Code)
+		}
+		runtimemetrics.ObserveTool(options.ToolName, errorCode, time.Since(startedAt))
 		span.SetAttributes(
 			attribute.Bool("tool.success", result.Success),
 			attribute.Int("tool.evidence_count", len(result.Evidence)),

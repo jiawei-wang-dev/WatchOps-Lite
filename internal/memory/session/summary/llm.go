@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -111,6 +112,7 @@ func (s *LLM) runFallback(
 	messages []session.Message,
 	reason string,
 ) (session.Summary, error) {
+	runtimemetrics.IncSummaryFallback(reason)
 	ctx, span := observability.StartSpan(
 		ctx,
 		"summary.fallback",

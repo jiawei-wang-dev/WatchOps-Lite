@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -26,6 +28,16 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		c.Set("request_id", requestID)
 		c.Next()
 
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		runtimemetrics.ObserveHTTPRequest(
+			c.Request.Method,
+			route,
+			strconv.Itoa(c.Writer.Status()),
+			time.Since(started),
+		)
 		logger.Info(
 			"http request completed",
 			"request_id", requestID,

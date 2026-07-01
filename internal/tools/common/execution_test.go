@@ -3,8 +3,12 @@ package common
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 )
 
 func TestExecuteReturnsStructuredTimeout(t *testing.T) {
@@ -54,5 +58,34 @@ func TestExecuteSanitizesUnexpectedErrors(t *testing.T) {
 	}
 	if toolErr.Code != ErrorCodeInternal || toolErr.Message != "tool execution failed" {
 		t.Fatalf("error = %#v, want sanitized internal error", toolErr)
+	}
+}
+
+func TestExecuteRecordsToolMetrics(t *testing.T) {
+	collector := runtimemetrics.New()
+	runtimemetrics.SetDefault(collector)
+	t.Cleanup(func() { runtimemetrics.SetDefault(nil) })
+
+	_, err := Execute(
+		context.Background(),
+		ExecuteOptions{ToolName: "query_logs"},
+		func(context.Context) (ToolResult, error) {
+			return ToolResult{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	collector.Handler().ServeHTTP(
+		recorder,
+		httptest.NewRequest("GET", "/metrics", nil),
+	)
+	if !strings.Contains(
+		recorder.Body.String(),
+		`watchops_tool_calls_total{status="success",tool="query_logs"} 1`,
+	) {
+		t.Fatalf("tool metric was not recorded: %s", recorder.Body.String())
 	}
 }

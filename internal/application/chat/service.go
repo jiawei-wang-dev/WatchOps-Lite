@@ -10,6 +10,7 @@ import (
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -84,6 +85,11 @@ func NewService(
 }
 
 func (s *Service) Execute(ctx context.Context, command Command) (Result, error) {
+	started := time.Now()
+	success := false
+	defer func() {
+		runtimemetrics.ObserveChat(success, time.Since(started))
+	}()
 	ctx, span := observability.StartSpan(
 		ctx,
 		"chat.execute",
@@ -133,6 +139,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	if !memoryAvailable {
 		appendMemoryLimitation(&agentOutput)
 	} else if err := s.persistContext(ctx, command, snapshot, agentOutput); err != nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
 		span.SetAttributes(attribute.Bool("session_memory_available", false))
 		agentOutput.Metadata["session_memory_available"] = false
 		appendMemoryLimitation(&agentOutput)
@@ -142,6 +149,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	if traceID != "" {
 		agentOutput.Metadata["trace_id"] = traceID
 	}
+	success = true
 	return Result{
 		RequestID: command.RequestID,
 		SessionID: command.SessionID,
@@ -162,6 +170,7 @@ func (s *Service) loadContext(
 	defer span.End()
 
 	if s.store == nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
 		span.SetAttributes(attribute.Bool("memory_available", false))
 		observability.MarkError(span, "session memory unavailable")
 		return emptySnapshot(), false
@@ -169,6 +178,7 @@ func (s *Service) loadContext(
 
 	snapshot, err := s.store.LoadContext(ctx, sessionID)
 	if err != nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
 		span.SetAttributes(attribute.Bool("memory_available", false))
 		observability.MarkError(span, "session memory load failed")
 		return emptySnapshot(), false

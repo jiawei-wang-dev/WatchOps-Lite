@@ -36,6 +36,21 @@ func TestLoadAppliesFileThenEnvironment(t *testing.T) {
 	}
 }
 
+func TestRuntimeMetricsDefaultsAndEnvironmentOverride(t *testing.T) {
+	cfg := Default()
+	if !cfg.RuntimeMetrics.Enabled {
+		t.Fatal("expected runtime metrics to be enabled by default")
+	}
+
+	t.Setenv("WATCHOPS_RUNTIME_METRICS_ENABLED", "false")
+	if err := applyEnvironment(&cfg); err != nil {
+		t.Fatalf("apply environment: %v", err)
+	}
+	if cfg.RuntimeMetrics.Enabled {
+		t.Fatal("expected environment to disable runtime metrics")
+	}
+}
+
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"unknown": true}`), 0o600); err != nil {

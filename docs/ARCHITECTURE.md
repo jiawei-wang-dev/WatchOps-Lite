@@ -277,17 +277,18 @@ When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`
 
 Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 
-Jaeger is the local trace visualization backend. Prometheus is now used as the `query_metrics` evidence backend. Instrumenting WatchOps-Lite itself with Prometheus application metrics remains a separate deferred enhancement.
+Jaeger is the local trace visualization backend. Prometheus has two deliberately separate roles: `query_metrics` reads allowlisted service-reliability signals as Agent evidence, while `GET /metrics` exposes WatchOps-Lite runtime telemetry for scraping.
 
-Potential post-MVP metrics:
+Runtime metrics include:
 
-- Chat latency and success rate
-- Per-tool latency, timeout rate, and fallback rate
-- Model tokens and loop steps
-- Empty RAG retrieval rate
-- Evidence coverage
-- Positive/negative feedback ratio
-- Eval pass rate
+- HTTP request count and latency by bounded route
+- Chat count and latency
+- tool count, duration, and errors by tool/error code
+- RAG search latency by retrieval mode
+- memory-unavailable, Agent-fallback, and summary-fallback counts
+- eval run count by completion status
+
+`internal/observability/metrics` owns a private Prometheus registry so application metrics do not collide with process-global collectors in tests or embedded use. Configuration can disable both collection and the endpoint. Trace spans remain the source for request-level causality; metrics provide aggregate rates and latency distributions. Grafana visualization is deferred to the next stage.
 
 ## 10. Dependency Failure Policy
 

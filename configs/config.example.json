@@ -114,5 +114,8 @@
     "insecure": true,
     "sample_ratio": 1.0,
     "export_timeout": "3s"
+  },
+  "runtime_metrics": {
+    "enabled": true
   }
 }

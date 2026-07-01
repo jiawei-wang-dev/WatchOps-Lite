@@ -324,6 +324,22 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement Stage 4: Runtime Prometheus Metrics — Completed
+
+Delivered:
+
+- Optional `GET /metrics` endpoint backed by a private Prometheus registry
+- HTTP and Chat request counters and latency histograms
+- Tool call, duration, and structured-error metrics
+- Knowledge RAG search latency
+- Session-memory unavailability and Agent/summary fallback counters
+- Eval run completion counters
+- Local Prometheus scrape configuration for WatchOps-Lite
+
+The Prometheus evidence backend used by `query_metrics` remains separate: it answers reliability questions about monitored services, while these runtime metrics describe WatchOps-Lite itself.
+
+Exit status: complete. Grafana visualization remains the next enhancement stage.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -342,11 +358,11 @@ flowchart LR
     U13 --> S1["Stage 1 LLM Summary (complete)"]
     S1 --> S2["Stage 2 Hybrid Retrieval (complete)"]
     S2 --> S3["Stage 3 Eval Runner (complete)"]
+    S3 --> S4["Stage 4 Runtime Metrics (complete)"]
 ```
 
 ## Deferred Work
 
-- Prometheus instrumentation for WatchOps-Lite application health and tool SLIs
 - Advanced trace critical-path, dependency-graph, and anomaly analytics
 - MySQL long-term memory, audit records, and document lifecycle metadata
 - Eval-case review/export, release comparison, and optional future LLM judge
@@ -357,4 +373,4 @@ flowchart LR
 - Advanced tenant billing
 - Voice and multimodal input
 
-Grafana dashboards and Prometheus instrumentation for WatchOps-Lite itself remain deferred. Upgrade 1.2 uses Prometheus specifically as the read-only service-metrics evidence backend.
+Grafana dashboards remain deferred. Upgrade 1.2 uses Prometheus as the read-only service-metrics evidence backend, while Enhancement Stage 4 separately instruments WatchOps-Lite itself.

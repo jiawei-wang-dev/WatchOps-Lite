@@ -43,6 +43,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Elasticsearch BM25, optional vector retrieval, and RRF hybrid fusion with BM25 fallback
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
+- Prometheus runtime metrics at `GET /metrics` for HTTP, Chat, tools, RAG, memory, fallbacks, and eval runs
 - Jaeger-backed `query_traces` with trace-ID or bounded service/time search and explicit mock fallback
 - MySQL upvote/downvote feedback, good/bad eval cases, and synchronous rule-based eval runs
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
@@ -133,6 +134,8 @@ export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Knowledge, feedback, and eval scripts create additional records.
 
 `configs/config.example.json` selects Elasticsearch logs, Prometheus metrics, and Jaeger traces with explicit mock fallback. If a backend is unavailable, Chat continues with `LOGS_FALLBACK`, `METRICS_FALLBACK`, or `TRACES_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps all three observability tools in mock mode.
+
+Runtime Prometheus instrumentation is enabled by default and exposed at `http://localhost:8080/metrics`. Set `WATCHOPS_RUNTIME_METRICS_ENABLED=false` to omit the endpoint. The local Prometheus configuration scrapes this endpoint separately from the demo service signals consumed by `query_metrics`.
 
 Query the demo Prometheus signal directly:
 
@@ -302,7 +305,7 @@ make verify
 - LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
 - Eval cases are executed by deterministic rules; LLM-as-judge and prompt A/B testing remain deferred.
-- Prometheus application metrics and Grafana dashboards are not included.
+- Prometheus application metrics are included; a Grafana dashboard remains a follow-up enhancement.
 - The LLM Agent is optional and disabled by default.
 - MySQL currently stores feedback and eval cases, not long-term memory, document metadata, or audit records.
 
@@ -311,7 +314,7 @@ make verify
 - Evaluation-driven reranking and retrieval tuning
 - Advanced trace critical-path and service-graph analytics
 - Eval release comparison reports and optional LLM judge
-- Prometheus application metrics and Grafana dashboards
+- Starter Grafana dashboard for the runtime Prometheus metrics
 
 ## Design Documents
 
@@ -328,6 +331,7 @@ make verify
 - [ADR 0013: LLM Session Summary](docs/adr/0013-llm-session-summary.md)
 - [ADR 0014: Hybrid Knowledge Retrieval](docs/adr/0014-hybrid-knowledge-retrieval.md)
 - [ADR 0015: Rule-based Eval Runner](docs/adr/0015-eval-runner.md)
+- [ADR 0016: Runtime Prometheus Metrics](docs/adr/0016-runtime-prometheus-metrics.md)
 
 ## Originality
 
