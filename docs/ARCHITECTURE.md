@@ -117,13 +117,19 @@ Each message contains role, content, timestamp, sequence, and request ID. Summar
 
 ### 5.2 Context Budget
 
-The current context implementation bounds recent messages and moves older messages into a deterministic rolling summary. Future relevance and token budgeting can extend this order:
+The context implementation bounds recent messages and moves older messages into a rolling structured summary. `summary.mode=llm` uses the configured OpenAI-compatible model with a versioned JSON-only prompt; deterministic mode remains the default. Model errors, summary timeouts, or invalid JSON create `summary.fallback` and use the deterministic summarizer without failing Chat.
+
+The LLM summary is separate from Agent answering: it only compresses already available session context and cannot invoke tools. Its prompt explicitly prevents user guesses or unsupported assistant speculation from becoming confirmed facts and preserves operational identifiers, evidence IDs, tool names, error codes, and time ranges.
+
+Context budgeting follows this order:
 
 1. Preserve the current question, system boundaries, and critical evidence.
 2. Move older recent messages into the summary.
 3. Shorten RAG chunks while retaining source references.
 4. Compress tool output into statistics and representative samples.
 5. Remove low-relevance future long-term memories.
+
+Summary tracing uses `summary.llm`, `summary.parse`, and `summary.fallback`. Attributes record only mode, prompt version, message count, parse status, and fallback status—not message or model-output content.
 
 ## 6. RAG Architecture
 

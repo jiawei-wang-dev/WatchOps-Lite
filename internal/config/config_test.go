@@ -211,6 +211,39 @@ func TestLoadAppliesRedisAndSessionEnvironment(t *testing.T) {
 	}
 }
 
+func TestDefaultSummaryConfigurationUsesDeterministicMode(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Summary.Mode != "deterministic" ||
+		cfg.Summary.PromptVersion != "session_summary_v1" ||
+		cfg.Summary.Timeout.Value() != 10*time.Second ||
+		!cfg.Summary.FallbackToDeterministic {
+		t.Fatalf("Summary config = %#v", cfg.Summary)
+	}
+}
+
+func TestLoadAppliesSummaryEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCHOPS_SUMMARY_MODE", "llm")
+	t.Setenv("WATCHOPS_SUMMARY_PROMPT_VERSION", "session_summary_v2")
+	t.Setenv("WATCHOPS_SUMMARY_TIMEOUT", "750ms")
+	t.Setenv("WATCHOPS_SUMMARY_FALLBACK_TO_DETERMINISTIC", "true")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Summary.Mode != "llm" ||
+		cfg.Summary.PromptVersion != "session_summary_v2" ||
+		cfg.Summary.Timeout.Value() != 750*time.Millisecond ||
+		!cfg.Summary.FallbackToDeterministic {
+		t.Fatalf("Summary config = %#v", cfg.Summary)
+	}
+}
+
 func TestLoadAppliesElasticsearchEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {

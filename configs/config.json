@@ -24,6 +24,12 @@
     "summary_threshold": 12,
     "ttl": "24h"
   },
+  "summary": {
+    "mode": "deterministic",
+    "prompt_version": "session_summary_v1",
+    "timeout": "10s",
+    "fallback_to_deterministic": true
+  },
   "elasticsearch": {
     "enabled": false,
     "addresses": ["http://localhost:9200"],

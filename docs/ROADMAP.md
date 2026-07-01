@@ -265,6 +265,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement Stage 1: LLM Session Summary — Completed
+
+Delivered:
+
+- Versioned JSON-only session-summary prompt
+- Structured LLM summary parsing into the existing `session.Summary`
+- Deterministic fallback for disabled or incomplete configuration, model errors, timeouts, and invalid JSON
+- `summary.llm`, `summary.parse`, and `summary.fallback` spans
+- Preserved Redis summary versioning and unchanged Chat API
+
+Exit criteria:
+
+- Deterministic mode remains the default.
+- LLM mode cannot make Chat fail solely because summarization failed.
+- Confirmed-fact safety and identifier preservation are explicit prompt rules.
+- Existing ChatService and Redis summary tests continue to pass.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -280,6 +299,7 @@ flowchart LR
     P9 --> U11["Upgrade 1.1 ES Logs (complete)"]
     U11 --> U12["Upgrade 1.2 Prometheus Metrics (complete)"]
     U12 --> U13["Upgrade 1.3 Jaeger Traces (complete)"]
+    U13 --> S1["Stage 1 LLM Summary (complete)"]
 ```
 
 ## Deferred Work

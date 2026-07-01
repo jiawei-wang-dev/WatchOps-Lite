@@ -14,7 +14,6 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/eval"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
-	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
@@ -257,10 +256,16 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		logger,
 		newOpenAICompatibleModel,
 	)
+	summarizer := buildSessionSummarizer(
+		context.Background(),
+		cfg,
+		logger,
+		newOpenAICompatibleModel,
+	)
 	chatService := applicationchat.NewService(
 		agentRunner,
 		sessionStore,
-		sessionSummary.NewDeterministic(),
+		summarizer,
 		applicationchat.ServiceConfig{
 			RecentWindowSize: cfg.Session.RecentWindowSize,
 			SummaryThreshold: cfg.Session.SummaryThreshold,

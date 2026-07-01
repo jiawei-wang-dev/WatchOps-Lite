@@ -39,7 +39,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
-- Redis recent-message sliding window and deterministic rolling summary
+- Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
 - Elasticsearch chunk indexing and BM25 knowledge retrieval
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
@@ -297,7 +297,7 @@ make verify
 ## Current Limitations
 
 - Knowledge retrieval is BM25 only; embeddings, hybrid retrieval, RRF, and reranking are deferred.
-- Session summarization is deterministic; an LLM summary model with deterministic fallback is deferred.
+- LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
 - Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
 - Prometheus application metrics and Grafana dashboards are not included.
@@ -306,7 +306,6 @@ make verify
 
 ## Roadmap
 
-- LLM session summary model with deterministic fallback
 - Hybrid BM25/vector retrieval with evaluation-driven RRF and reranking
 - Advanced trace critical-path and service-graph analytics
 - Automatic eval runner and release comparison reports
@@ -324,6 +323,7 @@ make verify
 - [ADR 0010: Elasticsearch-backed Logs Tool](docs/adr/0010-elasticsearch-logs-tool.md)
 - [ADR 0011: Prometheus-backed Metrics Tool](docs/adr/0011-prometheus-metrics-tool.md)
 - [ADR 0012: Jaeger-backed Traces Tool](docs/adr/0012-jaeger-traces-tool.md)
+- [ADR 0013: LLM Session Summary](docs/adr/0013-llm-session-summary.md)
 
 ## Originality
 

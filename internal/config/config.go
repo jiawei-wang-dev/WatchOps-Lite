@@ -43,6 +43,7 @@ type Config struct {
 	Log           LogConfig           `json:"log"`
 	Redis         RedisConfig         `json:"redis"`
 	Session       SessionConfig       `json:"session"`
+	Summary       SummaryConfig       `json:"summary"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
 	Logs          LogsConfig          `json:"logs"`
@@ -81,6 +82,13 @@ type SessionConfig struct {
 	RecentWindowSize int      `json:"recent_window_size"`
 	SummaryThreshold int      `json:"summary_threshold"`
 	TTL              Duration `json:"ttl"`
+}
+
+type SummaryConfig struct {
+	Mode                    string   `json:"mode"`
+	PromptVersion           string   `json:"prompt_version"`
+	Timeout                 Duration `json:"timeout"`
+	FallbackToDeterministic bool     `json:"fallback_to_deterministic"`
 }
 
 type ElasticsearchConfig struct {
@@ -181,6 +189,12 @@ func Default() Config {
 			RecentWindowSize: 12,
 			SummaryThreshold: 12,
 			TTL:              Duration(24 * time.Hour),
+		},
+		Summary: SummaryConfig{
+			Mode:                    "deterministic",
+			PromptVersion:           "session_summary_v1",
+			Timeout:                 Duration(10 * time.Second),
+			FallbackToDeterministic: true,
 		},
 		Elasticsearch: ElasticsearchConfig{
 			Enabled:        false,
@@ -298,6 +312,8 @@ func applyEnvironment(cfg *Config) error {
 	setString("REDIS_ADDRESS", &cfg.Redis.Address)
 	setString("REDIS_USERNAME", &cfg.Redis.Username)
 	setString("REDIS_PASSWORD", &cfg.Redis.Password)
+	setString("SUMMARY_MODE", &cfg.Summary.Mode)
+	setString("SUMMARY_PROMPT_VERSION", &cfg.Summary.PromptVersion)
 	setString("ELASTICSEARCH_USERNAME", &cfg.Elasticsearch.Username)
 	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
@@ -332,6 +348,7 @@ func applyEnvironment(cfg *Config) error {
 		{"REDIS_READ_TIMEOUT", &cfg.Redis.ReadTimeout},
 		{"REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout},
 		{"SESSION_TTL", &cfg.Session.TTL},
+		{"SUMMARY_TIMEOUT", &cfg.Summary.Timeout},
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
 		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
@@ -377,6 +394,17 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sELASTICSEARCH_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Elasticsearch.Enabled = parsed
+	}
+	if value, ok := lookup("SUMMARY_FALLBACK_TO_DETERMINISTIC"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf(
+				"%sSUMMARY_FALLBACK_TO_DETERMINISTIC must be a boolean: %w",
+				envPrefix,
+				err,
+			)
+		}
+		cfg.Summary.FallbackToDeterministic = parsed
 	}
 	if value, ok := lookup("LOGS_FALLBACK_TO_MOCK"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -563,6 +591,20 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Session.TTL <= 0 {
 		return errors.New("session.ttl must be greater than zero")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Summary.Mode)) {
+	case "deterministic", "llm":
+	default:
+		return errors.New("summary.mode must be deterministic or llm")
+	}
+	if strings.TrimSpace(cfg.Summary.PromptVersion) == "" {
+		return errors.New("summary.prompt_version is required")
+	}
+	if cfg.Summary.Timeout <= 0 {
+		return errors.New("summary.timeout must be greater than zero")
+	}
+	if strings.EqualFold(cfg.Summary.Mode, "llm") && !cfg.Summary.FallbackToDeterministic {
+		return errors.New("summary.fallback_to_deterministic must be true in llm mode")
 	}
 
 	if cfg.Elasticsearch.RequestTimeout <= 0 {
