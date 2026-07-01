@@ -58,7 +58,7 @@ Requirements:
 - `curl`
 - Python 3 for JSON-safe demo-file loading and response ID extraction
 
-Start Redis, Elasticsearch, Prometheus, the demo metrics exporter, MySQL, and Jaeger:
+Start Redis, Elasticsearch, Prometheus, the demo metrics exporter, MySQL, Jaeger, and Grafana:
 
 ```bash
 docker compose up -d --wait
@@ -88,6 +88,8 @@ Check readiness from another terminal:
 ```bash
 curl --fail-with-body http://localhost:8080/healthz
 ```
+
+Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 
 The local config enables Redis, Elasticsearch, MySQL, and OpenTelemetry, while keeping `llm.enabled=false` and `agent.mode=deterministic`. No LLM key is required.
 
@@ -305,7 +307,7 @@ make verify
 - LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
 - Eval cases are executed by deterministic rules; LLM-as-judge and prompt A/B testing remain deferred.
-- Prometheus application metrics are included; a Grafana dashboard remains a follow-up enhancement.
+- The included Grafana dashboard is intentionally demo-focused, not a production SRE dashboard.
 - The LLM Agent is optional and disabled by default.
 - MySQL currently stores feedback and eval cases, not long-term memory, document metadata, or audit records.
 
@@ -314,7 +316,7 @@ make verify
 - Evaluation-driven reranking and retrieval tuning
 - Advanced trace critical-path and service-graph analytics
 - Eval release comparison reports and optional LLM judge
-- Starter Grafana dashboard for the runtime Prometheus metrics
+- Production alerting, recording rules, and expanded SRE dashboards
 
 ## Design Documents
 
@@ -332,6 +334,7 @@ make verify
 - [ADR 0014: Hybrid Knowledge Retrieval](docs/adr/0014-hybrid-knowledge-retrieval.md)
 - [ADR 0015: Rule-based Eval Runner](docs/adr/0015-eval-runner.md)
 - [ADR 0016: Runtime Prometheus Metrics](docs/adr/0016-runtime-prometheus-metrics.md)
+- [ADR 0017: Grafana Dashboard](docs/adr/0017-grafana-dashboard.md)
 
 ## Originality
 

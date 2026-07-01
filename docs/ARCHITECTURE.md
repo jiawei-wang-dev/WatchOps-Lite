@@ -21,6 +21,8 @@ flowchart LR
     RAG --> ES[("Elasticsearch")]
     LOGS --> ES
     METRICS --> PROM[("Prometheus")]
+    API -. runtime metrics .-> PROM
+    PROM --> GRAFANA["Grafana"]
     TRACES --> JAEGER
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
@@ -288,7 +290,9 @@ Runtime metrics include:
 - memory-unavailable, Agent-fallback, and summary-fallback counts
 - eval run count by completion status
 
-`internal/observability/metrics` owns a private Prometheus registry so application metrics do not collide with process-global collectors in tests or embedded use. Configuration can disable both collection and the endpoint. Trace spans remain the source for request-level causality; metrics provide aggregate rates and latency distributions. Grafana visualization is deferred to the next stage.
+`internal/observability/metrics` owns a private Prometheus registry so application metrics do not collide with process-global collectors in tests or embedded use. Configuration can disable both collection and the endpoint. Trace spans remain the source for request-level causality; metrics provide aggregate rates and latency distributions.
+
+The local Compose stack provisions Grafana with Prometheus as a read-only datasource and a version-controlled WatchOps-Lite dashboard. Panels cover HTTP and Chat traffic, tool activity and errors, RAG latency, memory availability, Agent/summary fallback, and eval runs. This dashboard is a demo verification surface rather than a production alerting or SLO system.
 
 ## 10. Dependency Failure Policy
 

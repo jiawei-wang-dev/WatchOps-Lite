@@ -340,6 +340,18 @@ The Prometheus evidence backend used by `query_metrics` remains separate: it ans
 
 Exit status: complete. Grafana visualization remains the next enhancement stage.
 
+## Enhancement Stage 5: Grafana Dashboard — Completed
+
+Delivered:
+
+- Loopback-bound Grafana service in Docker Compose
+- File-provisioned Prometheus datasource
+- Version-controlled WatchOps-Lite Runtime dashboard
+- Panels for HTTP, Chat, tools, RAG, memory, fallback, and eval runtime signals
+- Anonymous viewer access scoped to the local demo
+
+Exit status: complete. The dashboard demonstrates runtime instrumentation; production alerts, recording rules, and SLO design remain outside this stage.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -359,6 +371,7 @@ flowchart LR
     S1 --> S2["Stage 2 Hybrid Retrieval (complete)"]
     S2 --> S3["Stage 3 Eval Runner (complete)"]
     S3 --> S4["Stage 4 Runtime Metrics (complete)"]
+    S4 --> S5["Stage 5 Grafana Dashboard (complete)"]
 ```
 
 ## Deferred Work
@@ -373,4 +386,4 @@ flowchart LR
 - Advanced tenant billing
 - Voice and multimodal input
 
-Grafana dashboards remain deferred. Upgrade 1.2 uses Prometheus as the read-only service-metrics evidence backend, while Enhancement Stage 4 separately instruments WatchOps-Lite itself.
+The starter Grafana dashboard is complete. Upgrade 1.2 uses Prometheus as the read-only service-metrics evidence backend, while Enhancement Stage 4 separately instruments WatchOps-Lite itself.

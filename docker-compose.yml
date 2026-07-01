@@ -88,8 +88,32 @@ services:
       - prometheus-data:/prometheus
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:13.0.2
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://localhost:3000/api/health
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
 volumes:
   redis-data:
   elasticsearch-data:
   mysql-data:
   prometheus-data:
+  grafana-data:
