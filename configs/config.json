@@ -35,6 +35,12 @@
   "knowledge": {
     "chunk_max_size": 1200
   },
+  "logs": {
+    "backend": "mock",
+    "index": "watchops_logs",
+    "fallback_to_mock": true,
+    "default_limit": 20
+  },
   "mysql": {
     "enabled": false,
     "dsn": "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",

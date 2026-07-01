@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Requires curl and python3. Uses stable document IDs, so reruns replace demo events.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ELASTICSEARCH_URL="${WATCHOPS_ELASTICSEARCH_URL:-http://localhost:9200}"
+LOGS_INDEX="${WATCHOPS_LOGS_INDEX:-watchops_logs}"
+LOGS_PATH="${ROOT_DIR}/demo/logs/checkout_logs.jsonl"
+bulk_file="$(mktemp)"
+response_file="$(mktemp)"
+trap 'rm -f "${bulk_file}" "${response_file}"' EXIT
+
+if ! curl --fail --silent --show-error "${ELASTICSEARCH_URL}" >/dev/null; then
+  echo "Elasticsearch is unavailable at ${ELASTICSEARCH_URL}." >&2
+  exit 1
+fi
+
+index_status="$(
+  curl --silent --output /dev/null --write-out "%{http_code}" \
+    --head "${ELASTICSEARCH_URL}/${LOGS_INDEX}"
+)"
+if [[ "${index_status}" == "404" ]]; then
+  curl --fail-with-body --silent --show-error \
+    -X PUT "${ELASTICSEARCH_URL}/${LOGS_INDEX}" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "mappings": {
+        "properties": {
+          "id": {"type": "keyword"},
+          "timestamp": {"type": "date"},
+          "service": {"type": "keyword"},
+          "level": {"type": "keyword"},
+          "message": {"type": "text"},
+          "trace_id": {"type": "keyword"},
+          "span_id": {"type": "keyword"},
+          "attributes": {"type": "object", "dynamic": true},
+          "created_at": {"type": "date"}
+        }
+      }
+    }' >/dev/null
+elif [[ "${index_status}" != "200" ]]; then
+  echo "Unable to inspect Elasticsearch index ${LOGS_INDEX}: HTTP ${index_status}." >&2
+  exit 1
+fi
+
+python3 -c '
+import json
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+index = sys.argv[2]
+with source.open(encoding="utf-8") as events:
+    for line in events:
+        event = json.loads(line)
+        print(json.dumps({"index": {"_index": index, "_id": event["id"]}}))
+        print(json.dumps(event, separators=(",", ":")))
+' "${LOGS_PATH}" "${LOGS_INDEX}" >"${bulk_file}"
+
+curl --fail-with-body --silent --show-error \
+  -X POST "${ELASTICSEARCH_URL}/_bulk?refresh=wait_for" \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary "@${bulk_file}" >"${response_file}"
+
+python3 -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    response = json.load(source)
+if response.get("errors"):
+    raise SystemExit("Elasticsearch rejected one or more demo log events.")
+print(json.dumps({
+    "index": sys.argv[2],
+    "indexed_count": len(response.get("items", [])),
+    "status": "seeded"
+}))
+' "${response_file}" "${LOGS_INDEX}"

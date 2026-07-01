@@ -261,12 +261,12 @@ Each chunk records its generated identity, document ID, title, chunk index, sour
 
 | Tool | Purpose | Primary constraints | Suggested adapter |
 | --- | --- | --- | --- |
-| `query_logs` | Search and aggregate logs | Bounded time range, result count, and labels | Loki HTTP API |
+| `query_logs` | Search and aggregate logs | Bounded time range, result count, level, and keywords | Elasticsearch with mock fallback |
 | `query_metrics` | Query time-series metrics | Allowlisted metrics and functions | Prometheus HTTP API |
 | `query_traces` | Find traces and important spans | Bounded services, time range, and result count | Tempo HTTP API |
 | `search_knowledge` | Retrieve runbooks and postmortems | Top-k, score threshold, and access filters | Elasticsearch |
 
-Tools are read-only by default. The model produces constrained domain parameters, and adapters construct backend queries. Arbitrary LogQL or PromQL must not pass directly from the model to a backend.
+Tools are read-only by default. The model produces constrained domain parameters, and adapters construct backend queries. Arbitrary Elasticsearch DSL, LogQL, or PromQL must not pass directly from the model to a backend.
 
 ### 5.4 Memory and Feedback
 
@@ -492,7 +492,7 @@ WatchOps-Lite owns:
 
 These policies wrap Eino tools rather than recreating Eino's tool runtime.
 
-Phase 2 introduced deterministic implementations through Eino `InvokableTool` values. The Elasticsearch-backed `search_knowledge` adapter was added in Phase 5, and Phase 8 connects all four tools to a bounded Eino ReAct Agent through Eino's official tool-calling mechanism. Production log, metrics, and trace data-source connectors remain deferred.
+Phase 2 introduced deterministic implementations through Eino `InvokableTool` values. The Elasticsearch-backed `search_knowledge` adapter was added in Phase 5, and Phase 8 connects all four tools to a bounded Eino ReAct Agent through Eino's official tool-calling mechanism. Upgrade 1.1 adds Elasticsearch-backed `query_logs` with explicit mock fallback; production metrics and trace connectors remain deferred.
 
 The initial tools are:
 

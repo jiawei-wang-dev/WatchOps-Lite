@@ -83,3 +83,28 @@ func TestNewContinuesWhenMySQLIsUnavailable(t *testing.T) {
 		t.Fatalf("close Redis client: %v", err)
 	}
 }
+
+func TestNewContinuesWhenElasticsearchLogsAreUnavailable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Elasticsearch.Enabled = true
+	cfg.Elasticsearch.Addresses = []string{"http://127.0.0.1:1"}
+	cfg.Elasticsearch.RequestTimeout = config.Duration(20 * time.Millisecond)
+	cfg.Logs.Backend = "elasticsearch"
+	cfg.Logs.FallbackToMock = true
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	app, err := New(cfg, logger)
+	if err != nil {
+		t.Fatalf("New() error = %v, want resilient logs startup", err)
+	}
+	if app.elasticsearchClient == nil {
+		t.Fatal("Elasticsearch client was not retained for later recovery")
+	}
+
+	if err := app.elasticsearchClient.Close(context.Background()); err != nil {
+		t.Fatalf("close Elasticsearch client: %v", err)
+	}
+	if err := app.redisClient.Close(); err != nil {
+		t.Fatalf("close Redis client: %v", err)
+	}
+}

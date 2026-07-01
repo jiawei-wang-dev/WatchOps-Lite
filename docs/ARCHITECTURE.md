@@ -19,6 +19,7 @@ flowchart LR
     CTX --> REDIS[("Redis")]
     CTX -. planned long-term memory .-> MYSQL[("MySQL")]
     RAG --> ES[("Elasticsearch")]
+    LOGS --> ES
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
     API -. spans .-> OTEL["OpenTelemetry"]
@@ -181,7 +182,20 @@ Every `ToolResult` uses a common envelope:
 
 ### 7.2 Query Safety
 
-The model emits domain parameters such as service, environment, time range, and filters. Adapters construct allowlisted LogQL, PromQL, or trace queries. Unvalidated complete query strings are prohibited.
+The model emits domain parameters such as service, environment, time range, and filters. Adapters construct bounded Elasticsearch queries or future allowlisted metrics/trace queries. Unvalidated complete query strings are prohibited.
+
+### 7.3 Elasticsearch Logs
+
+`query_logs` preserves its Eino schema of service, time range, keywords, and optional level. When `logs.backend=elasticsearch`, the tool maps those domain fields to a bounded Elasticsearch query:
+
+```text
+service term + timestamp range + optional level term
+             + optional message keyword query + configured result limit
+```
+
+The adapter returns log events through `internal/retrieval/logs`; the tool converts each event into a bounded `EvidenceItem` with source `elasticsearch-logs`, the log ID, timestamp, level, trace/span IDs, service resource identity, and truncation metadata.
+
+If the index or Elasticsearch is unavailable, configured mock fallback returns explicit `LOGS_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. Neither condition blocks application startup.
 
 ## 8. Persistence
 
@@ -207,6 +221,8 @@ http POST /api/v1/chat
     ├── agent.run
     │   ├── tool.query_metrics
     │   ├── tool.query_logs
+    │   │   └── logs.search
+    │   │       └── elasticsearch.logs.search
     │   ├── tool.query_traces
     │   └── tool.search_knowledge
     │       └── knowledge.search
@@ -237,8 +253,9 @@ Potential post-MVP metrics:
 | --- | --- |
 | Redis | Process a single turn and clearly report loss of short-term continuity |
 | MySQL | Feedback and eval APIs return a structured dependency error; Chat is unaffected |
-| Elasticsearch | Knowledge APIs return a structured dependency error; the Agent tool reports explicit mock fallback evidence |
-| Logs/Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
+| Elasticsearch | Knowledge APIs return a structured dependency error; logs and knowledge tools use their configured mock fallback |
+| Logs | Return real Elasticsearch evidence, explicit mock fallback, or structured unavailability according to configuration |
+| Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
 | Model | Use the deterministic runner at startup or for the failed request |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
 
@@ -264,3 +281,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0007: OpenTelemetry and Jaeger Tracing](adr/0007-opentelemetry-jaeger-tracing.md)
 - [ADR 0008: Eino ReAct Agent](adr/0008-eino-react-agent.md)
 - [ADR 0009: MVP Demo Packaging](adr/0009-mvp-demo-packaging.md)
+- [ADR 0010: Elasticsearch-backed Logs Tool](adr/0010-elasticsearch-logs-tool.md)

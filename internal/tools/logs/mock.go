@@ -37,35 +37,37 @@ func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult,
 		if toolErr := validate(input); toolErr != nil {
 			return common.ToolResult{}, toolErr
 		}
+		return mockResult(input), nil
+	})
+}
 
-		confidence := 0.92
-		level := strings.ToLower(strings.TrimSpace(input.Level))
-		if level == "" {
-			level = "error"
-		}
-
-		return common.ToolResult{
-			Evidence: []common.EvidenceItem{
-				{
-					ID:         "log-evidence-001",
-					SourceType: "logs",
-					SourceName: "mock-logs",
-					TimeRange:  &input.TimeRange,
-					Content:    "Mock logs show repeated upstream timeout errors for service " + strings.TrimSpace(input.Service) + ".",
-					ResourceID: strings.TrimSpace(input.Service),
-					Confidence: &confidence,
-					Metadata: map[string]any{
-						"level":    level,
-						"keywords": input.Keywords,
-					},
+func mockResult(input Input) common.ToolResult {
+	confidence := 0.92
+	level := strings.ToLower(strings.TrimSpace(input.Level))
+	if level == "" {
+		level = "error"
+	}
+	return common.ToolResult{
+		Evidence: []common.EvidenceItem{
+			{
+				ID:         "log-evidence-001",
+				SourceType: "logs",
+				SourceName: "mock-logs",
+				TimeRange:  &input.TimeRange,
+				Content:    "Mock logs show repeated upstream timeout errors for service " + strings.TrimSpace(input.Service) + ".",
+				ResourceID: strings.TrimSpace(input.Service),
+				Confidence: &confidence,
+				Metadata: map[string]any{
+					"level":    level,
+					"keywords": input.Keywords,
 				},
 			},
-			Payload: map[string]any{
-				"matched_entries": 18,
-			},
-			Metadata: map[string]any{"mode": "mock"},
-		}, nil
-	})
+		},
+		Payload: map[string]any{
+			"matched_entries": 18,
+		},
+		Metadata: map[string]any{"mode": "mock", "fallback_used": false},
+	}
 }
 
 func validate(input Input) *common.ToolError {

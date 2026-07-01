@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
@@ -17,6 +18,7 @@ import (
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
+	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 	"github.com/redis/go-redis/v9"
 )
@@ -66,7 +68,41 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cancel()
 	}
 
-	toolConfig := agenteino.MockToolsConfig{}
+	var logsSearcher *retrievallogs.Service
+	if strings.EqualFold(cfg.Logs.Backend, "elasticsearch") && elasticsearchClient != nil {
+		logsStore, err := retrievallogs.NewElasticsearchStore(
+			elasticsearchClient,
+			cfg.Logs.Index,
+		)
+		if err != nil {
+			_ = elasticsearchClient.Close(context.Background())
+			return nil, err
+		}
+		logsSearcher, err = retrievallogs.NewService(logsStore)
+		if err != nil {
+			_ = elasticsearchClient.Close(context.Background())
+			return nil, err
+		}
+		indexContext, cancel := context.WithTimeout(
+			context.Background(),
+			cfg.Elasticsearch.RequestTimeout.Value(),
+		)
+		if err := logsSearcher.EnsureIndex(indexContext); err != nil {
+			logger.Warn("Elasticsearch logs index is not ready; startup will continue", "error", err)
+		}
+		cancel()
+	}
+
+	toolConfig := agenteino.MockToolsConfig{
+		LogsBackend:        cfg.Logs.Backend,
+		LogsIndex:          cfg.Logs.Index,
+		LogsDefaultLimit:   cfg.Logs.DefaultLimit,
+		LogsFallbackToMock: cfg.Logs.FallbackToMock,
+		LogsSearcher:       logsSearcher,
+	}
+	if strings.EqualFold(cfg.Logs.Backend, "elasticsearch") {
+		toolConfig.LogsTimeout = cfg.Elasticsearch.RequestTimeout.Value()
+	}
 	if cfg.Elasticsearch.Enabled {
 		toolConfig.KnowledgeSearcher = knowledgeService
 		toolConfig.KnowledgeTimeout = cfg.Elasticsearch.RequestTimeout.Value()

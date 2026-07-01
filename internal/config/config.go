@@ -45,6 +45,7 @@ type Config struct {
 	Session       SessionConfig       `json:"session"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
+	Logs          LogsConfig          `json:"logs"`
 	MySQL         MySQLConfig         `json:"mysql"`
 	Agent         AgentConfig         `json:"agent"`
 	LLM           LLMConfig           `json:"llm"`
@@ -91,6 +92,13 @@ type ElasticsearchConfig struct {
 
 type KnowledgeConfig struct {
 	ChunkMaxSize int `json:"chunk_max_size"`
+}
+
+type LogsConfig struct {
+	Backend        string `json:"backend"`
+	Index          string `json:"index"`
+	FallbackToMock bool   `json:"fallback_to_mock"`
+	DefaultLimit   int    `json:"default_limit"`
 }
 
 type MySQLConfig struct {
@@ -162,6 +170,12 @@ func Default() Config {
 		},
 		Knowledge: KnowledgeConfig{
 			ChunkMaxSize: 1200,
+		},
+		Logs: LogsConfig{
+			Backend:        "mock",
+			Index:          "watchops_logs",
+			FallbackToMock: true,
+			DefaultLimit:   20,
 		},
 		MySQL: MySQLConfig{
 			Enabled:         false,
@@ -246,6 +260,8 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_USERNAME", &cfg.Elasticsearch.Username)
 	setString("ELASTICSEARCH_PASSWORD", &cfg.Elasticsearch.Password)
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
+	setString("LOGS_BACKEND", &cfg.Logs.Backend)
+	setString("LOGS_INDEX", &cfg.Logs.Index)
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("AGENT_MODE", &cfg.Agent.Mode)
 	setString("AGENT_PROMPT_VERSION", &cfg.Agent.PromptVersion)
@@ -291,6 +307,7 @@ func applyEnvironment(cfg *Config) error {
 		{"SESSION_RECENT_WINDOW_SIZE", &cfg.Session.RecentWindowSize},
 		{"SESSION_SUMMARY_THRESHOLD", &cfg.Session.SummaryThreshold},
 		{"KNOWLEDGE_CHUNK_MAX_SIZE", &cfg.Knowledge.ChunkMaxSize},
+		{"LOGS_DEFAULT_LIMIT", &cfg.Logs.DefaultLimit},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
 		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
 		{"AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations},
@@ -310,6 +327,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sELASTICSEARCH_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Elasticsearch.Enabled = parsed
+	}
+	if value, ok := lookup("LOGS_FALLBACK_TO_MOCK"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sLOGS_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Logs.FallbackToMock = parsed
 	}
 	if value, ok := lookup("MYSQL_ENABLED"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -468,6 +492,17 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Knowledge.ChunkMaxSize <= 0 {
 		return errors.New("knowledge.chunk_max_size must be greater than zero")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Logs.Backend)) {
+	case "mock", "elasticsearch":
+	default:
+		return errors.New("logs.backend must be mock or elasticsearch")
+	}
+	if strings.TrimSpace(cfg.Logs.Index) == "" {
+		return errors.New("logs.index is required")
+	}
+	if cfg.Logs.DefaultLimit < 1 || cfg.Logs.DefaultLimit > 100 {
+		return errors.New("logs.default_limit must be between 1 and 100")
 	}
 	if cfg.Elasticsearch.Enabled {
 		if len(cfg.Elasticsearch.Addresses) == 0 {

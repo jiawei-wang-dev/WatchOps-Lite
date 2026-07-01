@@ -75,6 +75,32 @@ document_id: doc_3238de720ea4732ed7219b66
 chunk_count: 2
 ```
 
+### Logs Ingestion
+
+```bash
+./scripts/demo_seed_logs.sh
+```
+
+Observed: passed.
+
+- index: `watchops_logs`
+- six stable checkout demo events indexed
+- reruns replace the same event IDs
+- Elasticsearch unavailability produces a clear non-zero failure
+
+```json
+{"index":"watchops_logs","indexed_count":6,"status":"seeded"}
+```
+
+A real-backend Chat smoke test returned two log evidence items from `elasticsearch-logs`:
+
+- `log_checkout_004`: context deadline exceeded
+- `log_checkout_003`: checkout upstream timeout
+
+The `query_logs` run reported `evidence_count=2`, `warning_count=0`, and trace ID `f9dcebef3f990a1a88b3d1f6e3c945dc`. Each evidence item included the expected log ID, level, trace ID, span ID, and timestamp metadata.
+
+Degraded-mode smoke verification also passed with Elasticsearch unavailable: the application started, `query_logs` succeeded with `mock-logs`, `warning_count=1`, and the response retained the `MOCK_DATA` limitation.
+
 ### Chat Demo
 
 ```bash
@@ -295,6 +321,7 @@ Observed: passed.
 - [x] `docker compose ps` showing Redis, Elasticsearch, MySQL, and Jaeger
 - [x] `/healthz` showing HTTP 200, request ID, and trace ID
 - [x] knowledge ingestion showing `document_id` and `chunk_count`
+- [x] logs ingestion showing six indexed events and Chat evidence from `elasticsearch-logs`
 - [x] Chat response showing `trace_id`, evidence, limitations, and `tool_runs`
 - [x] knowledge search showing checkout runbook chunks and scores
 - [x] feedback creation showing `feedback_id`
@@ -321,6 +348,7 @@ In another terminal:
 
 ```bash
 ./scripts/demo_seed_knowledge.sh
+./scripts/demo_seed_logs.sh
 ./scripts/demo_chat.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh

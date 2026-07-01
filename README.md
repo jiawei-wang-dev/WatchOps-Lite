@@ -17,6 +17,7 @@ flowchart LR
     T --> P["query_metrics"]
     T --> R["query_traces"]
     T --> K["search_knowledge"]
+    L --> ES
     K --> ES[("Elasticsearch BM25")]
     G --> F["Feedback / eval seed"]
     F --> DB[("MySQL")]
@@ -25,7 +26,7 @@ flowchart LR
     O --> J["Jaeger"]
 ```
 
-The default demo deliberately uses deterministic Agent routing and mock logs, metrics, and traces. Elasticsearch knowledge retrieval, Redis session memory, MySQL feedback/eval persistence, and Jaeger tracing are real local integrations. An OpenAI-compatible Eino `ChatModel` can be enabled separately.
+The local demo uses deterministic Agent routing, Elasticsearch-backed logs and knowledge, and mock metrics/traces. Redis session memory, MySQL feedback/eval persistence, and Jaeger tracing are real local integrations. An OpenAI-compatible Eino `ChatModel` can be enabled separately.
 
 ## MVP Features
 
@@ -38,6 +39,7 @@ The default demo deliberately uses deterministic Agent routing and mock logs, me
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window and deterministic rolling summary
 - Elasticsearch chunk indexing and BM25 knowledge retrieval
+- Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - MySQL upvote/downvote feedback and manual good/bad eval-case seeding
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
 - Reproducible Docker Compose and scripted demo flow
@@ -98,6 +100,7 @@ With the application running, execute:
 
 ```bash
 ./scripts/demo_seed_knowledge.sh
+./scripts/demo_seed_logs.sh
 ./scripts/demo_chat.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
@@ -105,8 +108,8 @@ With the application running, execute:
 
 The flow demonstrates:
 
-1. A checkout runbook is chunked and indexed in Elasticsearch.
-2. Chat loads Redis context and invokes metrics, logs, and knowledge tools.
+1. A checkout runbook and deterministic checkout log events are indexed in Elasticsearch.
+2. Chat loads Redis context and invokes mock metrics, real logs, and real knowledge tools.
 3. The response exposes evidence, limitations, `tool_runs`, and `trace_id`.
 4. A downvote is stored in MySQL.
 5. The feedback record seeds a reusable `bad_case`, which is then listed.
@@ -118,7 +121,9 @@ export WATCHOPS_API_BASE_URL=http://localhost:8080
 export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 ```
 
-Running the scripts again is safe for the services, although it creates additional knowledge, feedback, and eval records.
+The log seed uses stable IDs and safely replaces its demo events on rerun. Knowledge, feedback, and eval scripts create additional records.
+
+`configs/config.example.json` selects `logs.backend=elasticsearch` with `fallback_to_mock=true`. If Elasticsearch logs are unavailable, Chat continues with explicit `LOGS_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps the logs backend in mock mode.
 
 ## API Examples
 
@@ -252,7 +257,7 @@ make verify
 .
 ├── cmd/server/                  # Process entry point
 ├── configs/                    # Default and local-demo configuration
-├── demo/knowledge/             # Safe demonstration runbook
+├── demo/                       # Safe runbook and deterministic log events
 ├── docs/                       # Architecture, API, roadmap, and ADRs
 ├── scripts/                    # Reproducible demo and verification scripts
 └── internal/
@@ -266,6 +271,7 @@ make verify
     ├── observability/          # Structured logs and OpenTelemetry
     ├── platform/               # Elasticsearch and MySQL clients
     ├── retrieval/knowledge/    # Chunking, BM25 policy, and ES store
+    ├── retrieval/logs/         # Bounded logs search and Elasticsearch store
     ├── tools/                  # WatchOps tool contracts and implementations
     └── transport/http/         # Gin router, middleware, DTOs, handlers
 ```
@@ -274,7 +280,7 @@ make verify
 
 - Knowledge retrieval is BM25 only; embeddings, hybrid retrieval, RRF, and reranking are deferred.
 - Session summarization is deterministic; an LLM summary model with deterministic fallback is deferred.
-- Logs, metrics, and traces use deterministic fixtures until production adapters are added.
+- Metrics and traces still use deterministic fixtures; logs can use Elasticsearch or mock fallback.
 - Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
 - Prometheus application metrics and Grafana dashboards are not included.
 - The LLM Agent is optional and disabled by default.
@@ -284,7 +290,7 @@ make verify
 
 - LLM session summary model with deterministic fallback
 - Hybrid BM25/vector retrieval with evaluation-driven RRF and reranking
-- Production Prometheus, log, and trace query adapters
+- Production metrics and trace query adapters
 - Automatic eval runner and release comparison reports
 - Prometheus application metrics and Grafana dashboards
 
@@ -297,6 +303,7 @@ make verify
 - [Project Structure](docs/STRUCTURE.md)
 - [ADR 0008: Eino ReAct Agent](docs/adr/0008-eino-react-agent.md)
 - [ADR 0009: MVP Demo Packaging](docs/adr/0009-mvp-demo-packaging.md)
+- [ADR 0010: Elasticsearch-backed Logs Tool](docs/adr/0010-elasticsearch-logs-tool.md)
 
 ## Originality
 

@@ -5,9 +5,26 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
+	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
+
+type logsSearcherStub struct{}
+
+func (logsSearcherStub) Search(
+	context.Context,
+	retrievallogs.SearchQuery,
+) ([]retrievallogs.Event, error) {
+	return []retrievallogs.Event{{
+		ID:        "log_checkout_001",
+		Timestamp: time.Date(2026, 6, 30, 0, 10, 0, 0, time.UTC),
+		Service:   "checkout",
+		Level:     "error",
+		Message:   "upstream timeout calling payment",
+	}}, nil
+}
 
 func TestBuildMockTools(t *testing.T) {
 	tools, err := BuildMockTools()
@@ -120,5 +137,50 @@ func TestEinoToolInvocationPreservesStructuredError(t *testing.T) {
 		return
 	}
 
+	t.Fatal("query_logs tool not found")
+}
+
+func TestEinoToolInvocationUsesConfiguredElasticsearchLogs(t *testing.T) {
+	tools, err := BuildMockToolsWithConfig(MockToolsConfig{
+		LogsBackend:        "elasticsearch",
+		LogsIndex:          "watchops_logs",
+		LogsDefaultLimit:   20,
+		LogsFallbackToMock: true,
+		LogsSearcher:       logsSearcherStub{},
+	})
+	if err != nil {
+		t.Fatalf("BuildMockToolsWithConfig() error = %v", err)
+	}
+
+	for _, assembledTool := range tools {
+		info, infoErr := assembledTool.Info(context.Background())
+		if infoErr != nil {
+			t.Fatalf("tool Info() error = %v", infoErr)
+		}
+		if info.Name != "query_logs" {
+			continue
+		}
+		output, invokeErr := assembledTool.InvokableRun(context.Background(), `{
+			"service":"checkout",
+			"time_range":{
+				"from":"2026-06-30T00:00:00Z",
+				"to":"2026-06-30T00:20:00Z"
+			},
+			"keywords":["timeout"],
+			"level":"error"
+		}`)
+		if invokeErr != nil {
+			t.Fatalf("InvokableRun() error = %v", invokeErr)
+		}
+		var result common.ToolResult
+		if err := json.Unmarshal([]byte(output), &result); err != nil {
+			t.Fatalf("decode tool output: %v", err)
+		}
+		if len(result.Evidence) != 1 ||
+			result.Evidence[0].SourceName != "elasticsearch-logs" {
+			t.Fatalf("result = %#v", result)
+		}
+		return
+	}
 	t.Fatal("query_logs tool not found")
 }

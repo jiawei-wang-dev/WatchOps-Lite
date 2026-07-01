@@ -60,6 +60,42 @@ func TestLocalDemoExampleIsValid(t *testing.T) {
 	if cfg.LLM.Enabled || cfg.Agent.Mode != "deterministic" {
 		t.Fatalf("local demo must not require an LLM: Agent=%#v LLM=%#v", cfg.Agent, cfg.LLM)
 	}
+	if cfg.Logs.Backend != "elasticsearch" || !cfg.Logs.FallbackToMock {
+		t.Fatalf("local demo logs config = %#v, want Elasticsearch with mock fallback", cfg.Logs)
+	}
+}
+
+func TestDefaultLogsConfigurationUsesMock(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Logs.Backend != "mock" ||
+		cfg.Logs.Index != "watchops_logs" ||
+		!cfg.Logs.FallbackToMock ||
+		cfg.Logs.DefaultLimit != 20 {
+		t.Fatalf("Logs config = %#v", cfg.Logs)
+	}
+}
+
+func TestLoadAppliesLogsEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCHOPS_LOGS_BACKEND", "elasticsearch")
+	t.Setenv("WATCHOPS_LOGS_INDEX", "logs_test")
+	t.Setenv("WATCHOPS_LOGS_FALLBACK_TO_MOCK", "false")
+	t.Setenv("WATCHOPS_LOGS_DEFAULT_LIMIT", "35")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Logs.Backend != "elasticsearch" ||
+		cfg.Logs.Index != "logs_test" ||
+		cfg.Logs.FallbackToMock ||
+		cfg.Logs.DefaultLimit != 35 {
+		t.Fatalf("Logs config = %#v", cfg.Logs)
+	}
 }
 
 func TestLoadAppliesRedisAndSessionEnvironment(t *testing.T) {

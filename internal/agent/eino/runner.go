@@ -162,7 +162,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		if logEvidence, logsOK := successfulTools[logs.Name]; logsOK {
 			evidenceIDs := append(append([]string{}, metricEvidence...), logEvidence...)
 			output.Inferences = append(output.Inferences, Inference{
-				Text:        "The correlated mock metrics and logs suggest upstream timeouts are a plausible contributor to the elevated error rate.",
+				Text:        "The correlated metric and log evidence suggests upstream timeouts are a plausible contributor to the elevated error rate.",
 				EvidenceIDs: evidenceIDs,
 			})
 		}
@@ -170,7 +170,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 
 	output.Limitations = append(output.Limitations, Limitation{
 		Code:    "MOCK_DATA",
-		Message: "This response uses deterministic mock evidence and has not queried production systems.",
+		Message: "This response includes deterministic mock evidence for one or more tools and is not a production-only investigation.",
 	})
 
 	return output, nil
@@ -382,7 +382,7 @@ func conclusionFor(toolName string, evidenceIDs []string) Conclusion {
 	case metrics.Name:
 		text = "Mock metrics report elevated latency and error rate."
 	case logs.Name:
-		text = "Mock logs report repeated upstream timeout errors."
+		text = "Log evidence contains events matching the requested service and time range."
 	case traces.Name:
 		text = "Mock trace evidence identifies a slow database span."
 	case knowledge.Name:

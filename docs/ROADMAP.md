@@ -200,6 +200,27 @@ Exit criteria:
 
 Exit status: complete. The repository is packaged as a local portfolio demo; production hardening remains outside this phase.
 
+## Upgrade 1.1: Elasticsearch-backed Logs Tool — Completed
+
+Delivered:
+
+- Configurable `mock` or `elasticsearch` logs backend
+- Bounded service, time-range, level, keyword, and result-limit query construction
+- Elasticsearch logs index mapping and normalized log-event model
+- Real log evidence with trace/span metadata
+- Explicit mock fallback or structured dependency error
+- Checkout JSONL fixtures and repeatable Bulk API seed script
+- `logs.search` and `elasticsearch.logs.search` tracing
+
+Exit criteria:
+
+- `query_logs` returns Elasticsearch evidence when configured and available.
+- Backend failure does not block startup.
+- Fallback behavior is explicit and testable.
+- Metrics and traces remain unchanged.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -212,11 +233,13 @@ flowchart LR
     P6 --> P7["P7 OTel + Jaeger (complete)"]
     P7 --> P8["P8 Eino ReAct Agent (complete)"]
     P8 --> P9["P9 MVP Demo Packaging (complete)"]
+    P9 --> U11["Upgrade 1.1 ES Logs (complete)"]
 ```
 
 ## Deferred Work
 
 - Prometheus application metrics
+- Production metrics and trace backends
 - MySQL long-term memory, audit records, and document lifecycle metadata
 - Eval-case review/export and automatic regression runner
 - Multi-agent orchestration

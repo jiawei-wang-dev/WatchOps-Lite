@@ -2,6 +2,7 @@ package eino
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	einotool "github.com/cloudwego/eino/components/tool"
@@ -13,11 +14,16 @@ import (
 )
 
 type MockToolsConfig struct {
-	LogsTimeout       time.Duration
-	MetricsTimeout    time.Duration
-	TracesTimeout     time.Duration
-	KnowledgeTimeout  time.Duration
-	KnowledgeSearcher knowledge.Searcher
+	LogsTimeout        time.Duration
+	LogsBackend        string
+	LogsIndex          string
+	LogsDefaultLimit   int
+	LogsFallbackToMock bool
+	LogsSearcher       logs.Searcher
+	MetricsTimeout     time.Duration
+	TracesTimeout      time.Duration
+	KnowledgeTimeout   time.Duration
+	KnowledgeSearcher  knowledge.Searcher
 }
 
 func BuildMockTools() ([]einotool.InvokableTool, error) {
@@ -25,10 +31,20 @@ func BuildMockTools() ([]einotool.InvokableTool, error) {
 }
 
 func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool, error) {
+	logsExecutor := logs.NewMockTool(config.LogsTimeout).Execute
+	if strings.EqualFold(config.LogsBackend, "elasticsearch") {
+		logsExecutor = logs.NewSearchTool(config.LogsSearcher, logs.SearchToolConfig{
+			Backend:        config.LogsBackend,
+			Index:          config.LogsIndex,
+			DefaultLimit:   config.LogsDefaultLimit,
+			FallbackToMock: config.LogsFallbackToMock,
+			Timeout:        config.LogsTimeout,
+		}).Execute
+	}
 	logsTool, err := toolutils.InferTool(
 		logs.Name,
 		"Query service logs for reliability evidence within a bounded time range.",
-		logs.NewMockTool(config.LogsTimeout).Execute,
+		logsExecutor,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build %s tool: %w", logs.Name, err)
