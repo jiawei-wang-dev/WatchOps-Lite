@@ -63,6 +63,9 @@ func TestLocalDemoExampleIsValid(t *testing.T) {
 	if cfg.Logs.Backend != "elasticsearch" || !cfg.Logs.FallbackToMock {
 		t.Fatalf("local demo logs config = %#v, want Elasticsearch with mock fallback", cfg.Logs)
 	}
+	if cfg.Metrics.Backend != "prometheus" || !cfg.Metrics.FallbackToMock {
+		t.Fatalf("local demo metrics config = %#v, want Prometheus with mock fallback", cfg.Metrics)
+	}
 }
 
 func TestDefaultLogsConfigurationUsesMock(t *testing.T) {
@@ -95,6 +98,45 @@ func TestLoadAppliesLogsEnvironment(t *testing.T) {
 		cfg.Logs.FallbackToMock ||
 		cfg.Logs.DefaultLimit != 35 {
 		t.Fatalf("Logs config = %#v", cfg.Logs)
+	}
+}
+
+func TestDefaultMetricsConfigurationUsesMock(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Metrics.Backend != "mock" ||
+		cfg.Metrics.BaseURL != "http://localhost:9090" ||
+		!cfg.Metrics.FallbackToMock ||
+		cfg.Metrics.DefaultStep.Value() != 30*time.Second ||
+		cfg.Metrics.RequestTimeout.Value() != 3*time.Second ||
+		cfg.Metrics.Queries["checkout_error_rate"] != "watchops_checkout_error_rate" {
+		t.Fatalf("Metrics config = %#v", cfg.Metrics)
+	}
+}
+
+func TestLoadAppliesMetricsEnvironment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WATCHOPS_METRICS_BACKEND", "prometheus")
+	t.Setenv("WATCHOPS_METRICS_BASE_URL", "http://prometheus:9090")
+	t.Setenv("WATCHOPS_METRICS_FALLBACK_TO_MOCK", "false")
+	t.Setenv("WATCHOPS_METRICS_DEFAULT_STEP", "15s")
+	t.Setenv("WATCHOPS_METRICS_REQUEST_TIMEOUT", "750ms")
+	t.Setenv("WATCHOPS_METRICS_QUERY_CHECKOUT_ERROR_RATE", "custom_checkout_error_rate")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Metrics.Backend != "prometheus" ||
+		cfg.Metrics.BaseURL != "http://prometheus:9090" ||
+		cfg.Metrics.FallbackToMock ||
+		cfg.Metrics.DefaultStep.Value() != 15*time.Second ||
+		cfg.Metrics.RequestTimeout.Value() != 750*time.Millisecond ||
+		cfg.Metrics.Queries["checkout_error_rate"] != "custom_checkout_error_rate" {
+		t.Fatalf("Metrics config = %#v", cfg.Metrics)
 	}
 }
 

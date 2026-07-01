@@ -80,7 +80,7 @@ Successful response shape:
   "answer": {
     "conclusion": [
       {
-        "text": "Mock metrics report elevated latency and error rate.",
+        "text": "Metric evidence reports the requested service reliability signal.",
         "evidence_ids": ["metric-evidence-001"]
       }
     ],
@@ -109,7 +109,7 @@ Successful response shape:
     "limitations": [
       {
         "code": "MOCK_DATA",
-        "message": "This response uses deterministic mock evidence and has not queried production systems."
+        "message": "This response includes deterministic mock evidence for one or more tools and is not a production-only investigation."
       }
     ]
   },

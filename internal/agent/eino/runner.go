@@ -138,6 +138,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 	}
 
 	successfulTools := make(map[string][]string, len(calls))
+	mockEvidenceUsed := false
 	for _, call := range calls {
 		result, run, toolErr := r.invoke(ctx, call)
 		output.ToolRuns = append(output.ToolRuns, run)
@@ -152,7 +153,14 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		}
 
 		output.Evidence = append(output.Evidence, result.Evidence...)
+		if mode, ok := result.Metadata["mode"].(string); ok &&
+			strings.HasPrefix(mode, "mock") {
+			mockEvidenceUsed = true
+		}
 		evidenceIDs := collectEvidenceIDs(result.Evidence)
+		if len(evidenceIDs) == 0 {
+			continue
+		}
 		successfulTools[call.name] = evidenceIDs
 		output.Conclusions = append(output.Conclusions, conclusionFor(call.name, evidenceIDs))
 		output.Recommendations = append(output.Recommendations, recommendationFor(call.name, evidenceIDs))
@@ -168,10 +176,12 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		}
 	}
 
-	output.Limitations = append(output.Limitations, Limitation{
-		Code:    "MOCK_DATA",
-		Message: "This response includes deterministic mock evidence for one or more tools and is not a production-only investigation.",
-	})
+	if mockEvidenceUsed {
+		output.Limitations = append(output.Limitations, Limitation{
+			Code:    "MOCK_DATA",
+			Message: "This response includes deterministic mock evidence for one or more tools and is not a production-only investigation.",
+		})
+	}
 
 	return output, nil
 }
@@ -380,13 +390,13 @@ func conclusionFor(toolName string, evidenceIDs []string) Conclusion {
 	text := "The tool returned reliability evidence."
 	switch toolName {
 	case metrics.Name:
-		text = "Mock metrics report elevated latency and error rate."
+		text = "Metric evidence reports the requested service reliability signal."
 	case logs.Name:
 		text = "Log evidence contains events matching the requested service and time range."
 	case traces.Name:
 		text = "Mock trace evidence identifies a slow database span."
 	case knowledge.Name:
-		text = "A mock runbook contains a relevant diagnostic procedure."
+		text = "Knowledge evidence contains a relevant diagnostic procedure."
 	}
 	return Conclusion{Text: text, EvidenceIDs: evidenceIDs}
 }

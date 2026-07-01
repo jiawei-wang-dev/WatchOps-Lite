@@ -46,6 +46,7 @@ type Config struct {
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	Knowledge     KnowledgeConfig     `json:"knowledge"`
 	Logs          LogsConfig          `json:"logs"`
+	Metrics       MetricsConfig       `json:"metrics"`
 	MySQL         MySQLConfig         `json:"mysql"`
 	Agent         AgentConfig         `json:"agent"`
 	LLM           LLMConfig           `json:"llm"`
@@ -99,6 +100,15 @@ type LogsConfig struct {
 	Index          string `json:"index"`
 	FallbackToMock bool   `json:"fallback_to_mock"`
 	DefaultLimit   int    `json:"default_limit"`
+}
+
+type MetricsConfig struct {
+	Backend        string            `json:"backend"`
+	BaseURL        string            `json:"base_url"`
+	FallbackToMock bool              `json:"fallback_to_mock"`
+	DefaultStep    Duration          `json:"default_step"`
+	RequestTimeout Duration          `json:"request_timeout"`
+	Queries        map[string]string `json:"queries"`
 }
 
 type MySQLConfig struct {
@@ -176,6 +186,19 @@ func Default() Config {
 			Index:          "watchops_logs",
 			FallbackToMock: true,
 			DefaultLimit:   20,
+		},
+		Metrics: MetricsConfig{
+			Backend:        "mock",
+			BaseURL:        "http://localhost:9090",
+			FallbackToMock: true,
+			DefaultStep:    Duration(30 * time.Second),
+			RequestTimeout: Duration(3 * time.Second),
+			Queries: map[string]string{
+				"checkout_error_rate":        "watchops_checkout_error_rate",
+				"checkout_p95_latency":       "watchops_checkout_p95_latency_seconds",
+				"checkout_timeout_total":     "watchops_checkout_timeout_total",
+				"payment_dependency_latency": "watchops_payment_dependency_latency_seconds",
+			},
 		},
 		MySQL: MySQLConfig{
 			Enabled:         false,
@@ -262,6 +285,8 @@ func applyEnvironment(cfg *Config) error {
 	setString("ELASTICSEARCH_KNOWLEDGE_INDEX", &cfg.Elasticsearch.KnowledgeIndex)
 	setString("LOGS_BACKEND", &cfg.Logs.Backend)
 	setString("LOGS_INDEX", &cfg.Logs.Index)
+	setString("METRICS_BACKEND", &cfg.Metrics.Backend)
+	setString("METRICS_BASE_URL", &cfg.Metrics.BaseURL)
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("AGENT_MODE", &cfg.Agent.Mode)
 	setString("AGENT_PROMPT_VERSION", &cfg.Agent.PromptVersion)
@@ -287,6 +312,8 @@ func applyEnvironment(cfg *Config) error {
 		{"REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout},
 		{"SESSION_TTL", &cfg.Session.TTL},
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
+		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
+		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
@@ -334,6 +361,27 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sLOGS_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Logs.FallbackToMock = parsed
+	}
+	if value, ok := lookup("METRICS_FALLBACK_TO_MOCK"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sMETRICS_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Metrics.FallbackToMock = parsed
+	}
+	metricQueryEnvironment := map[string]string{
+		"METRICS_QUERY_CHECKOUT_ERROR_RATE":        "checkout_error_rate",
+		"METRICS_QUERY_CHECKOUT_P95_LATENCY":       "checkout_p95_latency",
+		"METRICS_QUERY_CHECKOUT_TIMEOUT_TOTAL":     "checkout_timeout_total",
+		"METRICS_QUERY_PAYMENT_DEPENDENCY_LATENCY": "payment_dependency_latency",
+	}
+	for environmentName, queryName := range metricQueryEnvironment {
+		if value, ok := lookup(environmentName); ok {
+			if cfg.Metrics.Queries == nil {
+				cfg.Metrics.Queries = make(map[string]string)
+			}
+			cfg.Metrics.Queries[queryName] = value
+		}
 	}
 	if value, ok := lookup("MYSQL_ENABLED"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -503,6 +551,28 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Logs.DefaultLimit < 1 || cfg.Logs.DefaultLimit > 100 {
 		return errors.New("logs.default_limit must be between 1 and 100")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Metrics.Backend)) {
+	case "mock", "prometheus":
+	default:
+		return errors.New("metrics.backend must be mock or prometheus")
+	}
+	if strings.TrimSpace(cfg.Metrics.BaseURL) == "" {
+		return errors.New("metrics.base_url is required")
+	}
+	if cfg.Metrics.DefaultStep <= 0 {
+		return errors.New("metrics.default_step must be greater than zero")
+	}
+	if cfg.Metrics.RequestTimeout <= 0 {
+		return errors.New("metrics.request_timeout must be greater than zero")
+	}
+	if len(cfg.Metrics.Queries) == 0 {
+		return errors.New("metrics.queries must contain at least one query")
+	}
+	for name, query := range cfg.Metrics.Queries {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(query) == "" {
+			return errors.New("metrics.queries must not contain empty names or expressions")
+		}
 	}
 	if cfg.Elasticsearch.Enabled {
 		if len(cfg.Elasticsearch.Addresses) == 0 {

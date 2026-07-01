@@ -38,31 +38,39 @@ func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult,
 			return common.ToolResult{}, toolErr
 		}
 
-		confidence := 0.95
-		service := strings.TrimSpace(input.Service)
-		return common.ToolResult{
-			Evidence: []common.EvidenceItem{
-				{
-					ID:         "metric-evidence-001",
-					SourceType: "metrics",
-					SourceName: "mock-metrics",
-					TimeRange:  &input.TimeRange,
-					Content:    "Mock metrics show p95 latency at 1.8s and an error rate of 6.2% for service " + service + ".",
-					ResourceID: service,
-					Confidence: &confidence,
-					Metadata: map[string]any{
-						"metric_name": input.MetricName,
-						"symptom":     input.Symptom,
-					},
+		return mockResult(input), nil
+	})
+}
+
+func mockResult(input Input) common.ToolResult {
+	confidence := 0.95
+	service := strings.TrimSpace(input.Service)
+	return common.ToolResult{
+		Evidence: []common.EvidenceItem{
+			{
+				ID:         "metric-evidence-001",
+				SourceType: "metrics",
+				SourceName: "mock-metrics",
+				TimeRange:  &input.TimeRange,
+				Content:    "Mock metrics show p95 latency at 1.8s and an error rate of 6.2% for service " + service + ".",
+				ResourceID: service,
+				Confidence: &confidence,
+				Metadata: map[string]any{
+					"metric_name": input.MetricName,
+					"symptom":     input.Symptom,
 				},
 			},
-			Payload: map[string]any{
-				"p95_latency_ms": 1800,
-				"error_rate":     0.062,
-			},
-			Metadata: map[string]any{"mode": "mock"},
-		}, nil
-	})
+		},
+		Payload: map[string]any{
+			"p95_latency_ms": 1800,
+			"error_rate":     0.062,
+		},
+		Metadata: map[string]any{
+			"mode":          "mock",
+			"backend":       "mock",
+			"fallback_used": false,
+		},
+	}
 }
 
 func validate(input Input) *common.ToolError {

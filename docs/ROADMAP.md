@@ -221,6 +221,28 @@ Exit criteria:
 
 Exit status: complete.
 
+## Upgrade 1.2: Prometheus-backed Metrics Tool — Completed
+
+Delivered:
+
+- Configurable `mock` or `prometheus` metrics backend
+- Allowlisted checkout reliability queries selected from tool intent
+- Prometheus HTTP API vector parsing and normalized metric samples
+- Real metric evidence with values, labels, queries, and timestamps
+- Explicit mock fallback or structured dependency error
+- Go demo metrics exporter, Prometheus scrape configuration, and Compose services
+- `metrics.query` and `prometheus.query` tracing
+
+Exit criteria:
+
+- `query_metrics` returns Prometheus evidence when configured and available.
+- Backend failure does not block startup.
+- Fallback behavior is explicit and testable.
+- Elasticsearch-backed logs continue unchanged.
+- Traces remain mock.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -234,12 +256,13 @@ flowchart LR
     P7 --> P8["P8 Eino ReAct Agent (complete)"]
     P8 --> P9["P9 MVP Demo Packaging (complete)"]
     P9 --> U11["Upgrade 1.1 ES Logs (complete)"]
+    U11 --> U12["Upgrade 1.2 Prometheus Metrics (complete)"]
 ```
 
 ## Deferred Work
 
-- Prometheus application metrics
-- Production metrics and trace backends
+- Prometheus instrumentation for WatchOps-Lite application health and tool SLIs
+- Production trace backend
 - MySQL long-term memory, audit records, and document lifecycle metadata
 - Eval-case review/export and automatic regression runner
 - Multi-agent orchestration
@@ -249,4 +272,4 @@ flowchart LR
 - Advanced tenant billing
 - Voice and multimodal input
 
-Prometheus may be added after the MVP when concrete service-level metrics and dashboards have been identified.
+Grafana dashboards and Prometheus instrumentation for WatchOps-Lite itself remain deferred. Upgrade 1.2 uses Prometheus specifically as the read-only service-metrics evidence backend.

@@ -1,0 +1,6 @@
+.git
+.gitignore
+.env
+configs/config.local.json
+tmp
+vendor

@@ -20,6 +20,7 @@ flowchart LR
     CTX -. planned long-term memory .-> MYSQL[("MySQL")]
     RAG --> ES[("Elasticsearch")]
     LOGS --> ES
+    METRICS --> PROM[("Prometheus")]
     APP --> FEEDBACK["Feedback / Eval Loop"]
     FEEDBACK --> MYSQL
     API -. spans .-> OTEL["OpenTelemetry"]
@@ -182,7 +183,7 @@ Every `ToolResult` uses a common envelope:
 
 ### 7.2 Query Safety
 
-The model emits domain parameters such as service, environment, time range, and filters. Adapters construct bounded Elasticsearch queries or future allowlisted metrics/trace queries. Unvalidated complete query strings are prohibited.
+The model emits domain parameters such as service, environment, time range, and filters. Adapters construct bounded Elasticsearch queries or select configured PromQL expressions. Unvalidated complete query strings are prohibited.
 
 ### 7.3 Elasticsearch Logs
 
@@ -196,6 +197,14 @@ service term + timestamp range + optional level term
 The adapter returns log events through `internal/retrieval/logs`; the tool converts each event into a bounded `EvidenceItem` with source `elasticsearch-logs`, the log ID, timestamp, level, trace/span IDs, service resource identity, and truncation metadata.
 
 If the index or Elasticsearch is unavailable, configured mock fallback returns explicit `LOGS_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. Neither condition blocks application startup.
+
+### 7.4 Prometheus Metrics
+
+`query_metrics` preserves its Eino schema of service, metric name or symptom, and time range. When `metrics.backend=prometheus`, the metrics service maps the requested reliability intent to an allowlisted PromQL expression from configuration. The first implementation uses an instant query at the end of the requested interval and supports the checkout error-rate, p95-latency, timeout-count, and dependency-latency signals.
+
+`internal/retrieval/metrics` owns query selection and Prometheus HTTP response parsing. The tool converts finite vector samples into `EvidenceItem` records with source `prometheus`, service identity, metric name, numeric value, labels, selected query, and sample timestamp. PromQL is not accepted directly from an Agent or HTTP caller.
+
+If Prometheus is unavailable, configured mock fallback returns explicit `METRICS_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. Prometheus availability is checked at query time and never blocks application startup.
 
 ## 8. Persistence
 
@@ -220,6 +229,8 @@ http POST /api/v1/chat
     ├── session.load_context
     ├── agent.run
     │   ├── tool.query_metrics
+    │   │   └── metrics.query
+    │   │       └── prometheus.query
     │   ├── tool.query_logs
     │   │   └── logs.search
     │   │       └── elasticsearch.logs.search
@@ -235,7 +246,7 @@ When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`
 
 Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 
-Jaeger is the local trace visualization backend. Prometheus metrics may be added after the MVP and are not required for the tracing baseline.
+Jaeger is the local trace visualization backend. Prometheus is now used as the `query_metrics` evidence backend. Instrumenting WatchOps-Lite itself with Prometheus application metrics remains a separate deferred enhancement.
 
 Potential post-MVP metrics:
 
@@ -255,7 +266,8 @@ Potential post-MVP metrics:
 | MySQL | Feedback and eval APIs return a structured dependency error; Chat is unaffected |
 | Elasticsearch | Knowledge APIs return a structured dependency error; logs and knowledge tools use their configured mock fallback |
 | Logs | Return real Elasticsearch evidence, explicit mock fallback, or structured unavailability according to configuration |
-| Metrics/Traces | A single-tool failure does not stop the Agent; expose the limitation |
+| Prometheus | Metrics tool uses explicit mock fallback or structured unavailability according to configuration |
+| Traces | A single-tool failure does not stop the Agent; expose the limitation |
 | Model | Use the deterministic runner at startup or for the failed request |
 | OTel Collector | Drop or buffer telemetry without blocking the request |
 
@@ -264,8 +276,8 @@ Potential post-MVP metrics:
 - Unit tests: domain rules, context pruning, evidence validation, fallback selection, and stop conditions.
 - Golden tests: prompt rendering and structured response templates.
 - Contract tests: four tool adapters and their external API fixtures.
-- Local demo: Compose-backed upload → retrieve → Chat → feedback → eval seed.
-- Future integration tests: disposable Elasticsearch, MySQL, and Redis lifecycles.
+- Local demo: Compose-backed upload → logs/metrics evidence → Chat → feedback → eval seed.
+- Future integration tests: disposable Elasticsearch, Prometheus, MySQL, and Redis lifecycles.
 - Future eval runner: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
 
 CI uses redacted fixtures or containers and never depends on real production endpoints.

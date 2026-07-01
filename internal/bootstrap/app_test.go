@@ -108,3 +108,21 @@ func TestNewContinuesWhenElasticsearchLogsAreUnavailable(t *testing.T) {
 		t.Fatalf("close Redis client: %v", err)
 	}
 }
+
+func TestNewContinuesWhenPrometheusMetricsAreUnavailable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Metrics.Backend = "prometheus"
+	cfg.Metrics.BaseURL = "http://127.0.0.1:1"
+	cfg.Metrics.RequestTimeout = config.Duration(20 * time.Millisecond)
+	cfg.Metrics.FallbackToMock = true
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+
+	app, err := New(cfg, logger)
+	if err != nil {
+		t.Fatalf("New() error = %v, want resilient metrics startup", err)
+	}
+
+	if err := app.redisClient.Close(); err != nil {
+		t.Fatalf("close Redis client: %v", err)
+	}
+}

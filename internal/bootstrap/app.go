@@ -19,6 +19,7 @@ import (
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
+	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
 	httptransport "github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http"
 	"github.com/redis/go-redis/v9"
 )
@@ -93,12 +94,38 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cancel()
 	}
 
+	var metricsSearcher *retrievalmetrics.Service
+	if strings.EqualFold(cfg.Metrics.Backend, "prometheus") {
+		metricsStore, err := retrievalmetrics.NewPrometheusClient(
+			cfg.Metrics.BaseURL,
+			cfg.Metrics.RequestTimeout.Value(),
+		)
+		if err != nil {
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		metricsSearcher, err = retrievalmetrics.NewService(metricsStore, cfg.Metrics.Queries)
+		if err != nil {
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+	}
+
 	toolConfig := agenteino.MockToolsConfig{
-		LogsBackend:        cfg.Logs.Backend,
-		LogsIndex:          cfg.Logs.Index,
-		LogsDefaultLimit:   cfg.Logs.DefaultLimit,
-		LogsFallbackToMock: cfg.Logs.FallbackToMock,
-		LogsSearcher:       logsSearcher,
+		LogsBackend:           cfg.Logs.Backend,
+		LogsIndex:             cfg.Logs.Index,
+		LogsDefaultLimit:      cfg.Logs.DefaultLimit,
+		LogsFallbackToMock:    cfg.Logs.FallbackToMock,
+		LogsSearcher:          logsSearcher,
+		MetricsBackend:        cfg.Metrics.Backend,
+		MetricsBaseURL:        cfg.Metrics.BaseURL,
+		MetricsFallbackToMock: cfg.Metrics.FallbackToMock,
+		MetricsTimeout:        cfg.Metrics.RequestTimeout.Value(),
+		MetricsSearcher:       metricsSearcher,
 	}
 	if strings.EqualFold(cfg.Logs.Backend, "elasticsearch") {
 		toolConfig.LogsTimeout = cfg.Elasticsearch.RequestTimeout.Value()

@@ -47,14 +47,22 @@ python3 -c '
 import json
 import pathlib
 import sys
+from datetime import datetime, timedelta, timezone
 
 source = pathlib.Path(sys.argv[1])
 index = sys.argv[2]
 with source.open(encoding="utf-8") as events:
-    for line in events:
-        event = json.loads(line)
-        print(json.dumps({"index": {"_index": index, "_id": event["id"]}}))
-        print(json.dumps(event, separators=(",", ":")))
+    records = [json.loads(line) for line in events if line.strip()]
+fixture_start = min(datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00")) for item in records)
+window_start = datetime.now(timezone.utc) - timedelta(minutes=20)
+for event in records:
+    fixture_time = datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00"))
+    shifted_time = window_start + (fixture_time - fixture_start)
+    encoded_time = shifted_time.isoformat(timespec="seconds").replace("+00:00", "Z")
+    event["timestamp"] = encoded_time
+    event["created_at"] = encoded_time
+    print(json.dumps({"index": {"_index": index, "_id": event["id"]}}))
+    print(json.dumps(event, separators=(",", ":")))
 ' "${LOGS_PATH}" "${LOGS_INDEX}" >"${bulk_file}"
 
 curl --fail-with-body --silent --show-error \

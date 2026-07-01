@@ -60,7 +60,36 @@ services:
       - "127.0.0.1:4317:4317"
     restart: unless-stopped
 
+  demo-metrics:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo-metrics
+    ports:
+      - "127.0.0.1:9108:9108"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/demo-metrics", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.11.3
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    depends_on:
+      demo-metrics:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
 volumes:
   redis-data:
   elasticsearch-data:
   mysql-data:
+  prometheus-data:

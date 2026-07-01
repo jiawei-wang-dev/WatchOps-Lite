@@ -41,6 +41,19 @@
     "fallback_to_mock": true,
     "default_limit": 20
   },
+  "metrics": {
+    "backend": "mock",
+    "base_url": "http://localhost:9090",
+    "fallback_to_mock": true,
+    "default_step": "30s",
+    "request_timeout": "3s",
+    "queries": {
+      "checkout_error_rate": "watchops_checkout_error_rate",
+      "checkout_p95_latency": "watchops_checkout_p95_latency_seconds",
+      "checkout_timeout_total": "watchops_checkout_timeout_total",
+      "payment_dependency_latency": "watchops_payment_dependency_latency_seconds"
+    }
+  },
   "mysql": {
     "enabled": false,
     "dsn": "watchops:watchops@tcp(localhost:3306)/watchops_lite?parseTime=true",

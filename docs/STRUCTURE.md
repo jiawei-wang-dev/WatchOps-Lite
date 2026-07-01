@@ -6,12 +6,14 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 
 ```text
 .
-├── cmd/server/                  # Process entry point
-├── configs/                    # Default and full local-demo configuration
+├── cmd/
+│   ├── server/                 # Application process entry point
+│   └── demo-metrics/           # Local Prometheus scrape target
+├── configs/                    # App configuration and Prometheus scrape config
 ├── demo/                       # Safe runbook and deterministic log fixtures
 ├── docs/                       # Product and architecture documentation
 ├── scripts/                    # Demo flow and verification gate
-├── docker-compose.yml          # Redis, Elasticsearch, MySQL, and Jaeger
+├── docker-compose.yml          # Redis, Elasticsearch, Prometheus, MySQL, and Jaeger
 └── internal/
     ├── bootstrap/              # Dependency wiring and server lifecycle
     ├── config/                 # Configuration loading and validation
@@ -27,10 +29,11 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
     ├── platform/mysql/         # database/sql pool and feedback/eval schema
     ├── retrieval/knowledge/    # Chunking, retrieval service, and ES-backed store
     ├── retrieval/logs/         # Bounded log search and Elasticsearch store
+    ├── retrieval/metrics/      # Allowlisted queries and Prometheus HTTP client
     ├── tools/
     │   ├── common/             # Shared results, errors, evidence, execution policy
     │   ├── logs/               # Elasticsearch query_logs with mock fallback
-    │   ├── metrics/            # Deterministic query_metrics mock
+    │   ├── metrics/            # Prometheus query_metrics with mock fallback
     │   ├── traces/             # Deterministic query_traces mock
     │   └── knowledge/          # Elasticsearch search tool with mock fallback
     └── transport/http/
@@ -54,6 +57,7 @@ WatchOps-Lite keeps its repository structure intentionally small. A package is c
 - `internal/platform/elasticsearch` owns official-client construction and bounded requests.
 - `internal/retrieval/knowledge` owns document/chunk models, deterministic chunking, retrieval policy, and Elasticsearch query construction.
 - `internal/retrieval/logs` owns log-event models, bounded search policy, and Elasticsearch query construction.
+- `internal/retrieval/metrics` owns metric samples, allowlisted query selection, and Prometheus response parsing.
 - `internal/feedback` owns feedback validation and persistence contracts.
 - `internal/eval` owns manual good-case/bad-case seeding and feedback-rating compatibility.
 - `internal/platform/mysql` owns MySQL driver, connection-pool settings, and schema initialization.

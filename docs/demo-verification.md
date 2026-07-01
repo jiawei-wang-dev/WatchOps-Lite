@@ -8,7 +8,7 @@
 
 Status: **Fully verified locally.**
 
-The complete MVP demo passed with Redis, Elasticsearch, MySQL, Jaeger, and the Go application running together. Knowledge ingestion and BM25 search, deterministic Agent tool execution, evidence attribution, Redis session memory, MySQL feedback/eval persistence, OpenTelemetry export, Jaeger trace visualization, and the repository quality gate were all verified.
+The complete demo passed with Redis, Elasticsearch, Prometheus, the Go demo metrics exporter, MySQL, Jaeger, and the Go application running together. Knowledge ingestion and BM25 search, real log and metric retrieval, deterministic Agent tool execution, evidence attribution, Redis session memory, MySQL feedback/eval persistence, OpenTelemetry export, Jaeger trace visualization, and the repository quality gate were all verified.
 
 An earlier attempt was blocked by Docker Hub TLS handshake timeouts. After the Docker proxy/network configuration was corrected, `docker compose up -d --wait` completed successfully and the full flow below passed.
 
@@ -43,6 +43,8 @@ Observed: passed.
 | `watchops-lite-elasticsearch-1` | healthy | `127.0.0.1:9200->9200` |
 | `watchops-lite-mysql-1` | healthy | `127.0.0.1:3306->3306` |
 | `watchops-lite-jaeger-1` | running | `127.0.0.1:16686->16686`, `127.0.0.1:4317->4317` |
+| `watchops-lite-demo-metrics-1` | healthy | `127.0.0.1:9108->9108` |
+| `watchops-lite-prometheus-1` | healthy | `127.0.0.1:9090->9090` |
 
 ### Application and Health
 
@@ -88,6 +90,8 @@ Observed: passed.
 - reruns replace the same event IDs
 - Elasticsearch unavailability produces a clear non-zero failure
 
+The seed script preserves fixture IDs and content while shifting timestamps into the current 20-minute demo window. This keeps Elasticsearch logs aligned with normally scraped Prometheus samples without backdating time-series data.
+
 ```json
 {"index":"watchops_logs","indexed_count":6,"status":"seeded"}
 ```
@@ -101,6 +105,22 @@ The `query_logs` run reported `evidence_count=2`, `warning_count=0`, and trace I
 
 Degraded-mode smoke verification also passed with Elasticsearch unavailable: the application started, `query_logs` succeeded with `mock-logs`, `warning_count=1`, and the response retained the `MOCK_DATA` limitation.
 
+### Metrics Verification
+
+```bash
+./scripts/demo_metrics.sh
+```
+
+Observed: passed.
+
+```json
+{"metric":"watchops_checkout_error_rate","service":"checkout","value":"0.062","status":"queryable"}
+```
+
+Prometheus scraped the Go demo exporter and exposed all four checkout signals. A real-backend Chat run returned `prometheus-watchops_checkout_error_rate-1` with value `0.062`, query and label metadata, `evidence_count=1`, and `warning_count=0`.
+
+Degraded-mode verification also passed with the Prometheus URL intentionally unavailable: application startup succeeded, `query_metrics` returned `mock-metrics`, `warning_count=1`, and the response included the `MOCK_DATA` limitation. The unit suite separately verifies `TOOL_DEPENDENCY_UNAVAILABLE` when fallback is disabled.
+
 ### Chat Demo
 
 ```bash
@@ -110,27 +130,33 @@ Degraded-mode smoke verification also passed with Elasticsearch unavailable: the
 Observed: passed.
 
 ```text
-request_id: req-1782845918218-3
+request_id: req-1782882785709-2
 session_id: demo-checkout-session
-trace_id:   a3d9c5424d650c27a60d1e2f6c4e6f31
+trace_id:   9df0c1f254cffbe547fc944e821871d0
 ```
 
-The response contained conclusions, evidence, tool runs, metadata, and an explicit `MOCK_DATA` limitation.
+The response contained conclusions, evidence, tool runs, metadata, and no mock-data limitation because every selected tool used its real configured backend.
 
 Tool runs:
 
 | Tool | Success | Evidence count |
 | --- | --- | --- |
 | `query_metrics` | true | 1 |
-| `query_logs` | true | 1 |
+| `query_logs` | true | 2 |
 | `search_knowledge` | true | 2 |
+
+`query_metrics` returned real Prometheus evidence:
+
+- `prometheus-watchops_checkout_error_rate-1`
+- value: `0.062`
+- service: `checkout`
 
 `search_knowledge` returned real Elasticsearch evidence:
 
 - `doc_3238de720ea4732ed7219b66_chunk_0000`
 - `doc_3238de720ea4732ed7219b66_chunk_0001`
 
-The response did not present the payment dependency as a confirmed root cause. It described upstream timeouts as a plausible contributor and retained the mock-data limitation for the deterministic observability tools.
+The response did not present the payment dependency as a confirmed root cause. It correlated the metric and log evidence while describing upstream timeouts only as a plausible contributor.
 
 ### Feedback Demo
 
@@ -281,9 +307,8 @@ http://localhost:16686
 Observed: passed.
 
 - service: `watchops-lite`
-- trace ID: `a3d9c5424d650c27a60d1e2f6c4e6f31`
-- duration: approximately `126.29ms`
-- total spans: `10`
+- trace ID: `9df0c1f254cffbe547fc944e821871d0`
+- total spans: `14`
 - service count: `1`
 - depth: `6`
 
@@ -294,7 +319,11 @@ The trace tree contained:
 - `session.load_context`
 - `agent.run`
 - `tool.query_metrics`
+- `metrics.query`
+- `prometheus.query`
 - `tool.query_logs`
+- `logs.search`
+- `elasticsearch.logs.search`
 - `tool.search_knowledge`
 - `knowledge.search`
 - `elasticsearch.search`
@@ -318,10 +347,11 @@ Observed: passed.
 
 ## Screenshot Checklist
 
-- [x] `docker compose ps` showing Redis, Elasticsearch, MySQL, and Jaeger
+- [x] `docker compose ps` showing Redis, Elasticsearch, Prometheus, the demo exporter, MySQL, and Jaeger
 - [x] `/healthz` showing HTTP 200, request ID, and trace ID
 - [x] knowledge ingestion showing `document_id` and `chunk_count`
 - [x] logs ingestion showing six indexed events and Chat evidence from `elasticsearch-logs`
+- [x] Prometheus showing a scraped checkout metric and Chat evidence from `prometheus`
 - [x] Chat response showing `trace_id`, evidence, limitations, and `tool_runs`
 - [x] knowledge search showing checkout runbook chunks and scores
 - [x] feedback creation showing `feedback_id`
@@ -349,6 +379,7 @@ In another terminal:
 ```bash
 ./scripts/demo_seed_knowledge.sh
 ./scripts/demo_seed_logs.sh
+./scripts/demo_metrics.sh
 ./scripts/demo_chat.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh

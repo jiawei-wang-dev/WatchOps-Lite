@@ -14,16 +14,20 @@ import (
 )
 
 type MockToolsConfig struct {
-	LogsTimeout        time.Duration
-	LogsBackend        string
-	LogsIndex          string
-	LogsDefaultLimit   int
-	LogsFallbackToMock bool
-	LogsSearcher       logs.Searcher
-	MetricsTimeout     time.Duration
-	TracesTimeout      time.Duration
-	KnowledgeTimeout   time.Duration
-	KnowledgeSearcher  knowledge.Searcher
+	LogsTimeout           time.Duration
+	LogsBackend           string
+	LogsIndex             string
+	LogsDefaultLimit      int
+	LogsFallbackToMock    bool
+	LogsSearcher          logs.Searcher
+	MetricsBackend        string
+	MetricsBaseURL        string
+	MetricsFallbackToMock bool
+	MetricsTimeout        time.Duration
+	MetricsSearcher       metrics.Searcher
+	TracesTimeout         time.Duration
+	KnowledgeTimeout      time.Duration
+	KnowledgeSearcher     knowledge.Searcher
 }
 
 func BuildMockTools() ([]einotool.InvokableTool, error) {
@@ -50,10 +54,19 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		return nil, fmt.Errorf("build %s tool: %w", logs.Name, err)
 	}
 
+	metricsExecutor := metrics.NewMockTool(config.MetricsTimeout).Execute
+	if strings.EqualFold(config.MetricsBackend, "prometheus") {
+		metricsExecutor = metrics.NewSearchTool(config.MetricsSearcher, metrics.SearchToolConfig{
+			Backend:        config.MetricsBackend,
+			BaseURL:        config.MetricsBaseURL,
+			FallbackToMock: config.MetricsFallbackToMock,
+			Timeout:        config.MetricsTimeout,
+		}).Execute
+	}
 	metricsTool, err := toolutils.InferTool(
 		metrics.Name,
 		"Query service metrics for latency, error-rate, or symptom evidence.",
-		metrics.NewMockTool(config.MetricsTimeout).Execute,
+		metricsExecutor,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build %s tool: %w", metrics.Name, err)

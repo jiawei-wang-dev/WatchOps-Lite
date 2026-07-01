@@ -1,6 +1,6 @@
 # WatchOps-Lite: Agentic RAG for Service Reliability
 
-A Go-based Agentic RAG assistant for service reliability analysis, combining Eino ReAct tool calling, Elasticsearch RAG, Redis session memory, MySQL feedback/eval seed, and OpenTelemetry tracing.
+A Go-based Agentic RAG assistant for service reliability analysis, combining Eino ReAct tool calling, Elasticsearch RAG and logs, Prometheus metrics, Redis session memory, MySQL feedback/eval seed, and OpenTelemetry tracing.
 
 WatchOps-Lite turns an incident question into a bounded investigation: it builds session context, selects read-only tools, gathers normalized evidence, and returns conclusions, inferences, recommendations, limitations, and tool-run metadata without treating unsupported model output as fact.
 
@@ -18,6 +18,7 @@ flowchart LR
     T --> R["query_traces"]
     T --> K["search_knowledge"]
     L --> ES
+    P --> PROM[("Prometheus")]
     K --> ES[("Elasticsearch BM25")]
     G --> F["Feedback / eval seed"]
     F --> DB[("MySQL")]
@@ -26,7 +27,7 @@ flowchart LR
     O --> J["Jaeger"]
 ```
 
-The local demo uses deterministic Agent routing, Elasticsearch-backed logs and knowledge, and mock metrics/traces. Redis session memory, MySQL feedback/eval persistence, and Jaeger tracing are real local integrations. An OpenAI-compatible Eino `ChatModel` can be enabled separately.
+The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elasticsearch-backed logs and knowledge, and mock traces. Redis session memory, MySQL feedback/eval persistence, and Jaeger tracing are real local integrations. An OpenAI-compatible Eino `ChatModel` can be enabled separately.
 
 ## MVP Features
 
@@ -40,6 +41,7 @@ The local demo uses deterministic Agent routing, Elasticsearch-backed logs and k
 - Redis recent-message sliding window and deterministic rolling summary
 - Elasticsearch chunk indexing and BM25 knowledge retrieval
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
+- Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
 - MySQL upvote/downvote feedback and manual good/bad eval-case seeding
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
 - Reproducible Docker Compose and scripted demo flow
@@ -53,7 +55,7 @@ Requirements:
 - `curl`
 - Python 3 for JSON-safe demo-file loading and response ID extraction
 
-Start Redis, Elasticsearch, MySQL, and Jaeger:
+Start Redis, Elasticsearch, Prometheus, the demo metrics exporter, MySQL, and Jaeger:
 
 ```bash
 docker compose up -d --wait
@@ -101,6 +103,7 @@ With the application running, execute:
 ```bash
 ./scripts/demo_seed_knowledge.sh
 ./scripts/demo_seed_logs.sh
+./scripts/demo_metrics.sh
 ./scripts/demo_chat.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
@@ -109,10 +112,11 @@ With the application running, execute:
 The flow demonstrates:
 
 1. A checkout runbook and deterministic checkout log events are indexed in Elasticsearch.
-2. Chat loads Redis context and invokes mock metrics, real logs, and real knowledge tools.
-3. The response exposes evidence, limitations, `tool_runs`, and `trace_id`.
-4. A downvote is stored in MySQL.
-5. The feedback record seeds a reusable `bad_case`, which is then listed.
+2. Prometheus scrapes four checkout reliability signals from the Go demo exporter.
+3. Chat loads Redis context and invokes real metrics, real logs, and real knowledge tools.
+4. The response exposes evidence, limitations, `tool_runs`, and `trace_id`.
+5. A downvote is stored in MySQL.
+6. The feedback record seeds a reusable `bad_case`, which is then listed.
 
 Open [Jaeger](http://localhost:16686), select the `watchops-lite` service, and search for the trace ID returned by Chat. Demo response state is stored under `/tmp/watchops-lite-demo` by default. Override the API or state location with:
 
@@ -121,9 +125,15 @@ export WATCHOPS_API_BASE_URL=http://localhost:8080
 export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 ```
 
-The log seed uses stable IDs and safely replaces its demo events on rerun. Knowledge, feedback, and eval scripts create additional records.
+The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Knowledge, feedback, and eval scripts create additional records.
 
-`configs/config.example.json` selects `logs.backend=elasticsearch` with `fallback_to_mock=true`. If Elasticsearch logs are unavailable, Chat continues with explicit `LOGS_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps the logs backend in mock mode.
+`configs/config.example.json` selects Elasticsearch logs and Prometheus metrics with explicit mock fallback. If either backend is unavailable, Chat continues with `LOGS_FALLBACK` or `METRICS_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps both backends in mock mode.
+
+Query the demo Prometheus signal directly:
+
+```bash
+./scripts/demo_metrics.sh
+```
 
 ## API Examples
 
@@ -255,7 +265,9 @@ make verify
 
 ```text
 .
-├── cmd/server/                  # Process entry point
+├── cmd/
+│   ├── server/                 # Application process entry point
+│   └── demo-metrics/           # Static local Prometheus scrape target
 ├── configs/                    # Default and local-demo configuration
 ├── demo/                       # Safe runbook and deterministic log events
 ├── docs/                       # Architecture, API, roadmap, and ADRs
@@ -272,6 +284,7 @@ make verify
     ├── platform/               # Elasticsearch and MySQL clients
     ├── retrieval/knowledge/    # Chunking, BM25 policy, and ES store
     ├── retrieval/logs/         # Bounded logs search and Elasticsearch store
+    ├── retrieval/metrics/      # Allowlisted metrics policy and Prometheus client
     ├── tools/                  # WatchOps tool contracts and implementations
     └── transport/http/         # Gin router, middleware, DTOs, handlers
 ```
@@ -280,7 +293,7 @@ make verify
 
 - Knowledge retrieval is BM25 only; embeddings, hybrid retrieval, RRF, and reranking are deferred.
 - Session summarization is deterministic; an LLM summary model with deterministic fallback is deferred.
-- Metrics and traces still use deterministic fixtures; logs can use Elasticsearch or mock fallback.
+- Traces still use deterministic fixtures; logs and metrics have real backends with mock fallback.
 - Eval cases are manually seeded; there is no automatic evaluator, scorer, or LLM judge.
 - Prometheus application metrics and Grafana dashboards are not included.
 - The LLM Agent is optional and disabled by default.
@@ -290,7 +303,7 @@ make verify
 
 - LLM session summary model with deterministic fallback
 - Hybrid BM25/vector retrieval with evaluation-driven RRF and reranking
-- Production metrics and trace query adapters
+- Production trace query adapter
 - Automatic eval runner and release comparison reports
 - Prometheus application metrics and Grafana dashboards
 
@@ -304,6 +317,7 @@ make verify
 - [ADR 0008: Eino ReAct Agent](docs/adr/0008-eino-react-agent.md)
 - [ADR 0009: MVP Demo Packaging](docs/adr/0009-mvp-demo-packaging.md)
 - [ADR 0010: Elasticsearch-backed Logs Tool](docs/adr/0010-elasticsearch-logs-tool.md)
+- [ADR 0011: Prometheus-backed Metrics Tool](docs/adr/0011-prometheus-metrics-tool.md)
 
 ## Originality
 
