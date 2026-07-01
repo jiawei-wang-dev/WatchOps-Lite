@@ -150,3 +150,31 @@ func TestRuntimeRejectsInvalidEvidence(t *testing.T) {
 		t.Fatalf("result = %#v, want invalid evidence failure", result)
 	}
 }
+
+func TestRuntimeBoundsFallbackExecution(t *testing.T) {
+	toolRuntime, err := New(Config{
+		ToolName:   "query_logs",
+		SourceType: SourceLogs,
+		Timeout:    5 * time.Millisecond,
+		Operation: func(context.Context, any) (Result, error) {
+			return Result{}, errors.New("backend unavailable")
+		},
+		Fallback: func(ctx context.Context, _ any) (Result, error) {
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result := toolRuntime.Execute(context.Background(), struct{}{})
+
+	if result.Error == nil || result.Error.Code != ErrorCodeTimeout {
+		t.Fatalf("result = %#v, want bounded fallback timeout", result)
+	}
+	if result.Error.Details["primary_error_code"] != ErrorCodeInternal ||
+		result.Error.Details["fallback_error_code"] != ErrorCodeTimeout {
+		t.Fatalf("error details = %#v", result.Error.Details)
+	}
+}

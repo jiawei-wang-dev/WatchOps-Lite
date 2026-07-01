@@ -6,7 +6,6 @@ import (
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
-	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -35,11 +34,6 @@ func ExecuteRuntime(
 		attribute.Int64("tool.duration_ms", result.LatencyMS),
 	)
 	span.End()
-	runtimemetrics.ObserveTool(
-		toolRuntime.Name(),
-		errorCode,
-		result.FinishedAt.Sub(result.StartedAt),
-	)
 	return FromRuntimeResult(result)
 }
 

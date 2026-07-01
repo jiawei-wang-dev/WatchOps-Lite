@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 const DefaultTimeout = 2 * time.Second
@@ -55,8 +58,34 @@ func (r *Runtime) SourceType() SourceType {
 	return r.config.SourceType
 }
 
-func (r *Runtime) Execute(ctx context.Context, input any) Result {
+func (r *Runtime) Execute(ctx context.Context, input any) (result Result) {
 	startedAt := time.Now().UTC()
+	ctx, span := observability.StartSpan(
+		ctx,
+		"tool.runtime.execute",
+		attribute.String("tool_name", r.config.ToolName),
+		attribute.String("source_type", string(r.config.SourceType)),
+		attribute.Bool("fallback_used", false),
+	)
+	defer func() {
+		errorCode := resultErrorCode(result)
+		fallbackUsed, _ := result.Metadata["fallback_used"].(bool)
+		span.SetAttributes(
+			attribute.String("error_code", errorCode),
+			attribute.Bool("fallback_used", fallbackUsed),
+			attribute.Int("evidence_count", len(result.Evidence)),
+			attribute.Int64("latency_ms", result.LatencyMS),
+		)
+		if result.Error != nil {
+			observability.MarkError(span, "tool runtime execution failed")
+		}
+		span.End()
+		runtimemetrics.ObserveTool(
+			r.config.ToolName,
+			errorCodeForMetrics(result),
+			result.FinishedAt.Sub(result.StartedAt),
+		)
+	}()
 	executionContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
 	defer cancel()
 
@@ -69,6 +98,16 @@ func (r *Runtime) Execute(ctx context.Context, input any) Result {
 	select {
 	case <-executionContext.Done():
 		if errors.Is(executionContext.Err(), context.DeadlineExceeded) {
+			fallbackUsed := r.config.Fallback != nil && ctx.Err() == nil
+			_, timeoutSpan := observability.StartSpan(
+				ctx,
+				"tool.runtime.timeout",
+				attribute.String("tool_name", r.config.ToolName),
+				attribute.String("source_type", string(r.config.SourceType)),
+				attribute.String("error_code", ErrorCodeTimeout),
+				attribute.Bool("fallback_used", fallbackUsed),
+			)
+			timeoutSpan.End()
 			return r.fallbackOrFailure(
 				ctx,
 				input,
@@ -114,8 +153,42 @@ func (r *Runtime) fallbackOrFailure(
 	if r.config.Fallback == nil || ctx.Err() != nil {
 		return finishFailure(r.config, startedAt, primaryError)
 	}
-	fallbackResult, err := r.config.Fallback(ctx, input)
+	ctx, span := observability.StartSpan(
+		ctx,
+		"tool.runtime.fallback",
+		attribute.String("tool_name", r.config.ToolName),
+		attribute.String("source_type", string(r.config.SourceType)),
+		attribute.String("error_code", primaryError.Code),
+		attribute.Bool("fallback_used", true),
+	)
+	defer span.End()
+	fallbackContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
+	defer cancel()
+	completed := make(chan operationResult, 1)
+	go func() {
+		result, err := r.config.Fallback(fallbackContext, input)
+		completed <- operationResult{result: result, err: err}
+	}()
+	var fallbackResult Result
+	var err error
+	select {
+	case <-fallbackContext.Done():
+		err = fallbackContext.Err()
+		_, timeoutSpan := observability.StartSpan(
+			ctx,
+			"tool.runtime.timeout",
+			attribute.String("tool_name", r.config.ToolName),
+			attribute.String("source_type", string(r.config.SourceType)),
+			attribute.String("error_code", ErrorCodeTimeout),
+			attribute.Bool("fallback_used", true),
+		)
+		timeoutSpan.End()
+	case operation := <-completed:
+		fallbackResult = operation.result
+		err = operation.err
+	}
 	if err != nil {
+		observability.MarkError(span, "tool runtime fallback failed")
 		fallbackError := normalizeError(r.config.ToolName, err)
 		fallbackError.Details = map[string]any{
 			"primary_error_code":  primaryError.Code,
@@ -138,6 +211,25 @@ func (r *Runtime) fallbackOrFailure(
 		)
 	}
 	return finishSuccess(r.config, startedAt, fallbackResult, true)
+}
+
+func resultErrorCode(result Result) string {
+	if result.Error != nil {
+		return result.Error.Code
+	}
+	if result.Metadata != nil {
+		if value, ok := result.Metadata["primary_error_code"].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func errorCodeForMetrics(result Result) string {
+	if result.Error != nil {
+		return result.Error.Code
+	}
+	return ""
 }
 
 func finishSuccess(
