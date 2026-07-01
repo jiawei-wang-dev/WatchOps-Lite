@@ -1,14 +1,14 @@
 # WatchOps-Lite Demo Verification
 
-> Verification date: `2026-07-01`
+> Verification date: `2026-07-02`
 >
-> Final full local run: 2026-07-01 (Australia/Melbourne)
+> Final enhanced local run: 2026-07-02 (Australia/Melbourne)
 
 ## Status Summary
 
 Status: **Fully verified locally.**
 
-The complete demo passed with Redis, Elasticsearch, Prometheus, the Go demo metrics exporter, MySQL, Jaeger, and the Go application running together. Knowledge ingestion and BM25 search, real log, metric, and trace retrieval, deterministic Agent tool execution, evidence attribution, Redis session memory, MySQL feedback/eval persistence, OpenTelemetry export, Jaeger trace visualization, and the repository quality gate were all verified.
+The complete enhanced demo passed with Redis, Elasticsearch, Prometheus, the Go demo metrics exporter, MySQL, Jaeger, Grafana, and the Go application running together. Knowledge ingestion and retrieval, real log, metric, trace, and knowledge evidence, deterministic Agent execution, Redis recent messages and rolling summary, MySQL feedback/eval/run persistence, OpenTelemetry traces, runtime Prometheus metrics, the provisioned Grafana dashboard, and the repository quality gate were all verified.
 
 An earlier attempt was blocked by Docker Hub TLS handshake timeouts. After the Docker proxy/network configuration was corrected, `docker compose up -d --wait` completed successfully and the full flow below passed.
 
@@ -45,6 +45,7 @@ Observed: passed.
 | `watchops-lite-jaeger-1` | running | `127.0.0.1:16686->16686`, `127.0.0.1:4317->4317` |
 | `watchops-lite-demo-metrics-1` | healthy | `127.0.0.1:9108->9108` |
 | `watchops-lite-prometheus-1` | healthy | `127.0.0.1:9090->9090` |
+| `watchops-lite-grafana-1` | healthy | `127.0.0.1:3000->3000` |
 
 ### Application and Health
 
@@ -73,7 +74,7 @@ Observed: passed.
 Observed: passed.
 
 ```text
-document_id: doc_59235efa1dd832f3c1d21f36
+document_id: doc_f2ae47c05cf5d4bdde076aa1
 chunk_count: 2
 ```
 
@@ -130,9 +131,9 @@ Degraded-mode verification also passed with the Prometheus URL intentionally una
 Observed: passed.
 
 ```text
-request_id: req-1782882785709-2
+request_id: req-1782918331084-2
 session_id: demo-checkout-session
-trace_id:   9df0c1f254cffbe547fc944e821871d0
+trace_id:   315f80b4485d4aa43fd547d382be1d34
 ```
 
 The response contained conclusions, evidence, tool runs, metadata, and no mock-data limitation because every selected tool used its real configured backend.
@@ -226,6 +227,24 @@ The list response retained:
 - `feedback_id`: `fb_96d2fd3761f901121b4e6ef6`
 - forbidden pattern: `The payment service is definitely the root cause.`
 
+### Eval Run Demo
+
+```bash
+./scripts/demo_eval_run.sh
+```
+
+Observed: passed.
+
+```text
+run_id: run_02ff47d81a86b1435be636a8
+status: completed
+total: 2
+passed: 2
+failed: 0
+```
+
+Both case results persisted their request ID, trace ID, duration, pass status, and empty failure-reason list.
+
 ### Manual Knowledge Search
 
 ```bash
@@ -279,8 +298,8 @@ Expected and confirmed:
 ### Redis Session Memory
 
 ```bash
-redis-cli LRANGE session:demo_final_01:recent 0 -1
-redis-cli HGETALL session:demo_final_01:summary
+docker compose exec -T redis redis-cli LLEN session:demo-checkout-session:recent
+docker compose exec -T redis redis-cli EXISTS session:demo-checkout-session:summary
 ```
 
 Expected:
@@ -288,7 +307,10 @@ Expected:
 - recent messages contain user and assistant entries
 - the rolling summary appears after the configured threshold is exceeded
 
-For a short session, an empty summary is expected until enough messages leave the recent-message window.
+Observed: passed.
+
+- recent-message length: `12`
+- rolling-summary key exists: `1`
 
 ### MySQL Feedback and Eval
 
@@ -310,6 +332,17 @@ Tables:
 
 - `feedback`
 - `eval_cases`
+- `eval_runs`
+- `eval_case_results`
+
+Observed row counts:
+
+```text
+feedback          2
+eval_cases        2
+eval_runs         2
+eval_case_results 3
+```
 
 Feedback row:
 
@@ -343,11 +376,10 @@ http://localhost:16686
 Observed: passed.
 
 - service: `watchops-lite`
-- trace ID: `34c0a148e6f876887e8ceacdf1b7594d`
-- queried evidence trace ID: `956f1003e3cd8e768148b3c8875ab59a`
-- total spans: `17`
+- queried evidence trace ID: `ceacce9ce74ff105b9d60136e2a01a8c`
+- Chat trace ID: `858b11e53cad0dc54c3e881d1d5b38f5`
+- queried trace spans: `15`
 - service count: `1`
-- depth: `6`
 
 The trace tree contained:
 
@@ -369,6 +401,40 @@ The trace tree contained:
 - `elasticsearch.search`
 - `session.persist_context`
 
+### Runtime Prometheus Metrics
+
+```bash
+curl -fsS http://localhost:8080/metrics
+curl -fsS 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22watchops-lite%22%7D'
+```
+
+Observed: passed.
+
+- Prometheus target: `watchops-lite`
+- scrape URL: `http://host.docker.internal:8080/metrics`
+- target health: `up`
+- `up{job="watchops-lite"}`: `1`
+- HTTP, Chat, tool, RAG, and eval runtime series contained demo observations
+
+### Grafana
+
+Open:
+
+```text
+http://localhost:3000/d/watchops-lite/watchops-lite-runtime
+```
+
+Observed: passed.
+
+- Grafana health database status: `ok`
+- datasource UID: `prometheus`
+- datasource URL: `http://prometheus:9090`
+- dashboard UID: `watchops-lite`
+- dashboard title: `WatchOps-Lite Runtime`
+- provisioned panel count: `11`
+
+The dashboard contained HTTP and Chat traffic, tool calls and errors, RAG latency, session-memory availability, Agent and summary fallbacks, and eval-run status panels.
+
 ### Quality Gate
 
 ```bash
@@ -387,7 +453,7 @@ Observed: passed.
 
 ## Screenshot Checklist
 
-- [x] `docker compose ps` showing Redis, Elasticsearch, Prometheus, the demo exporter, MySQL, and Jaeger
+- [x] `docker compose ps` showing Redis, Elasticsearch, Prometheus, the demo exporter, MySQL, Jaeger, and Grafana
 - [x] `/healthz` showing HTTP 200, request ID, and trace ID
 - [x] knowledge ingestion showing `document_id` and `chunk_count`
 - [x] logs ingestion showing six indexed events and Chat evidence from `elasticsearch-logs`
@@ -397,9 +463,12 @@ Observed: passed.
 - [x] knowledge search showing checkout runbook chunks and scores
 - [x] feedback creation showing `feedback_id`
 - [x] eval-case creation showing `case_id`
-- [ ] Redis recent messages and rolling summary
-- [x] MySQL `feedback` and `eval_cases` rows
+- [x] eval run showing persisted pass/fail results
+- [x] Redis recent messages and rolling summary
+- [x] MySQL feedback, eval case, eval run, and case-result rows
 - [x] Jaeger trace tree for the Chat request
+- [x] Prometheus scraping WatchOps-Lite `/metrics`
+- [x] Grafana datasource and 11-panel dashboard
 - [x] `make verify` successful output
 - [ ] README Quick Start section
 - [ ] architecture overview or Mermaid diagram
@@ -425,6 +494,7 @@ In another terminal:
 ./scripts/demo_traces.sh
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
+./scripts/demo_eval_run.sh
 
 curl -sS http://localhost:8080/api/v1/knowledge/search \
   -H 'Content-Type: application/json' \
@@ -441,4 +511,4 @@ docker compose down
 
 ## Final Conclusion
 
-**WatchOps-Lite MVP and observability upgrades 1.1–1.3 are fully verified locally and ready for GitHub publication.**
+**WatchOps-Lite enhanced demo is fully verified locally.**

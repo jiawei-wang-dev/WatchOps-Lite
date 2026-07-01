@@ -352,6 +352,21 @@ Delivered:
 
 Exit status: complete. The dashboard demonstrates runtime instrumentation; production alerts, recording rules, and SLO design remain outside this stage.
 
+## Enhancement Stage 6: Final Demo Verification — Completed
+
+Verified:
+
+- all Compose services healthy, including Grafana
+- real Prometheus metrics, Elasticsearch logs, Jaeger traces, and Elasticsearch knowledge evidence in Chat
+- Redis recent messages and persisted rolling summary
+- MySQL feedback, eval cases, eval runs, and case results
+- Jaeger multi-span trace tree
+- Prometheus scraping WatchOps-Lite runtime metrics
+- provisioned Grafana datasource and 11-panel dashboard
+- complete repository verification gate
+
+Exit status: complete. WatchOps-Lite enhanced demo is fully verified locally.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -372,6 +387,7 @@ flowchart LR
     S2 --> S3["Stage 3 Eval Runner (complete)"]
     S3 --> S4["Stage 4 Runtime Metrics (complete)"]
     S4 --> S5["Stage 5 Grafana Dashboard (complete)"]
+    S5 --> S6["Stage 6 Enhanced Demo Verification (complete)"]
 ```
 
 ## Deferred Work
