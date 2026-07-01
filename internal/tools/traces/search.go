@@ -9,6 +9,7 @@ import (
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievaltraces "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/traces"
+	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -29,26 +30,51 @@ type SearchToolConfig struct {
 type SearchTool struct {
 	searcher Searcher
 	config   SearchToolConfig
+	runtime  *toolruntime.Runtime
 }
 
 func NewSearchTool(searcher Searcher, config SearchToolConfig) *SearchTool {
-	return &SearchTool{searcher: searcher, config: config}
+	tool := &SearchTool{searcher: searcher, config: config}
+	backend := strings.ToLower(strings.TrimSpace(config.Backend))
+	if backend == "" {
+		backend = "jaeger"
+	}
+	runtimeConfig := toolruntime.Config{
+		ToolName:   Name,
+		SourceType: toolruntime.SourceTraces,
+		Timeout:    config.Timeout,
+		Operation: func(ctx context.Context, value any) (toolruntime.Result, error) {
+			input, ok := value.(Input)
+			if !ok {
+				return toolruntime.Result{}, invalidArgument("invalid trace tool input", nil)
+			}
+			return tool.search(ctx, input)
+		},
+	}
+	if config.FallbackToMock {
+		runtimeConfig.Fallback = mockOperation
+		runtimeConfig.FallbackWarning = toolruntime.Warning{
+			Code:    "TRACES_FALLBACK",
+			Message: "Jaeger was unavailable; mock trace evidence was returned.",
+		}
+		runtimeConfig.FallbackMetadata = map[string]any{
+			"mode":               "mock_fallback",
+			"backend":            "mock",
+			"configured_backend": backend,
+		}
+	}
+	tool.runtime = mustRuntime(runtimeConfig)
+	return tool
 }
 
 func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResult, error) {
-	return common.Execute(ctx, common.ExecuteOptions{
-		ToolName: Name,
-		Timeout:  t.config.Timeout,
-		Fallback: "enable mock trace fallback or retry when Jaeger is available",
-	}, func(ctx context.Context) (common.ToolResult, error) {
-		return t.search(ctx, input)
-	})
+	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
 func (t *SearchTool) search(
 	ctx context.Context,
 	input Input,
-) (result common.ToolResult, resultErr error) {
+) (result toolruntime.Result, resultErr error) {
 	backend := strings.ToLower(strings.TrimSpace(t.config.Backend))
 	if backend == "" {
 		backend = "jaeger"
@@ -65,28 +91,16 @@ func (t *SearchTool) search(
 		attribute.String("operation", strings.TrimSpace(input.Operation)),
 		attribute.String("trace_id", strings.TrimSpace(input.TraceID)),
 	)
-	fallbackUsed := false
 	defer func() {
-		span.SetAttributes(
-			attribute.Int("result_count", len(result.Evidence)),
-			attribute.Bool("fallback_used", fallbackUsed),
-		)
+		span.SetAttributes(attribute.Int("result_count", len(result.Evidence)))
 		if resultErr != nil {
-			errorCode := common.ErrorCodeInternal
-			var toolErr *common.ToolError
-			if errors.As(resultErr, &toolErr) {
-				errorCode = toolErr.Code
-			} else if errors.Is(resultErr, context.DeadlineExceeded) {
-				errorCode = common.ErrorCodeTimeout
-			}
-			span.SetAttributes(attribute.String("error_code", string(errorCode)))
 			observability.MarkError(span, "Trace query failed")
 		}
 		span.End()
 	}()
 
 	if toolErr := validate(input); toolErr != nil {
-		return common.ToolResult{}, toolErr
+		return toolruntime.Result{}, toolErr
 	}
 	from, _ := time.Parse(time.RFC3339, input.TimeRange.From)
 	to, _ := time.Parse(time.RFC3339, input.TimeRange.To)
@@ -94,60 +108,37 @@ func (t *SearchTool) search(
 	if limit <= 0 {
 		limit = 10
 	}
-
-	var spans []retrievaltraces.Span
-	var err error
 	if t.searcher == nil {
-		err = retrievaltraces.ErrUnavailable
-	} else {
-		spans, err = t.searcher.Search(ctx, retrievaltraces.Query{
-			Service:   input.Service,
-			TraceID:   input.TraceID,
-			Operation: input.Operation,
-			From:      from,
-			To:        to,
-			Limit:     limit,
-		})
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
+	spans, err := t.searcher.Search(ctx, retrievaltraces.Query{
+		Service:   input.Service,
+		TraceID:   input.TraceID,
+		Operation: input.Operation,
+		From:      from,
+		To:        to,
+		Limit:     limit,
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return common.ToolResult{}, err
+			return toolruntime.Result{}, err
 		}
-		if t.config.FallbackToMock {
-			fallbackUsed = true
-			result = mockResult(input)
-			result.Warnings = append(result.Warnings, common.ToolWarning{
-				Code:    "TRACES_FALLBACK",
-				Message: "Jaeger was unavailable; mock trace evidence was returned.",
-			})
-			result.Metadata["mode"] = "mock_fallback"
-			result.Metadata["backend"] = "mock"
-			result.Metadata["configured_backend"] = backend
-			result.Metadata["fallback_used"] = true
-			return result, nil
-		}
-		return common.ToolResult{}, common.NewToolError(
-			common.ErrorCodeDependencyUnavailable,
-			Name,
-			"Jaeger trace backend is unavailable",
-			true,
-			map[string]any{"backend": "jaeger"},
-			"enable trace fallback or retry later",
-		)
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]common.EvidenceItem, 0, len(spans))
+	evidence := make([]toolruntime.Evidence, 0, len(spans))
 	for _, traceSpan := range spans {
 		startTime := traceSpan.StartTime.UTC()
 		endTime := startTime.Add(time.Duration(traceSpan.DurationMS * float64(time.Millisecond)))
-		evidence = append(evidence, common.EvidenceItem{
-			ID:         "jaeger-" + traceSpan.TraceID + "-" + traceSpan.SpanID,
-			SourceType: "traces",
-			SourceName: "jaeger",
-			TimeRange: &common.TimeRange{
+		evidence = append(evidence, toolruntime.Evidence{
+			EvidenceID: "jaeger-" + traceSpan.TraceID + "-" + traceSpan.SpanID,
+			SourceType: toolruntime.SourceTraces,
+			Source:     "jaeger",
+			TimeRange: &toolruntime.TimeRange{
 				From: startTime.Format(time.RFC3339Nano),
 				To:   endTime.Format(time.RFC3339Nano),
 			},
+			TraceID: traceSpan.TraceID,
 			Content: fmt.Sprintf(
 				"Span %s in service %s took %.3fms (error=%t).",
 				traceSpan.Operation,
@@ -167,23 +158,32 @@ func (t *SearchTool) search(
 			},
 		})
 	}
-	warnings := []common.ToolWarning{}
+	warnings := []toolruntime.Warning{}
 	if len(evidence) == 0 {
-		warnings = append(warnings, common.ToolWarning{
+		warnings = append(warnings, toolruntime.Warning{
 			Code:    "TRACES_NO_DATA",
 			Message: "Jaeger returned no spans for the requested trace query.",
 		})
 	}
-	return common.ToolResult{
+	return toolruntime.Result{
 		Evidence: evidence,
 		Warnings: warnings,
 		Payload: map[string]any{
 			"returned_count": len(evidence),
 		},
 		Metadata: map[string]any{
-			"mode":          "jaeger",
-			"backend":       backend,
-			"fallback_used": false,
+			"mode":    "jaeger",
+			"backend": backend,
 		},
 	}, nil
+}
+
+func dependencyUnavailable() *toolruntime.ToolError {
+	return toolruntime.NewToolError(
+		toolruntime.ErrorCodeDependencyUnavailable,
+		Name,
+		"Jaeger trace backend is unavailable",
+		true,
+		map[string]any{"backend": "jaeger"},
+	)
 }

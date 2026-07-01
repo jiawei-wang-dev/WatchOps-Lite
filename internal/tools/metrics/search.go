@@ -9,6 +9,7 @@ import (
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
+	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -27,26 +28,51 @@ type SearchToolConfig struct {
 type SearchTool struct {
 	searcher Searcher
 	config   SearchToolConfig
+	runtime  *toolruntime.Runtime
 }
 
 func NewSearchTool(searcher Searcher, config SearchToolConfig) *SearchTool {
-	return &SearchTool{searcher: searcher, config: config}
+	tool := &SearchTool{searcher: searcher, config: config}
+	backend := strings.ToLower(strings.TrimSpace(config.Backend))
+	if backend == "" {
+		backend = "prometheus"
+	}
+	runtimeConfig := toolruntime.Config{
+		ToolName:   Name,
+		SourceType: toolruntime.SourceMetrics,
+		Timeout:    config.Timeout,
+		Operation: func(ctx context.Context, value any) (toolruntime.Result, error) {
+			input, ok := value.(Input)
+			if !ok {
+				return toolruntime.Result{}, invalidArgument("invalid metrics tool input", nil)
+			}
+			return tool.search(ctx, input)
+		},
+	}
+	if config.FallbackToMock {
+		runtimeConfig.Fallback = mockOperation
+		runtimeConfig.FallbackWarning = toolruntime.Warning{
+			Code:    "METRICS_FALLBACK",
+			Message: "Prometheus was unavailable; mock metric evidence was returned.",
+		}
+		runtimeConfig.FallbackMetadata = map[string]any{
+			"mode":               "mock_fallback",
+			"backend":            "mock",
+			"configured_backend": backend,
+		}
+	}
+	tool.runtime = mustRuntime(runtimeConfig)
+	return tool
 }
 
 func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResult, error) {
-	return common.Execute(ctx, common.ExecuteOptions{
-		ToolName: Name,
-		Timeout:  t.config.Timeout,
-		Fallback: "enable mock metrics fallback or retry when Prometheus is available",
-	}, func(ctx context.Context) (common.ToolResult, error) {
-		return t.search(ctx, input)
-	})
+	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
 func (t *SearchTool) search(
 	ctx context.Context,
 	input Input,
-) (result common.ToolResult, resultErr error) {
+) (result toolruntime.Result, resultErr error) {
 	backend := strings.ToLower(strings.TrimSpace(t.config.Backend))
 	if backend == "" {
 		backend = "prometheus"
@@ -63,82 +89,49 @@ func (t *SearchTool) search(
 		attribute.String("query_name", queryName),
 		attribute.Int("query_length", len(queryName)),
 	)
-	fallbackUsed := false
 	defer func() {
-		span.SetAttributes(
-			attribute.Int("result_count", len(result.Evidence)),
-			attribute.Bool("fallback_used", fallbackUsed),
-		)
+		span.SetAttributes(attribute.Int("result_count", len(result.Evidence)))
 		if resultErr != nil {
-			errorCode := common.ErrorCodeInternal
-			var toolErr *common.ToolError
-			if errors.As(resultErr, &toolErr) {
-				errorCode = toolErr.Code
-			} else if errors.Is(resultErr, context.DeadlineExceeded) {
-				errorCode = common.ErrorCodeTimeout
-			}
-			span.SetAttributes(attribute.String("error_code", string(errorCode)))
 			observability.MarkError(span, "Metrics query failed")
 		}
 		span.End()
 	}()
 
 	if toolErr := validate(input); toolErr != nil {
-		return common.ToolResult{}, toolErr
+		return toolruntime.Result{}, toolErr
 	}
 	at, _ := time.Parse(time.RFC3339, input.TimeRange.To)
-
-	var samples []retrievalmetrics.Sample
-	var err error
 	if t.searcher == nil {
-		err = retrievalmetrics.ErrUnavailable
-	} else {
-		samples, err = t.searcher.Query(ctx, retrievalmetrics.QueryRequest{
-			Service:    input.Service,
-			MetricName: input.MetricName,
-			Symptom:    input.Symptom,
-			At:         at,
-		})
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
+	samples, err := t.searcher.Query(ctx, retrievalmetrics.QueryRequest{
+		Service:    input.Service,
+		MetricName: input.MetricName,
+		Symptom:    input.Symptom,
+		At:         at,
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return common.ToolResult{}, err
+			return toolruntime.Result{}, err
 		}
-		if t.config.FallbackToMock {
-			fallbackUsed = true
-			result = mockResult(input)
-			result.Warnings = append(result.Warnings, common.ToolWarning{
-				Code:    "METRICS_FALLBACK",
-				Message: "Prometheus was unavailable; mock metric evidence was returned.",
-			})
-			result.Metadata["mode"] = "mock_fallback"
-			result.Metadata["backend"] = "mock"
-			result.Metadata["configured_backend"] = backend
-			result.Metadata["fallback_used"] = true
-			return result, nil
-		}
-		return common.ToolResult{}, common.NewToolError(
-			common.ErrorCodeDependencyUnavailable,
-			Name,
-			"Prometheus metrics backend is unavailable",
-			true,
-			map[string]any{"backend": "prometheus"},
-			"enable metrics fallback or retry later",
-		)
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]common.EvidenceItem, 0, len(samples))
+	evidence := make([]toolruntime.Evidence, 0, len(samples))
 	for index, sample := range samples {
 		timestamp := sample.Timestamp.UTC().Format(time.RFC3339Nano)
 		service := sample.Service
 		if service == "" {
 			service = strings.TrimSpace(input.Service)
 		}
-		evidence = append(evidence, common.EvidenceItem{
-			ID:         fmt.Sprintf("prometheus-%s-%d", evidenceIDPart(sample.Name), index+1),
-			SourceType: "metrics",
-			SourceName: "prometheus",
-			TimeRange:  &input.TimeRange,
+		evidence = append(evidence, toolruntime.Evidence{
+			EvidenceID: fmt.Sprintf("prometheus-%s-%d", evidenceIDPart(sample.Name), index+1),
+			SourceType: toolruntime.SourceMetrics,
+			Source:     "prometheus",
+			TimeRange: &toolruntime.TimeRange{
+				From: input.TimeRange.From,
+				To:   input.TimeRange.To,
+			},
 			Content: fmt.Sprintf(
 				"%s=%s for service %s at %s.",
 				sample.Name,
@@ -156,25 +149,34 @@ func (t *SearchTool) search(
 			},
 		})
 	}
-	warnings := []common.ToolWarning{}
+	warnings := []toolruntime.Warning{}
 	if len(evidence) == 0 {
-		warnings = append(warnings, common.ToolWarning{
+		warnings = append(warnings, toolruntime.Warning{
 			Code:    "METRICS_NO_DATA",
 			Message: "Prometheus returned no samples for the selected query and time.",
 		})
 	}
-	return common.ToolResult{
+	return toolruntime.Result{
 		Evidence: evidence,
 		Warnings: warnings,
 		Payload: map[string]any{
 			"returned_count": len(evidence),
 		},
 		Metadata: map[string]any{
-			"mode":          "prometheus",
-			"backend":       backend,
-			"fallback_used": false,
+			"mode":    "prometheus",
+			"backend": backend,
 		},
 	}, nil
+}
+
+func dependencyUnavailable() *toolruntime.ToolError {
+	return toolruntime.NewToolError(
+		toolruntime.ErrorCodeDependencyUnavailable,
+		Name,
+		"Prometheus metrics backend is unavailable",
+		true,
+		map[string]any{"backend": "prometheus"},
+	)
 }
 
 func formatMetricValue(value float64) string {

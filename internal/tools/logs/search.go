@@ -8,6 +8,7 @@ import (
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
+	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -29,26 +30,51 @@ type SearchToolConfig struct {
 type SearchTool struct {
 	searcher Searcher
 	config   SearchToolConfig
+	runtime  *toolruntime.Runtime
 }
 
 func NewSearchTool(searcher Searcher, config SearchToolConfig) *SearchTool {
-	return &SearchTool{searcher: searcher, config: config}
+	tool := &SearchTool{searcher: searcher, config: config}
+	backend := strings.ToLower(strings.TrimSpace(config.Backend))
+	if backend == "" {
+		backend = "elasticsearch"
+	}
+	runtimeConfig := toolruntime.Config{
+		ToolName:   Name,
+		SourceType: toolruntime.SourceLogs,
+		Timeout:    config.Timeout,
+		Operation: func(ctx context.Context, value any) (toolruntime.Result, error) {
+			input, ok := value.(Input)
+			if !ok {
+				return toolruntime.Result{}, invalidArgument("invalid log tool input", nil)
+			}
+			return tool.search(ctx, input)
+		},
+	}
+	if config.FallbackToMock {
+		runtimeConfig.Fallback = mockOperation
+		runtimeConfig.FallbackWarning = toolruntime.Warning{
+			Code:    "LOGS_FALLBACK",
+			Message: "Elasticsearch logs were unavailable; mock log evidence was returned.",
+		}
+		runtimeConfig.FallbackMetadata = map[string]any{
+			"mode":               "mock_fallback",
+			"backend":            "mock",
+			"configured_backend": backend,
+		}
+	}
+	tool.runtime = mustRuntime(runtimeConfig)
+	return tool
 }
 
 func (t *SearchTool) Execute(ctx context.Context, input Input) (common.ToolResult, error) {
-	return common.Execute(ctx, common.ExecuteOptions{
-		ToolName: Name,
-		Timeout:  t.config.Timeout,
-		Fallback: "enable mock log fallback or retry when Elasticsearch is available",
-	}, func(ctx context.Context) (common.ToolResult, error) {
-		return t.search(ctx, input)
-	})
+	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
 func (t *SearchTool) search(
 	ctx context.Context,
 	input Input,
-) (result common.ToolResult, resultErr error) {
+) (result toolruntime.Result, resultErr error) {
 	backend := strings.ToLower(strings.TrimSpace(t.config.Backend))
 	if backend == "" {
 		backend = "elasticsearch"
@@ -61,28 +87,16 @@ func (t *SearchTool) search(
 		attribute.String("service", strings.TrimSpace(input.Service)),
 		attribute.Int("query_length", len(strings.Join(input.Keywords, " "))),
 	)
-	fallbackUsed := false
 	defer func() {
-		span.SetAttributes(
-			attribute.Int("result_count", len(result.Evidence)),
-			attribute.Bool("fallback_used", fallbackUsed),
-		)
+		span.SetAttributes(attribute.Int("result_count", len(result.Evidence)))
 		if resultErr != nil {
-			errorCode := common.ErrorCodeInternal
-			var toolErr *common.ToolError
-			if errors.As(resultErr, &toolErr) {
-				errorCode = toolErr.Code
-			} else if errors.Is(resultErr, context.DeadlineExceeded) {
-				errorCode = common.ErrorCodeTimeout
-			}
-			span.SetAttributes(attribute.String("error_code", string(errorCode)))
 			observability.MarkError(span, "Logs search failed")
 		}
 		span.End()
 	}()
 
 	if toolErr := validate(input); toolErr != nil {
-		return common.ToolResult{}, toolErr
+		return toolruntime.Result{}, toolErr
 	}
 	from, _ := time.Parse(time.RFC3339, input.TimeRange.From)
 	to, _ := time.Parse(time.RFC3339, input.TimeRange.To)
@@ -91,59 +105,37 @@ func (t *SearchTool) search(
 		limit = 20
 	}
 
-	var events []retrievallogs.Event
-	var err error
 	if t.searcher == nil {
-		err = retrievallogs.ErrUnavailable
-	} else {
-		events, err = t.searcher.Search(ctx, retrievallogs.SearchQuery{
-			Service:  input.Service,
-			From:     from,
-			To:       to,
-			Keywords: input.Keywords,
-			Level:    input.Level,
-			Limit:    limit,
-		})
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
+	events, err := t.searcher.Search(ctx, retrievallogs.SearchQuery{
+		Service:  input.Service,
+		From:     from,
+		To:       to,
+		Keywords: input.Keywords,
+		Level:    input.Level,
+		Limit:    limit,
+	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return common.ToolResult{}, err
+			return toolruntime.Result{}, err
 		}
-		if t.config.FallbackToMock {
-			fallbackUsed = true
-			result = mockResult(input)
-			result.Warnings = append(result.Warnings, common.ToolWarning{
-				Code:    "LOGS_FALLBACK",
-				Message: "Elasticsearch logs were unavailable; mock log evidence was returned.",
-			})
-			result.Metadata["mode"] = "mock_fallback"
-			result.Metadata["backend"] = "mock"
-			result.Metadata["configured_backend"] = backend
-			result.Metadata["fallback_used"] = true
-			return result, nil
-		}
-		return common.ToolResult{}, common.NewToolError(
-			common.ErrorCodeDependencyUnavailable,
-			Name,
-			"Elasticsearch logs backend is unavailable",
-			true,
-			map[string]any{"backend": "elasticsearch"},
-			"enable logs fallback or retry later",
-		)
+		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidence := make([]common.EvidenceItem, 0, len(events))
+	evidence := make([]toolruntime.Evidence, 0, len(events))
 	for _, event := range events {
 		timestamp := event.Timestamp.UTC().Format(time.RFC3339Nano)
 		content, truncated := conciseMessage(event.Message)
-		evidence = append(evidence, common.EvidenceItem{
-			ID:         event.ID,
-			SourceType: "logs",
-			SourceName: "elasticsearch-logs",
-			TimeRange: &common.TimeRange{
+		evidence = append(evidence, toolruntime.Evidence{
+			EvidenceID: event.ID,
+			SourceType: toolruntime.SourceLogs,
+			Source:     "elasticsearch-logs",
+			TimeRange: &toolruntime.TimeRange{
 				From: timestamp,
 				To:   timestamp,
 			},
+			TraceID:    event.TraceID,
 			Content:    content,
 			ResourceID: event.Service,
 			Metadata: map[string]any{
@@ -156,19 +148,28 @@ func (t *SearchTool) search(
 			},
 		})
 	}
-	return common.ToolResult{
+	return toolruntime.Result{
 		Evidence: evidence,
 		Payload: map[string]any{
 			"returned_count": len(evidence),
 			"keywords":       input.Keywords,
 		},
 		Metadata: map[string]any{
-			"mode":          "elasticsearch",
-			"backend":       backend,
-			"index":         t.config.Index,
-			"fallback_used": false,
+			"mode":    "elasticsearch",
+			"backend": backend,
+			"index":   t.config.Index,
 		},
 	}, nil
+}
+
+func dependencyUnavailable() *toolruntime.ToolError {
+	return toolruntime.NewToolError(
+		toolruntime.ErrorCodeDependencyUnavailable,
+		Name,
+		"Elasticsearch logs backend is unavailable",
+		true,
+		map[string]any{"backend": "elasticsearch"},
+	)
 }
 
 func conciseMessage(value string) (string, bool) {

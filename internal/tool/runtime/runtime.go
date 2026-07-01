@@ -6,15 +6,18 @@ import (
 	"time"
 )
 
+const DefaultTimeout = 2 * time.Second
+
 type Operation func(context.Context, any) (Result, error)
 
 type Config struct {
-	ToolName        string
-	SourceType      SourceType
-	Timeout         time.Duration
-	Operation       Operation
-	Fallback        Operation
-	FallbackWarning Warning
+	ToolName         string
+	SourceType       SourceType
+	Timeout          time.Duration
+	Operation        Operation
+	Fallback         Operation
+	FallbackWarning  Warning
+	FallbackMetadata map[string]any
 }
 
 type Runtime struct {
@@ -34,7 +37,7 @@ func New(config Config) (*Runtime, error) {
 		return nil, errors.New("tool runtime source type is required")
 	}
 	if config.Timeout <= 0 {
-		return nil, errors.New("tool runtime timeout must be greater than zero")
+		config.Timeout = DefaultTimeout
 	}
 	if config.Operation == nil {
 		return nil, errors.New("tool runtime operation is required")
@@ -123,6 +126,9 @@ func (r *Runtime) fallbackOrFailure(
 	}
 	fallbackResult.Metadata["fallback_used"] = true
 	fallbackResult.Metadata["primary_error_code"] = primaryError.Code
+	for key, value := range r.config.FallbackMetadata {
+		fallbackResult.Metadata[key] = value
+	}
 	if r.config.FallbackWarning.Code != "" {
 		fallbackResult.Warnings = append(
 			fallbackResult.Warnings,
@@ -159,7 +165,11 @@ func finishSuccess(
 	if result.Metadata == nil {
 		result.Metadata = map[string]any{}
 	}
-	result.Metadata["fallback_used"] = fallbackUsed
+	if fallbackUsed {
+		result.Metadata["fallback_used"] = true
+	} else if _, exists := result.Metadata["fallback_used"]; !exists {
+		result.Metadata["fallback_used"] = false
+	}
 	return result
 }
 

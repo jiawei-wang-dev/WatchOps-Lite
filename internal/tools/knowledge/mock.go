@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -17,66 +18,92 @@ type Input struct {
 }
 
 type MockTool struct {
-	timeout time.Duration
+	runtime *toolruntime.Runtime
 }
 
 func NewMockTool(timeout time.Duration) *MockTool {
-	return &MockTool{timeout: timeout}
+	return &MockTool{runtime: mustRuntime(toolruntime.Config{
+		ToolName:   Name,
+		SourceType: toolruntime.SourceKnowledge,
+		Timeout:    timeout,
+		Operation:  mockOperation,
+	})}
 }
 
 func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult, error) {
-	return common.Execute(ctx, common.ExecuteOptions{
-		ToolName: Name,
-		Timeout:  t.timeout,
-		Fallback: "retry with a more specific knowledge query",
-	}, func(ctx context.Context) (common.ToolResult, error) {
-		if err := ctx.Err(); err != nil {
-			return common.ToolResult{}, err
-		}
-		if toolErr := validate(input); toolErr != nil {
-			return common.ToolResult{}, toolErr
-		}
-
-		score := 0.88
-		category := strings.TrimSpace(input.Category)
-		if category == "" {
-			category = "runbook"
-		}
-
-		return common.ToolResult{
-			Evidence: []common.EvidenceItem{
-				{
-					ID:         "knowledge-evidence-001",
-					SourceType: "knowledge",
-					SourceName: "mock-runbooks",
-					Content:    "Mock runbook recommends checking upstream timeout saturation before increasing client retry limits.",
-					ResourceID: "runbook-checkout-timeouts",
-					Score:      &score,
-					Metadata: map[string]any{
-						"category": category,
-						"section":  "Initial diagnosis",
-					},
-				},
-			},
-			Payload: map[string]any{
-				"query":          strings.TrimSpace(input.Query),
-				"returned_count": 1,
-			},
-			Metadata: map[string]any{"mode": "mock"},
-		}, nil
-	})
+	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
-func validate(input Input) *common.ToolError {
+func mockOperation(ctx context.Context, value any) (toolruntime.Result, error) {
+	input, ok := value.(Input)
+	if !ok {
+		return toolruntime.Result{}, invalidArgument("invalid knowledge tool input", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return toolruntime.Result{}, err
+	}
+	if toolErr := validate(input); toolErr != nil {
+		return toolruntime.Result{}, toolErr
+	}
+	return mockResult(input), nil
+}
+
+func mockResult(input Input) toolruntime.Result {
+	score := 0.88
+	category := strings.TrimSpace(input.Category)
+	if category == "" {
+		category = "runbook"
+	}
+	return toolruntime.Result{
+		Evidence: []toolruntime.Evidence{
+			{
+				EvidenceID: "knowledge-evidence-001",
+				SourceType: toolruntime.SourceKnowledge,
+				Source:     "mock-runbooks",
+				Content:    "Mock runbook recommends checking upstream timeout saturation before increasing client retry limits.",
+				ResourceID: "runbook-checkout-timeouts",
+				Score:      &score,
+				Metadata: map[string]any{
+					"category": category,
+					"section":  "Initial diagnosis",
+				},
+			},
+		},
+		Payload: map[string]any{
+			"query":          strings.TrimSpace(input.Query),
+			"returned_count": 1,
+		},
+		Metadata: map[string]any{"mode": "mock"},
+	}
+}
+
+func validate(input Input) *toolruntime.ToolError {
 	if strings.TrimSpace(input.Query) == "" {
-		return common.InvalidArgument(Name, "query is required", map[string]any{"field": "query"})
+		return invalidArgument("query is required", map[string]any{"field": "query"})
 	}
 	if input.TopK < 1 || input.TopK > 10 {
-		return common.InvalidArgument(
-			Name,
+		return invalidArgument(
 			"top_k must be between 1 and 10",
 			map[string]any{"field": "top_k", "minimum": 1, "maximum": 10},
 		)
 	}
 	return nil
+}
+
+func invalidArgument(message string, details map[string]any) *toolruntime.ToolError {
+	return toolruntime.NewToolError(
+		toolruntime.ErrorCodeInvalidArgument,
+		Name,
+		message,
+		false,
+		details,
+	)
+}
+
+func mustRuntime(config toolruntime.Config) *toolruntime.Runtime {
+	result, err := toolruntime.New(config)
+	if err != nil {
+		panic(err)
+	}
+	return result
 }

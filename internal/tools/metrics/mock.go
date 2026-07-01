@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -18,40 +19,49 @@ type Input struct {
 }
 
 type MockTool struct {
-	timeout time.Duration
+	runtime *toolruntime.Runtime
 }
 
 func NewMockTool(timeout time.Duration) *MockTool {
-	return &MockTool{timeout: timeout}
+	return &MockTool{runtime: mustRuntime(toolruntime.Config{
+		ToolName:   Name,
+		SourceType: toolruntime.SourceMetrics,
+		Timeout:    timeout,
+		Operation:  mockOperation,
+	})}
 }
 
 func (t *MockTool) Execute(ctx context.Context, input Input) (common.ToolResult, error) {
-	return common.Execute(ctx, common.ExecuteOptions{
-		ToolName: Name,
-		Timeout:  t.timeout,
-		Fallback: "narrow the metric time range or inspect the metrics backend directly",
-	}, func(ctx context.Context) (common.ToolResult, error) {
-		if err := ctx.Err(); err != nil {
-			return common.ToolResult{}, err
-		}
-		if toolErr := validate(input); toolErr != nil {
-			return common.ToolResult{}, toolErr
-		}
-
-		return mockResult(input), nil
-	})
+	return common.ExecuteRuntime(ctx, t.runtime, input)
 }
 
-func mockResult(input Input) common.ToolResult {
+func mockOperation(ctx context.Context, value any) (toolruntime.Result, error) {
+	input, ok := value.(Input)
+	if !ok {
+		return toolruntime.Result{}, invalidArgument("invalid metrics tool input", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return toolruntime.Result{}, err
+	}
+	if toolErr := validate(input); toolErr != nil {
+		return toolruntime.Result{}, toolErr
+	}
+	return mockResult(input), nil
+}
+
+func mockResult(input Input) toolruntime.Result {
 	confidence := 0.95
 	service := strings.TrimSpace(input.Service)
-	return common.ToolResult{
-		Evidence: []common.EvidenceItem{
+	return toolruntime.Result{
+		Evidence: []toolruntime.Evidence{
 			{
-				ID:         "metric-evidence-001",
-				SourceType: "metrics",
-				SourceName: "mock-metrics",
-				TimeRange:  &input.TimeRange,
+				EvidenceID: "metric-evidence-001",
+				SourceType: toolruntime.SourceMetrics,
+				Source:     "mock-metrics",
+				TimeRange: &toolruntime.TimeRange{
+					From: input.TimeRange.From,
+					To:   input.TimeRange.To,
+				},
 				Content:    "Mock metrics show p95 latency at 1.8s and an error rate of 6.2% for service " + service + ".",
 				ResourceID: service,
 				Confidence: &confidence,
@@ -66,26 +76,42 @@ func mockResult(input Input) common.ToolResult {
 			"error_rate":     0.062,
 		},
 		Metadata: map[string]any{
-			"mode":          "mock",
-			"backend":       "mock",
-			"fallback_used": false,
+			"mode":    "mock",
+			"backend": "mock",
 		},
 	}
 }
 
-func validate(input Input) *common.ToolError {
+func validate(input Input) *toolruntime.ToolError {
 	if strings.TrimSpace(input.Service) == "" {
-		return common.InvalidArgument(Name, "service is required", map[string]any{"field": "service"})
+		return invalidArgument("service is required", map[string]any{"field": "service"})
 	}
 	if strings.TrimSpace(input.MetricName) == "" && strings.TrimSpace(input.Symptom) == "" {
-		return common.InvalidArgument(
-			Name,
+		return invalidArgument(
 			"metric_name or symptom is required",
 			map[string]any{"fields": []string{"metric_name", "symptom"}},
 		)
 	}
 	if err := input.TimeRange.Validate(); err != nil {
-		return common.InvalidArgument(Name, err.Error(), map[string]any{"field": "time_range"})
+		return invalidArgument(err.Error(), map[string]any{"field": "time_range"})
 	}
 	return nil
+}
+
+func invalidArgument(message string, details map[string]any) *toolruntime.ToolError {
+	return toolruntime.NewToolError(
+		toolruntime.ErrorCodeInvalidArgument,
+		Name,
+		message,
+		false,
+		details,
+	)
+}
+
+func mustRuntime(config toolruntime.Config) *toolruntime.Runtime {
+	result, err := toolruntime.New(config)
+	if err != nil {
+		panic(err)
+	}
+	return result
 }
