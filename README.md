@@ -128,6 +128,14 @@ Check readiness from another terminal:
 curl --fail-with-body http://localhost:8080/healthz
 ```
 
+Open the local Agent demo console:
+
+```text
+http://localhost:8080/
+```
+
+The build-free HTML/CSS/JavaScript console provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, and existing feedback/eval actions. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
+
 Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 
 The local config enables Redis, Elasticsearch, MySQL, and OpenTelemetry, while keeping `llm.enabled=false` and `agent.mode=deterministic`. No LLM key is required.
@@ -355,6 +363,7 @@ It prints a summary and writes ignored JSON and Markdown reports under `tmp/`. T
 ├── demo/                       # Safe runbook and deterministic log events
 ├── docs/                       # Architecture, API, roadmap, and ADRs
 ├── scripts/                    # Reproducible demo and verification scripts
+├── web/                        # Embedded build-free local demo console
 └── internal/
     ├── agent/eino/             # ReAct, prompt/parser, tools, and fallback
     ├── application/chat/       # Chat use-case orchestration

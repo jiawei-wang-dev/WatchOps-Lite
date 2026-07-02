@@ -293,6 +293,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: Local Agent Demo Console — Completed
+
+Delivered:
+
+- Embedded, build-free HTML/CSS/vanilla JavaScript console at `GET /`
+- Polished responsive light SaaS layout with Chat, Streaming Trace, Evidence, Knowledge / Memory, and Eval / Feedback tabs
+- Existing normal Chat and SSE APIs rendered without exposing prompts, tool arguments, or private reasoning
+- Evidence grouping, tool-run status, request/trace context, and local Jaeger, Grafana, and Prometheus links
+- Existing knowledge search, feedback, and rule-based eval actions with graceful dependency-unavailable states
+- Router tests proving static assets do not shadow health or API routes
+
+Exit criteria:
+
+- No public API schema or Agent, Tool Runtime, Tool Guard, failure-control, Evidence, memory, feedback/eval, demo, benchmark, or retrieval-eval behavior changes.
+- No frontend framework, package manager, build system, authentication, or new backend convenience API.
+- The console is explicitly a local demonstration surface, not a production frontend.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

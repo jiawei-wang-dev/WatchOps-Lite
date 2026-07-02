@@ -55,6 +55,50 @@ func TestRouterServesHealthCheck(t *testing.T) {
 	}
 }
 
+func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+
+	indexRecorder := httptest.NewRecorder()
+	router.ServeHTTP(indexRecorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if indexRecorder.Code != http.StatusOK {
+		t.Fatalf("index status = %d, want %d", indexRecorder.Code, http.StatusOK)
+	}
+	if contentType := indexRecorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("index Content-Type = %q, want HTML", contentType)
+	}
+	if !strings.Contains(indexRecorder.Body.String(), "WatchOps-Lite Agent Console") {
+		t.Fatalf("index does not contain console title")
+	}
+
+	assetRecorder := httptest.NewRecorder()
+	router.ServeHTTP(assetRecorder, httptest.NewRequest(http.MethodGet, "/web/app.js", nil))
+	if assetRecorder.Code != http.StatusOK {
+		t.Fatalf("asset status = %d, want %d", assetRecorder.Code, http.StatusOK)
+	}
+	if !strings.Contains(assetRecorder.Body.String(), "sendStreamChat") {
+		t.Fatalf("JavaScript asset does not contain streaming client")
+	}
+}
+
+func TestDemoConsoleDoesNotShadowAPIRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/api/v1/not-a-console-asset", nil),
+	)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+	if strings.Contains(recorder.Body.String(), "WatchOps-Lite Agent Console") {
+		t.Fatalf("unknown API route was shadowed by the demo console")
+	}
+}
+
 func TestRouterServesRuntimeMetricsWhenEnabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	collector := runtimemetrics.New()

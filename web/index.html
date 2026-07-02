@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="WatchOps-Lite local Agent operations console">
+    <title>WatchOps-Lite Agent Console</title>
+    <link rel="stylesheet" href="/web/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M4 12h3l2-6 4 12 2-6h5"></path>
+            </svg>
+          </div>
+          <div>
+            <strong>WatchOps-Lite</strong>
+            <span>Agent Console</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Console sections">
+          <button class="nav-item active" type="button" data-tab="chat">
+            <span class="nav-icon">C</span><span>Chat Console</span>
+          </button>
+          <button class="nav-item" type="button" data-tab="stream">
+            <span class="nav-icon">S</span><span>Streaming Trace</span>
+          </button>
+          <button class="nav-item" type="button" data-tab="evidence">
+            <span class="nav-icon">E</span><span>Evidence</span>
+          </button>
+          <button class="nav-item" type="button" data-tab="knowledge">
+            <span class="nav-icon">K</span><span>Knowledge / Memory</span>
+          </button>
+          <button class="nav-item" type="button" data-tab="eval">
+            <span class="nav-icon">F</span><span>Eval / Feedback</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-context">
+          <p class="eyebrow">Latest context</p>
+          <div class="id-row">
+            <span>Request</span>
+            <button id="sidebar-request-id" class="copy-value" type="button" data-copy="" title="Copy request ID">—</button>
+          </div>
+          <div class="id-row">
+            <span>Trace</span>
+            <button id="sidebar-trace-id" class="copy-value" type="button" data-copy="" title="Copy trace ID">—</button>
+          </div>
+          <div class="sidebar-links">
+            <a href="http://localhost:16686" target="_blank" rel="noreferrer">Jaeger</a>
+            <a href="http://localhost:3000" target="_blank" rel="noreferrer">Grafana</a>
+            <a href="http://localhost:9090" target="_blank" rel="noreferrer">Prometheus</a>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-workspace">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Reliability intelligence workspace</p>
+            <h1>WatchOps-Lite Agent Console</h1>
+            <p>Eino Graph · ReAct Tools · Evidence · Observability</p>
+          </div>
+          <div class="status-cluster" aria-label="Runtime capabilities">
+            <span class="status-pill"><i></i>Eino Graph</span>
+            <span class="status-pill"><i></i>Tool Runtime</span>
+            <span class="status-pill neutral"><i></i>Redis Memory</span>
+            <span class="status-pill neutral"><i></i>MySQL Memory</span>
+            <span class="status-pill"><i></i>SSE Streaming</span>
+          </div>
+        </header>
+
+        <section id="tab-chat" class="tab-panel active" aria-labelledby="Chat Console">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Investigation</p>
+              <h2>Chat Console</h2>
+              <p>Ask an incident question and inspect the bounded, evidence-backed response.</p>
+            </div>
+          </div>
+
+          <div class="card input-card">
+            <div class="form-row">
+              <label for="session-id">Session ID</label>
+              <input id="session-id" type="text" value="demo-console-session" autocomplete="off">
+            </div>
+            <div class="form-row">
+              <label for="message">Reliability question</label>
+              <textarea id="message" rows="4">Why is the checkout error rate high in the last 20 minutes?</textarea>
+            </div>
+            <div class="preset-block">
+              <span class="field-label">Preset investigations</span>
+              <div id="preset-queries" class="chip-list">
+                <button type="button" class="query-chip">checkout error rate is high</button>
+                <button type="button" class="query-chip">payment timeout causing checkout failures</button>
+                <button type="button" class="query-chip">analyze slow trace</button>
+                <button type="button" class="query-chip">search checkout runbook</button>
+                <button type="button" class="query-chip">check active checkout alerts</button>
+                <button type="button" class="query-chip">show checkout service topology</button>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="send-chat" class="button primary" type="button">
+                <span class="button-label">Send request</span>
+              </button>
+              <button id="send-stream" class="button secondary" type="button">
+                <span class="button-label">Stream investigation</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card response-card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Agent output</p>
+                <h3>Latest response</h3>
+              </div>
+              <span id="response-status" class="badge neutral">Waiting</span>
+            </div>
+            <div id="response-summary" class="metric-grid">
+              <article><span>Evidence</span><strong>0</strong></article>
+              <article><span>Tool runs</span><strong>0</strong></article>
+              <article><span>Inferences</span><strong>0</strong></article>
+              <article><span>Limitations</span><strong>0</strong></article>
+            </div>
+            <div id="chat-response" class="empty-state">
+              <div class="empty-icon">↗</div>
+              <h4>Run a chat request first</h4>
+              <p>Conclusions, evidence, recommendations, and limitations will appear here.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-stream" class="tab-panel" aria-labelledby="Streaming Trace">
+          <div class="section-heading split">
+            <div>
+              <p class="eyebrow">Live execution</p>
+              <h2>Streaming Trace</h2>
+              <p>Safe operational progress from the existing SSE endpoint—never private reasoning.</p>
+            </div>
+            <button id="start-stream" class="button primary" type="button">
+              <span class="button-label">Start stream</span>
+            </button>
+          </div>
+          <div class="card">
+            <div class="timeline-legend">
+              <span><i class="dot info"></i>Workflow</span>
+              <span><i class="dot success"></i>Completed</span>
+              <span><i class="dot warning"></i>Fallback</span>
+              <span><i class="dot danger"></i>Failed</span>
+            </div>
+            <div id="stream-timeline" class="timeline">
+              <div class="empty-state compact">
+                <h4>Streaming events will appear here</h4>
+                <p>Start a stream to follow graph nodes, tool calls, evidence collection, and completion.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-evidence" class="tab-panel" aria-labelledby="Evidence">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Normalized sources</p>
+              <h2>Evidence</h2>
+              <p>Review tool execution and evidence grouped by observability source.</p>
+            </div>
+          </div>
+          <div id="evidence-summary" class="metric-grid six">
+            <article><span>Tool runs</span><strong>0</strong></article>
+            <article><span>Successful</span><strong>0</strong></article>
+            <article><span>Failed</span><strong>0</strong></article>
+            <article><span>Evidence</span><strong>0</strong></article>
+            <article><span>Limitations</span><strong>0</strong></article>
+            <article><span>Trace</span><strong>—</strong></article>
+          </div>
+          <div class="card">
+            <div class="card-heading">
+              <h3>Tool runs</h3>
+              <span class="subtle">Existing response data only</span>
+            </div>
+            <div id="tool-runs" class="table-wrap">
+              <div class="empty-state compact"><p>No tool runs available.</p></div>
+            </div>
+          </div>
+          <div id="evidence-groups" class="evidence-groups">
+            <div class="card empty-state">
+              <h4>No evidence collected yet</h4>
+              <p>Run a normal or streaming chat request to populate source groups.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-knowledge" class="tab-panel" aria-labelledby="Knowledge and Memory">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Retrieval context</p>
+              <h2>Knowledge / Memory</h2>
+              <p>Search the existing knowledge API and inspect memory signals exposed by Chat.</p>
+            </div>
+          </div>
+          <div class="two-card-grid">
+            <div class="card">
+              <div class="card-heading">
+                <div>
+                  <h3>Knowledge search</h3>
+                  <p>Uses <code>POST /api/v1/knowledge/search</code>.</p>
+                </div>
+              </div>
+              <div class="inline-form">
+                <input id="knowledge-query" type="search" value="checkout timeout runbook" aria-label="Knowledge query">
+                <button id="search-knowledge" class="button primary" type="button">
+                  <span class="button-label">Search</span>
+                </button>
+              </div>
+              <div id="knowledge-results" class="stack-list">
+                <div class="empty-state compact"><p>Search results will appear here.</p></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-heading">
+                <div>
+                  <h3>Memory context</h3>
+                  <p>Only context already exposed in the latest Chat response.</p>
+                </div>
+              </div>
+              <div id="memory-context" class="empty-state compact">
+                <h4>Run a chat request first</h4>
+                <p>Session and long-term memory status will appear here when available.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-eval" class="tab-panel" aria-labelledby="Eval and Feedback">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Learning loop</p>
+              <h2>Eval / Feedback</h2>
+              <p>Submit feedback for the latest response or run existing rule-based eval cases.</p>
+            </div>
+          </div>
+          <div class="two-card-grid">
+            <div class="card">
+              <div class="card-heading">
+                <div>
+                  <h3>Response feedback</h3>
+                  <p>Requires a completed Chat response and MySQL.</p>
+                </div>
+              </div>
+              <div class="rating-control" role="group" aria-label="Feedback rating">
+                <button class="rating-button" type="button" data-rating="up">↑ Helpful</button>
+                <button class="rating-button" type="button" data-rating="down">↓ Needs work</button>
+              </div>
+              <label class="form-row" for="feedback-comment">
+                <span>Optional comment</span>
+                <textarea id="feedback-comment" rows="3" placeholder="What was useful or missing?"></textarea>
+              </label>
+              <button id="submit-feedback" class="button primary" type="button" disabled>
+                <span class="button-label">Submit feedback</span>
+              </button>
+              <div id="feedback-result" class="inline-note">Feedback requires a completed chat response.</div>
+            </div>
+            <div class="card">
+              <div class="card-heading">
+                <div>
+                  <h3>Rule-based eval</h3>
+                  <p>Runs stored cases through the existing synchronous eval API.</p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label class="form-row" for="eval-case-type">
+                  <span>Case type</span>
+                  <select id="eval-case-type">
+                    <option value="bad_case">Bad cases</option>
+                    <option value="good_case">Good cases</option>
+                  </select>
+                </label>
+                <label class="form-row" for="eval-limit">
+                  <span>Limit</span>
+                  <input id="eval-limit" type="number" min="1" max="20" value="5">
+                </label>
+              </div>
+              <button id="run-eval" class="button secondary" type="button">
+                <span class="button-label">Run eval</span>
+              </button>
+              <div id="eval-result" class="empty-state compact">
+                <p>Eval summary will appear here. MySQL must be available.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="insight-panel">
+        <div class="insight-heading">
+          <p class="eyebrow">Runtime insight</p>
+          <h2>Latest context</h2>
+        </div>
+        <div id="runtime-empty" class="empty-state compact">
+          <p>Run a chat request to populate runtime context.</p>
+        </div>
+        <div id="runtime-context" class="runtime-context hidden">
+          <dl>
+            <div><dt>Session</dt><dd id="insight-session">—</dd></div>
+            <div><dt>Request</dt><dd id="insight-request">—</dd></div>
+            <div><dt>Trace</dt><dd id="insight-trace">—</dd></div>
+            <div><dt>Evidence</dt><dd id="insight-evidence">0</dd></div>
+            <div><dt>Tool runs</dt><dd id="insight-tools">0</dd></div>
+            <div><dt>Limitations</dt><dd id="insight-limitations">0</dd></div>
+            <div><dt>Agent latency</dt><dd id="insight-latency">—</dd></div>
+          </dl>
+          <div id="memory-pills" class="pill-row"></div>
+          <div class="insight-actions">
+            <a id="trace-link" class="button secondary disabled" href="http://localhost:16686" target="_blank" rel="noreferrer">Open trace</a>
+          </div>
+          <div>
+            <p class="eyebrow">Latest tools</p>
+            <div id="latest-tools" class="mini-list"><span class="subtle">No tool runs.</span></div>
+          </div>
+        </div>
+        <div class="observability-card">
+          <p class="eyebrow">Local observability</p>
+          <a href="http://localhost:16686" target="_blank" rel="noreferrer"><span>Jaeger</span><b>↗</b></a>
+          <a href="http://localhost:3000" target="_blank" rel="noreferrer"><span>Grafana</span><b>↗</b></a>
+          <a href="http://localhost:9090" target="_blank" rel="noreferrer"><span>Prometheus</span><b>↗</b></a>
+        </div>
+      </aside>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/web/app.js" defer></script>
+  </body>
+</html>
