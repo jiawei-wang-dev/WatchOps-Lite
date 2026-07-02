@@ -11,6 +11,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/embedding"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/rerank"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -24,19 +25,22 @@ type Service struct {
 	store     Store
 	chunker   *Chunker
 	embedding embedding.Provider
+	reranker  rerank.Reranker
 	config    ServiceConfig
 	now       func() time.Time
 	newID     func() (string, error)
 }
 
 type ServiceConfig struct {
-	ChunkMaxSize   int
-	RetrievalMode  string
-	BM25TopK       int
-	VectorTopK     int
-	FinalTopK      int
-	RRFK           int
-	FallbackToBM25 bool
+	ChunkMaxSize     int
+	RetrievalMode    string
+	BM25TopK         int
+	VectorTopK       int
+	FinalTopK        int
+	RRFK             int
+	FallbackToBM25   bool
+	RerankCandidateK int
+	RerankTopK       int
 }
 
 func NewService(store Store, chunkMaxSize int) (*Service, error) {
@@ -56,6 +60,15 @@ func NewServiceWithConfig(
 	embeddingProvider embedding.Provider,
 	config ServiceConfig,
 ) (*Service, error) {
+	return NewServiceWithReranker(store, embeddingProvider, nil, config)
+}
+
+func NewServiceWithReranker(
+	store Store,
+	embeddingProvider embedding.Provider,
+	reranker rerank.Reranker,
+	config ServiceConfig,
+) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: store is required", ErrInvalidArgument)
 	}
@@ -73,10 +86,20 @@ func NewServiceWithConfig(
 		config.FinalTopK <= 0 || config.RRFK <= 0 {
 		return nil, fmt.Errorf("%w: retrieval limits must be greater than zero", ErrInvalidArgument)
 	}
+	if config.RerankCandidateK == 0 {
+		config.RerankCandidateK = max(config.BM25TopK, config.VectorTopK)
+	}
+	if config.RerankTopK == 0 {
+		config.RerankTopK = config.FinalTopK
+	}
+	if config.RerankCandidateK < config.RerankTopK {
+		return nil, fmt.Errorf("%w: rerank candidate limit must not be less than rerank top-k", ErrInvalidArgument)
+	}
 	return &Service{
 		store:     store,
 		chunker:   chunker,
 		embedding: embeddingProvider,
+		reranker:  reranker,
 		config:    config,
 		now:       func() time.Time { return time.Now().UTC() },
 		newID:     generateDocumentID,
@@ -215,13 +238,182 @@ func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult
 		}
 		query.Filters[key] = strings.TrimSpace(value)
 	}
-	results, err := s.searchByMode(ctx, query, span)
+	candidateQuery := query
+	if s.reranker != nil {
+		candidateQuery.Limit = max(query.Limit, s.config.RerankCandidateK)
+	}
+	results, err := s.searchByMode(ctx, candidateQuery, span)
 	if err != nil {
 		observability.MarkError(span, "knowledge search failed")
 		return nil, err
 	}
+	if s.reranker != nil && len(results) > 0 {
+		results, err = s.rerankResults(ctx, query.Query, results, min(query.Limit, s.config.RerankTopK))
+		if err != nil {
+			observability.MarkError(span, "knowledge rerank failed")
+			return nil, err
+		}
+	} else {
+		results = trimResults(results, query.Limit)
+	}
 	span.SetAttributes(attribute.Int("result_count", len(results)))
 	return results, nil
+}
+
+func (s *Service) rerankResults(
+	ctx context.Context,
+	query string,
+	results []SearchResult,
+	topK int,
+) ([]SearchResult, error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"retrieval.rerank",
+		attribute.Int("candidate_count", len(results)),
+		attribute.Int("top_k", topK),
+	)
+	defer span.End()
+
+	candidates := make([]rerank.Candidate, 0, len(results))
+	originals := make(map[string]SearchResult, len(results))
+	for index, result := range results {
+		candidate := rerankCandidate(result, index)
+		candidates = append(candidates, candidate)
+		originals[candidate.ID] = result
+	}
+	reranked, err := s.reranker.Rerank(ctx, query, candidates, topK)
+	if err != nil {
+		if ctx.Err() != nil {
+			observability.MarkError(span, "knowledge rerank canceled")
+			return nil, ctx.Err()
+		}
+		observability.MarkError(span, "knowledge rerank unavailable; retrieval order retained")
+		fallback := trimResults(results, topK)
+		for index := range fallback {
+			fallback[index].Metadata = cloneMetadata(fallback[index].Metadata)
+			fallback[index].Metadata["rerank_provider"] = "none"
+			fallback[index].Metadata["rerank_fallback_reason"] = "reranker_error"
+		}
+		span.SetAttributes(
+			attribute.Bool("fallback_used", true),
+			attribute.String("fallback_reason", "reranker_error"),
+			attribute.Int("result_count", len(fallback)),
+		)
+		return fallback, nil
+	}
+	if len(reranked) == 0 {
+		fallback := trimResults(results, topK)
+		for index := range fallback {
+			fallback[index].Metadata = cloneMetadata(fallback[index].Metadata)
+			fallback[index].Metadata["rerank_provider"] = "none"
+			fallback[index].Metadata["rerank_fallback_reason"] = "empty_rerank_result"
+		}
+		span.SetAttributes(
+			attribute.Bool("fallback_used", true),
+			attribute.String("fallback_reason", "empty_rerank_result"),
+			attribute.Int("result_count", len(fallback)),
+		)
+		return fallback, nil
+	}
+
+	final := make([]SearchResult, 0, len(reranked))
+	fallbackUsed := false
+	fallbackReason := ""
+	for _, ranked := range reranked {
+		original, ok := originals[ranked.Candidate.ID]
+		if !ok {
+			continue
+		}
+		retrievalScore := original.Score
+		original.Score = ranked.Score
+		original.Metadata = cloneMetadata(original.Metadata)
+		original.Metadata["retrieval_score"] = retrievalScore
+		original.Metadata["rerank_provider"] = ranked.Provider
+		original.Metadata["rerank_score"] = ranked.Score
+		original.Metadata["rerank_reason"] = ranked.Reason
+		if ranked.FallbackReason != "" {
+			original.Metadata["rerank_fallback_reason"] = ranked.FallbackReason
+			fallbackUsed = true
+			fallbackReason = ranked.FallbackReason
+		}
+		final = append(final, original)
+	}
+	if len(final) == 0 {
+		fallback := trimResults(results, topK)
+		for index := range fallback {
+			fallback[index].Metadata = cloneMetadata(fallback[index].Metadata)
+			fallback[index].Metadata["rerank_provider"] = "none"
+			fallback[index].Metadata["rerank_fallback_reason"] = "unmatched_rerank_result"
+		}
+		span.SetAttributes(
+			attribute.Bool("fallback_used", true),
+			attribute.String("fallback_reason", "unmatched_rerank_result"),
+			attribute.Int("result_count", len(fallback)),
+		)
+		return fallback, nil
+	}
+	provider, _ := final[0].Metadata["rerank_provider"].(string)
+	span.SetAttributes(
+		attribute.String("provider", provider),
+		attribute.Bool("fallback_used", fallbackUsed),
+		attribute.String("fallback_reason", fallbackReason),
+		attribute.Int("result_count", len(final)),
+	)
+	return final, nil
+}
+
+func rerankCandidate(result SearchResult, index int) rerank.Candidate {
+	id := result.ChunkID
+	if id == "" {
+		id = fmt.Sprintf("%s#%d", result.DocumentID, index)
+	}
+	sourceType := metadataString(result.Metadata, "source_type")
+	if sourceType == "" {
+		sourceType = "knowledge"
+		if strings.Contains(strings.ToLower(result.Source+" "+result.Title), "runbook") {
+			sourceType = "runbook"
+		}
+	}
+	return rerank.Candidate{
+		ID:          id,
+		DocumentID:  result.DocumentID,
+		ChunkID:     result.ChunkID,
+		Title:       result.Title,
+		Content:     result.Content,
+		Service:     metadataString(result.Metadata, "service"),
+		Source:      result.Source,
+		SourceType:  sourceType,
+		Score:       result.Score,
+		BM25Score:   optionalScore(result.BM25Score),
+		VectorScore: optionalScore(result.VectorScore),
+		HybridScore: optionalScore(result.RRFScore),
+		Metadata:    cloneMetadata(result.Metadata),
+		CreatedAt:   metadataTime(result.Metadata, "created_at"),
+	}
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func metadataTime(metadata map[string]any, key string) time.Time {
+	switch value := metadata[key].(type) {
+	case time.Time:
+		return value
+	case string:
+		parsed, _ := time.Parse(time.RFC3339, value)
+		return parsed
+	default:
+		return time.Time{}
+	}
+}
+
+func optionalScore(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func (s *Service) searchByMode(

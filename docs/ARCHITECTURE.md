@@ -205,11 +205,15 @@ The MVP accepts plain-text or Markdown content synchronously. Elasticsearch stor
 4. Generate a query embedding only when vector retrieval is enabled.
 5. Retrieve BM25 and/or Elasticsearch dense-vector candidates.
 6. Fuse hybrid candidates with reciprocal rank fusion (RRF).
-7. Convert returned chunks into source-attributed evidence with component scores.
+7. Expand recall to the configured rerank candidate set.
+8. Rerank candidates with the deterministic rule-based scorer or optional external `/rerank` provider.
+9. Convert final chunks into source-attributed evidence with retrieval and rerank metadata.
+
+The rule-based reranker combines the original retrieval score with service match, title/content overlap, operational-identifier match, runbook preference, recency, and empty-content penalties. External reranking is optional. Provider timeout, invalid/empty output, missing credentials, or unavailability falls back to the rule-based scorer and records a safe `rerank_fallback_reason`; initial retrieval evidence is not discarded.
 
 Embeddings are optional. In hybrid mode, unavailable embedding or vector search falls back to BM25 with `KNOWLEDGE_VECTOR_FALLBACK`; existing chunks without vectors remain searchable. Vector-only mode reports unavailability instead of inventing results. Elasticsearch query construction remains in the adapter and never enters the Agent or HTTP layers.
 
-Trace spans include `knowledge.embedding`, `knowledge.search.bm25`, `knowledge.search.vector`, and `knowledge.search.hybrid_fusion`. Reranking is deferred until evaluation data justifies its cost.
+Trace spans include `knowledge.embedding`, `knowledge.search.bm25`, `knowledge.search.vector`, `knowledge.search.hybrid_fusion`, `retrieval.rerank`, `retrieval.rerank.external`, `retrieval.rerank.rule_based`, and `retrieval.rerank.fallback`. Spans record counts, provider, and safe fallback reason without query or chunk content.
 
 ## 7. Tool Harness
 

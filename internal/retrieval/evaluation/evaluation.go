@@ -35,21 +35,25 @@ type Searcher interface {
 }
 
 type CaseResult struct {
-	ID                 string         `json:"id"`
-	Query              string         `json:"query"`
-	RetrievalMode      string         `json:"retrieval_mode,omitempty"`
-	TopKResultIDs      []string       `json:"top_k_result_ids"`
-	MatchedKeywords    []string       `json:"matched_keywords"`
-	Hit                bool           `json:"hit"`
-	EmptyRecall        bool           `json:"empty_recall"`
-	BM25Score          *float64       `json:"bm25_score,omitempty"`
-	VectorScore        *float64       `json:"vector_score,omitempty"`
-	HybridScore        *float64       `json:"hybrid_score,omitempty"`
-	RRFScore           *float64       `json:"rrf_score,omitempty"`
-	ExpectedSourceType string         `json:"expected_source_type"`
-	Error              string         `json:"error,omitempty"`
-	Notes              string         `json:"notes,omitempty"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
+	ID                   string         `json:"id"`
+	Query                string         `json:"query"`
+	RetrievalMode        string         `json:"retrieval_mode,omitempty"`
+	TopKResultIDs        []string       `json:"top_k_result_ids"`
+	MatchedKeywords      []string       `json:"matched_keywords"`
+	Hit                  bool           `json:"hit"`
+	EmptyRecall          bool           `json:"empty_recall"`
+	BM25Score            *float64       `json:"bm25_score,omitempty"`
+	VectorScore          *float64       `json:"vector_score,omitempty"`
+	HybridScore          *float64       `json:"hybrid_score,omitempty"`
+	RRFScore             *float64       `json:"rrf_score,omitempty"`
+	RerankProvider       string         `json:"rerank_provider,omitempty"`
+	RerankScore          *float64       `json:"rerank_score,omitempty"`
+	RerankReason         string         `json:"rerank_reason,omitempty"`
+	RerankFallbackReason string         `json:"rerank_fallback_reason,omitempty"`
+	ExpectedSourceType   string         `json:"expected_source_type"`
+	Error                string         `json:"error,omitempty"`
+	Notes                string         `json:"notes,omitempty"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
 }
 
 type Report struct {
@@ -148,6 +152,13 @@ func evaluateCase(
 	if result.HybridScore == nil {
 		result.HybridScore = result.RRFScore
 	}
+	result.RerankProvider, _ = nestedStringMetadata(results[0], "rerank_provider")
+	result.RerankScore = scoreField(results[0], "rerank_score")
+	result.RerankReason, _ = nestedStringMetadata(results[0], "rerank_reason")
+	result.RerankFallbackReason, _ = nestedStringMetadata(
+		results[0],
+		"rerank_fallback_reason",
+	)
 	result.Metadata["top_score"] = results[0].Score
 	result.Hit = isHit(current, results, result.MatchedKeywords)
 	return result
@@ -225,15 +236,18 @@ func searchableText(results []SearchResult) string {
 }
 
 func retrievalMode(result SearchResult) string {
-	if value, ok := stringMetadata(result.Metadata, "retrieval_mode"); ok {
-		return value
+	value, _ := nestedStringMetadata(result, "retrieval_mode")
+	return value
+}
+
+func nestedStringMetadata(result SearchResult, key string) (string, bool) {
+	if value, ok := stringMetadata(result.Metadata, key); ok {
+		return value, true
 	}
 	if nested, ok := result.Metadata["metadata"].(map[string]any); ok {
-		if value, ok := stringMetadata(nested, "retrieval_mode"); ok {
-			return value
-		}
+		return stringMetadata(nested, key)
 	}
-	return ""
+	return "", false
 }
 
 func stringMetadata(metadata map[string]any, key string) (string, bool) {

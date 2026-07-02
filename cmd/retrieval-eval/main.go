@@ -79,6 +79,18 @@ func printReport(report evaluation.Report) {
 		if result.RRFScore != nil {
 			fmt.Printf("rrf_score: %.6g\n", *result.RRFScore)
 		}
+		if result.RerankProvider != "" {
+			fmt.Printf("rerank_provider: %s\n", result.RerankProvider)
+		}
+		if result.RerankScore != nil {
+			fmt.Printf("rerank_score: %.6g\n", *result.RerankScore)
+		}
+		if result.RerankReason != "" {
+			fmt.Printf("rerank_reason: %s\n", result.RerankReason)
+		}
+		if result.RerankFallbackReason != "" {
+			fmt.Printf("rerank_fallback_reason: %s\n", result.RerankFallbackReason)
+		}
 		if result.EmptyRecall {
 			fmt.Println("empty_recall: true")
 		}

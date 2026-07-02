@@ -82,12 +82,20 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 	warnings := []toolruntime.Warning{}
 	retrievalMode := "bm25"
 	vectorFallback := false
+	rerankProvider := ""
+	rerankFallbackReason := ""
 	for _, result := range results {
 		if result.RetrievalMode != "" {
 			retrievalMode = result.RetrievalMode
 		}
 		if fallback, _ := result.Metadata["vector_fallback"].(bool); fallback {
 			vectorFallback = true
+		}
+		if provider, _ := result.Metadata["rerank_provider"].(string); provider != "" {
+			rerankProvider = provider
+		}
+		if reason, _ := result.Metadata["rerank_fallback_reason"].(string); reason != "" {
+			rerankFallbackReason = reason
 		}
 		score := result.Score
 		evidenceItems = append(evidenceItems, evidence.Item{
@@ -99,14 +107,18 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 			ResourceID: result.DocumentID,
 			Score:      &score,
 			Metadata: map[string]any{
-				"title":          result.Title,
-				"chunk_id":       result.ChunkID,
-				"document_id":    result.DocumentID,
-				"retrieval_mode": result.RetrievalMode,
-				"bm25_score":     result.BM25Score,
-				"vector_score":   result.VectorScore,
-				"rrf_score":      result.RRFScore,
-				"metadata":       result.Metadata,
+				"title":                  result.Title,
+				"chunk_id":               result.ChunkID,
+				"document_id":            result.DocumentID,
+				"retrieval_mode":         result.RetrievalMode,
+				"bm25_score":             result.BM25Score,
+				"vector_score":           result.VectorScore,
+				"rrf_score":              result.RRFScore,
+				"rerank_provider":        result.Metadata["rerank_provider"],
+				"rerank_score":           result.Metadata["rerank_score"],
+				"rerank_reason":          result.Metadata["rerank_reason"],
+				"rerank_fallback_reason": result.Metadata["rerank_fallback_reason"],
+				"metadata":               result.Metadata,
 			},
 		})
 	}
@@ -114,6 +126,12 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 		warnings = append(warnings, toolruntime.Warning{
 			Code:    "KNOWLEDGE_VECTOR_FALLBACK",
 			Message: "Vector retrieval was unavailable; BM25 knowledge evidence was returned.",
+		})
+	}
+	if rerankFallbackReason != "" {
+		warnings = append(warnings, toolruntime.Warning{
+			Code:    "KNOWLEDGE_RERANK_FALLBACK",
+			Message: "External knowledge reranking was unavailable; deterministic rule-based ordering was used.",
 		})
 	}
 	return toolruntime.Result{
@@ -124,9 +142,11 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 			"returned_count": len(evidenceItems),
 		},
 		Metadata: map[string]any{
-			"mode":           "elasticsearch",
-			"retrieval_mode": retrievalMode,
-			"fallback_used":  vectorFallback,
+			"mode":                   "elasticsearch",
+			"retrieval_mode":         retrievalMode,
+			"rerank_provider":        rerankProvider,
+			"rerank_fallback_reason": rerankFallbackReason,
+			"fallback_used":          vectorFallback || rerankFallbackReason != "",
 		},
 	}, nil
 }

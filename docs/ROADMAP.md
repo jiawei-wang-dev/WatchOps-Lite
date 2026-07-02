@@ -104,7 +104,7 @@ Evolution path:
 
 - Add embeddings and vector search.
 - Add hybrid lexical/vector retrieval.
-- Add RRF and reranking when eval results justify them.
+- Add RRF and reranking when eval results justify them. Completed.
 
 Exit criteria:
 
@@ -250,7 +250,26 @@ Delivered:
 Exit criteria:
 
 - No public API schema, Eino ReAct, Tool Runtime, Tool Guard, Evidence, memory, feedback/eval, or demo-script behavior changes.
-- No heavy reranker, new vector database, external paid dependency, planner, policy engine, correlation engine, MCP, UEM, multi-agent, or auto-remediation.
+- The evaluation runner itself adds no new vector database or mandatory paid dependency and remains independent from planners, policy engines, MCP, UEM, multi-agent systems, and auto-remediation.
+
+Exit status: complete.
+
+## Enhancement: Retrieval Reranker — Completed
+
+Delivered:
+
+- Deterministic rule-based reranking over a larger initial recall candidate set
+- Optional bounded external `/rerank` provider configured without hard-coded credentials
+- Composite fallback for provider timeout, unavailability, invalid response, empty response, or missing credentials
+- Explainable metadata for provider, rerank score/reason, original retrieval score, and safe fallback reason
+- Retrieval Eval output for rerank provider, score, reason, and fallback
+- OpenTelemetry spans for overall, external, rule-based, and fallback rerank execution
+
+Exit criteria:
+
+- BM25/vector/hybrid retrieval, `search_knowledge`, Evidence, Chat APIs, Eino ReAct, Tool Runtime, Tool Guard, and failure control remain intact.
+- Local demo and unit tests require no external rerank provider or paid API.
+- Rerank failure retains initial retrieval evidence and never invents provider results.
 
 Exit status: complete.
 
@@ -432,7 +451,7 @@ Exit criteria:
 - BM25 remains the dependency-free default.
 - Existing chunks without embeddings remain searchable.
 - Hybrid vector failure does not break knowledge search when fallback is enabled.
-- Reranking remains deferred.
+- Reranking is delivered as a later, independently verified enhancement.
 
 Exit status: complete.
 

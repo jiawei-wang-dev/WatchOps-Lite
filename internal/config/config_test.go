@@ -311,8 +311,12 @@ func TestDefaultKnowledgeRetrievalUsesBM25WithoutEmbeddings(t *testing.T) {
 		cfg.Knowledge.RRFK != 60 ||
 		!cfg.Knowledge.FallbackToBM25 ||
 		cfg.Embedding.Enabled ||
-		cfg.Embedding.Dimension != 1536 {
-		t.Fatalf("Knowledge=%#v Embedding=%#v", cfg.Knowledge, cfg.Embedding)
+		cfg.Embedding.Dimension != 1536 ||
+		!cfg.Rerank.Enabled ||
+		cfg.Rerank.Provider != "rule" ||
+		cfg.Rerank.CandidateK != 20 ||
+		cfg.Rerank.TopK != 5 {
+		t.Fatalf("Knowledge=%#v Embedding=%#v Rerank=%#v", cfg.Knowledge, cfg.Embedding, cfg.Rerank)
 	}
 }
 
@@ -332,6 +336,13 @@ func TestLoadAppliesKnowledgeAndEmbeddingEnvironment(t *testing.T) {
 	t.Setenv("WATCHOPS_EMBEDDING_MODEL", "embed-test")
 	t.Setenv("WATCHOPS_EMBEDDING_DIMENSION", "8")
 	t.Setenv("WATCHOPS_EMBEDDING_REQUEST_TIMEOUT", "750ms")
+	t.Setenv("WATCHOPS_RERANK_ENABLED", "true")
+	t.Setenv("WATCHOPS_RERANK_PROVIDER", "external")
+	t.Setenv("WATCHOPS_RERANK_BASE_URL", "http://rerank.test/v1")
+	t.Setenv("WATCHOPS_RERANK_MODEL", "rerank-test")
+	t.Setenv("WATCHOPS_RERANK_TIMEOUT", "900ms")
+	t.Setenv("WATCHOPS_RERANK_CANDIDATE_K", "18")
+	t.Setenv("WATCHOPS_RERANK_TOP_K", "4")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -345,8 +356,14 @@ func TestLoadAppliesKnowledgeAndEmbeddingEnvironment(t *testing.T) {
 		!cfg.Embedding.Enabled ||
 		cfg.Embedding.Model != "embed-test" ||
 		cfg.Embedding.Dimension != 8 ||
-		cfg.Embedding.RequestTimeout.Value() != 750*time.Millisecond {
-		t.Fatalf("Knowledge=%#v Embedding=%#v", cfg.Knowledge, cfg.Embedding)
+		cfg.Embedding.RequestTimeout.Value() != 750*time.Millisecond ||
+		!cfg.Rerank.Enabled ||
+		cfg.Rerank.Provider != "external" ||
+		cfg.Rerank.Model != "rerank-test" ||
+		cfg.Rerank.Timeout.Value() != 900*time.Millisecond ||
+		cfg.Rerank.CandidateK != 18 ||
+		cfg.Rerank.TopK != 4 {
+		t.Fatalf("Knowledge=%#v Embedding=%#v Rerank=%#v", cfg.Knowledge, cfg.Embedding, cfg.Rerank)
 	}
 }
 

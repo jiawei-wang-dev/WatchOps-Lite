@@ -12,6 +12,7 @@ type storeStub struct {
 	results []SearchResult
 	info    DocumentInfo
 	err     error
+	query   SearchQuery
 }
 
 func (s *storeStub) EnsureIndex(context.Context) error { return s.err }
@@ -19,7 +20,8 @@ func (s *storeStub) IndexChunks(_ context.Context, chunks []Chunk) error {
 	s.indexed = chunks
 	return s.err
 }
-func (s *storeStub) Search(context.Context, SearchQuery) ([]SearchResult, error) {
+func (s *storeStub) Search(_ context.Context, query SearchQuery) ([]SearchResult, error) {
+	s.query = query
 	return s.results, s.err
 }
 func (s *storeStub) GetDocument(context.Context, string) (DocumentInfo, error) {

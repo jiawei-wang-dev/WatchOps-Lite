@@ -57,6 +57,32 @@ func TestSearchToolReportsVectorFallback(t *testing.T) {
 	}
 }
 
+func TestSearchToolMapsRerankMetadataAndFallback(t *testing.T) {
+	tool := NewSearchTool(searcherStub{results: []retrievalknowledge.SearchResult{{
+		ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
+		Content: "Inspect saturation.", Source: "manual", Score: 4.5,
+		RetrievalMode: "bm25",
+		Metadata: map[string]any{
+			"rerank_provider":        "rule_based",
+			"rerank_score":           4.5,
+			"rerank_reason":          "title_overlap",
+			"rerank_fallback_reason": "external_unavailable",
+		},
+	}}}, 0)
+
+	result, err := tool.Execute(context.Background(), Input{Query: "latency", TopK: 3})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(result.Warnings) != 1 ||
+		result.Warnings[0].Code != "KNOWLEDGE_RERANK_FALLBACK" ||
+		result.Metadata["rerank_provider"] != "rule_based" ||
+		result.Metadata["fallback_used"] != true ||
+		result.Evidence[0].Metadata["rerank_score"] != 4.5 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestSearchToolFallsBackToMockEvidence(t *testing.T) {
 	tool := NewSearchTool(searcherStub{err: errors.New("connection refused")}, 0)
 

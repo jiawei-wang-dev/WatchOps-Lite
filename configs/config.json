@@ -56,6 +56,16 @@
     "dimension": 1536,
     "request_timeout": "10s"
   },
+  "rerank": {
+    "enabled": true,
+    "provider": "rule",
+    "base_url": "",
+    "api_key_env": "WATCHOPS_RERANK_API_KEY",
+    "model": "",
+    "timeout": "5s",
+    "candidate_k": 20,
+    "top_k": 5
+  },
   "logs": {
     "backend": "mock",
     "index": "watchops_logs",

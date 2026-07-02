@@ -47,6 +47,7 @@ type Config struct {
 	Elasticsearch  ElasticsearchConfig  `json:"elasticsearch"`
 	Knowledge      KnowledgeConfig      `json:"knowledge"`
 	Embedding      EmbeddingConfig      `json:"embedding"`
+	Rerank         RerankConfig         `json:"rerank"`
 	Logs           LogsConfig           `json:"logs"`
 	Metrics        MetricsConfig        `json:"metrics"`
 	Traces         TracesConfig         `json:"traces"`
@@ -121,6 +122,17 @@ type EmbeddingConfig struct {
 	Model          string   `json:"model"`
 	Dimension      int      `json:"dimension"`
 	RequestTimeout Duration `json:"request_timeout"`
+}
+
+type RerankConfig struct {
+	Enabled    bool     `json:"enabled"`
+	Provider   string   `json:"provider"`
+	BaseURL    string   `json:"base_url"`
+	APIKeyEnv  string   `json:"api_key_env"`
+	Model      string   `json:"model"`
+	Timeout    Duration `json:"timeout"`
+	CandidateK int      `json:"candidate_k"`
+	TopK       int      `json:"top_k"`
 }
 
 type LogsConfig struct {
@@ -250,6 +262,14 @@ func Default() Config {
 			Dimension:      1536,
 			RequestTimeout: Duration(10 * time.Second),
 		},
+		Rerank: RerankConfig{
+			Enabled:    true,
+			Provider:   "rule",
+			APIKeyEnv:  "WATCHOPS_RERANK_API_KEY",
+			Timeout:    Duration(5 * time.Second),
+			CandidateK: 20,
+			TopK:       5,
+		},
 		Logs: LogsConfig{
 			Backend:        "mock",
 			Index:          "watchops_logs",
@@ -378,6 +398,10 @@ func applyEnvironment(cfg *Config) error {
 	setString("EMBEDDING_BASE_URL", &cfg.Embedding.BaseURL)
 	setString("EMBEDDING_API_KEY_ENV", &cfg.Embedding.APIKeyEnv)
 	setString("EMBEDDING_MODEL", &cfg.Embedding.Model)
+	setString("RERANK_PROVIDER", &cfg.Rerank.Provider)
+	setString("RERANK_BASE_URL", &cfg.Rerank.BaseURL)
+	setString("RERANK_API_KEY_ENV", &cfg.Rerank.APIKeyEnv)
+	setString("RERANK_MODEL", &cfg.Rerank.Model)
 	setString("LOGS_BACKEND", &cfg.Logs.Backend)
 	setString("LOGS_INDEX", &cfg.Logs.Index)
 	setString("METRICS_BACKEND", &cfg.Metrics.Backend)
@@ -412,6 +436,7 @@ func applyEnvironment(cfg *Config) error {
 		{"SUMMARY_TIMEOUT", &cfg.Summary.Timeout},
 		{"ELASTICSEARCH_REQUEST_TIMEOUT", &cfg.Elasticsearch.RequestTimeout},
 		{"EMBEDDING_REQUEST_TIMEOUT", &cfg.Embedding.RequestTimeout},
+		{"RERANK_TIMEOUT", &cfg.Rerank.Timeout},
 		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
 		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
 		{"TRACES_REQUEST_TIMEOUT", &cfg.Traces.RequestTimeout},
@@ -441,6 +466,8 @@ func applyEnvironment(cfg *Config) error {
 		{"KNOWLEDGE_FINAL_TOP_K", &cfg.Knowledge.FinalTopK},
 		{"KNOWLEDGE_RRF_K", &cfg.Knowledge.RRFK},
 		{"EMBEDDING_DIMENSION", &cfg.Embedding.Dimension},
+		{"RERANK_CANDIDATE_K", &cfg.Rerank.CandidateK},
+		{"RERANK_TOP_K", &cfg.Rerank.TopK},
 		{"LOGS_DEFAULT_LIMIT", &cfg.Logs.DefaultLimit},
 		{"TRACES_DEFAULT_LIMIT", &cfg.Traces.DefaultLimit},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
@@ -479,6 +506,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sEMBEDDING_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Embedding.Enabled = parsed
+	}
+	if value, ok := lookup("RERANK_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sRERANK_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Rerank.Enabled = parsed
 	}
 	if value, ok := lookup("SUMMARY_FALLBACK_TO_DETERMINISTIC"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -756,6 +790,30 @@ func (cfg Config) Validate() error {
 	if cfg.Embedding.Enabled &&
 		(strings.TrimSpace(cfg.Embedding.BaseURL) == "" || strings.TrimSpace(cfg.Embedding.Model) == "") {
 		return errors.New("embedding.base_url and embedding.model are required when embeddings are enabled")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Rerank.Provider)) {
+	case "rule", "external":
+	default:
+		return errors.New("rerank.provider must be rule or external")
+	}
+	if cfg.Rerank.Timeout <= 0 {
+		return errors.New("rerank.timeout must be greater than zero")
+	}
+	if cfg.Rerank.CandidateK < 1 || cfg.Rerank.CandidateK > 100 {
+		return errors.New("rerank.candidate_k must be between 1 and 100")
+	}
+	if cfg.Rerank.TopK < 1 || cfg.Rerank.TopK > 20 {
+		return errors.New("rerank.top_k must be between 1 and 20")
+	}
+	if cfg.Rerank.TopK > cfg.Rerank.CandidateK {
+		return errors.New("rerank.top_k must not exceed rerank.candidate_k")
+	}
+	if cfg.Rerank.Enabled && strings.EqualFold(cfg.Rerank.Provider, "external") {
+		if strings.TrimSpace(cfg.Rerank.BaseURL) == "" ||
+			strings.TrimSpace(cfg.Rerank.APIKeyEnv) == "" ||
+			strings.TrimSpace(cfg.Rerank.Model) == "" {
+			return errors.New("rerank.base_url, rerank.api_key_env, and rerank.model are required for external provider")
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Logs.Backend)) {
 	case "mock", "elasticsearch":

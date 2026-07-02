@@ -1,6 +1,6 @@
 # Retrieval Evaluation
 
-WatchOps-Lite uses retrieval evaluation to make knowledge RAG quality explainable without adding another retrieval system, reranker model, vector database, or paid dependency.
+WatchOps-Lite uses retrieval evaluation to make knowledge RAG and rerank quality explainable without requiring another vector database or paid dependency.
 
 ## Why chunking is needed
 
@@ -16,11 +16,25 @@ The current chunker is intentionally simple and paragraph-oriented. In larger co
 - Vector retrieval is strong for semantic similarity when the query and runbook use different wording.
 - Hybrid retrieval combines lexical and semantic signals so exact operational identifiers do not get lost while semantic matches can still surface.
 
-WatchOps-Lite supports BM25-first retrieval and optional vector/hybrid retrieval when embeddings are configured. The retrieval eval runner reports the retrieval mode and score fields that are actually returned. It does not invent vector, hybrid, or rerank scores.
+WatchOps-Lite supports BM25-first retrieval and optional vector/hybrid retrieval when embeddings are configured. These stages maximize recall; they do not guarantee that the first retrieved chunks are the most useful context for the final answer.
 
-## Why rerank may help
+## Why rerank is separate
 
-A lightweight deterministic rerank could later use service exact match, title overlap, error-code match, keyword overlap, recency metadata, and existing BM25/vector/hybrid scores. This stage does not add a reranker because the goal is to evaluate current retrieval quality before tuning it.
+Passing raw top-k recall directly to the model can waste context on near-duplicates or broad lexical matches. WatchOps-Lite retrieves a larger `candidate_k` set, then reranks before returning the final `top_k`.
+
+The local default is a deterministic rule-based reranker. It uses the base retrieval score, exact service and operational-identifier matches, title/content keyword overlap, runbook preference, optional recency, and an empty-content penalty. This makes ordering explainable and testable.
+
+An optional external provider can be selected with `WATCHOPS_RERANK_PROVIDER=external`. It uses a bounded HTTP `/rerank` request and a key read from the environment variable named by `WATCHOPS_RERANK_API_KEY_ENV`. Timeout, invalid/empty output, missing credentials, or provider failure falls back to the rule-based reranker. The result metadata records only the provider, rerank score/reason, and safe fallback reason.
+
+```bash
+export WATCHOPS_RERANK_ENABLED=true
+export WATCHOPS_RERANK_PROVIDER=external
+export WATCHOPS_RERANK_BASE_URL=https://your-provider.example/v1
+export WATCHOPS_RERANK_MODEL=your-rerank-model
+export WATCHOPS_RERANK_API_KEY=replace-me
+```
+
+The base URL receives a `/rerank` suffix and must expose the configured bounded request/response contract. Secrets remain in environment variables.
 
 ## Eval cases
 
@@ -50,7 +64,8 @@ The script calls the local knowledge search API and prints:
 - top-k result IDs
 - matched keywords
 - hit or miss
-- available score fields such as `bm25_score`, `vector_score`, `hybrid_score`, and `rrf_score`
+- available score fields such as `bm25_score`, `vector_score`, `hybrid_score`, `rrf_score`, and `rerank_score`
+- rerank provider, deterministic reason, and fallback reason when present
 - empty recall behavior
 - summary pass rate
 
@@ -79,7 +94,8 @@ The Agent can only support conclusions and inferences with evidence IDs that cam
 
 - The default eval runner checks top-k keyword and ID hits; it is not an LLM judge.
 - It evaluates the configured local retrieval mode rather than benchmarking every possible mode automatically.
-- It does not add a cross-encoder, LLM reranker, new vector database, or external paid service.
+- The rule-based scorer is intentionally simple and is not a learned cross-encoder.
+- External provider quality and latency depend on the configured model; the eval never invents external results.
 - The demo corpus is intentionally small, so some cases are useful as partial-recall or empty-recall probes.
 
-Future improvements can add versioned eval datasets, deterministic rerank experiments, corpus coverage reports, and CI-friendly fixture-backed retrieval tests.
+Future improvements can add larger versioned datasets, before/after ranking comparison, corpus coverage reports, and CI-friendly fixture-backed retrieval tests.

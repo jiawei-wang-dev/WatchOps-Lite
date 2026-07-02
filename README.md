@@ -50,7 +50,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
 - MySQL cross-session incident memory created only from evidence-backed positive feedback or explicit trusted sources
-- Elasticsearch BM25, optional vector retrieval, and RRF hybrid fusion with BM25 fallback
+- Elasticsearch BM25, optional vector retrieval, RRF hybrid fusion, and deterministic reranking with an optional external provider
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
 - Prometheus runtime metrics at `GET /metrics` for HTTP, Chat, tools, RAG, memory, fallbacks, and eval runs
@@ -377,6 +377,7 @@ It prints a summary and writes ignored JSON and Markdown reports under `tmp/`. T
     ├── platform/               # Elasticsearch and MySQL clients
     ├── retrieval/embedding/    # Optional embedding provider abstraction
     ├── retrieval/knowledge/    # Chunking, BM25/vector policy, RRF, and ES store
+    ├── retrieval/rerank/       # Rule-based rerank and optional external fallback chain
     ├── retrieval/logs/         # Bounded logs search and Elasticsearch store
     ├── retrieval/metrics/      # Allowlisted metrics policy and Prometheus client
     ├── retrieval/traces/       # Bounded trace policy and Jaeger Query API client
@@ -386,7 +387,7 @@ It prints a summary and writes ignored JSON and Markdown reports under `tmp/`. T
 
 ## Current Limitations
 
-- Embeddings are optional; reranking remains deferred.
+- Embeddings and external reranking are optional; the local demo uses deterministic rule-based reranking.
 - LLM session summarization is optional and uses the configured OpenAI-compatible model; deterministic mode remains the dependency-light default.
 - Logs, metrics, and traces have real backends with explicit deterministic fallback.
 - Eval cases are executed by deterministic rules; LLM-as-judge and prompt A/B testing remain deferred.
@@ -396,7 +397,7 @@ It prints a summary and writes ignored JSON and Markdown reports under `tmp/`. T
 
 ## Roadmap
 
-- Evaluation-driven reranking and retrieval tuning
+- Retrieval tuning with larger versioned evaluation corpora
 - Advanced trace critical-path and service-graph analytics
 - Eval release comparison reports and optional LLM judge
 - Production alerting, recording rules, and expanded SRE dashboards

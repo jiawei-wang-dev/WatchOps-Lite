@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/embedding"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/rerank"
 )
 
 type hybridStoreStub struct {
@@ -125,5 +126,54 @@ func TestServiceIndexesEmbeddingsWhenProviderIsEnabled(t *testing.T) {
 	}
 	if len(store.indexed) != 1 || len(store.indexed[0].Embedding) != 8 {
 		t.Fatalf("indexed chunks = %#v", store.indexed)
+	}
+}
+
+func TestServiceReranksCandidateSetBeforeFinalTopK(t *testing.T) {
+	store := &storeStub{results: []SearchResult{
+		{
+			ChunkID: "generic", DocumentID: "doc-generic", Title: "Operations",
+			Content: "General reference.", Score: 1, Metadata: map[string]any{},
+		},
+		{
+			ChunkID: "checkout", DocumentID: "doc-checkout", Title: "Checkout timeout runbook",
+			Content: "Inspect payment timeout saturation.", Score: 1, Metadata: map[string]any{"service": "checkout"},
+		},
+	}}
+	service, err := NewServiceWithReranker(
+		store,
+		nil,
+		rerank.NewRuleBased(),
+		ServiceConfig{
+			ChunkMaxSize:     100,
+			RetrievalMode:    "bm25",
+			BM25TopK:         2,
+			VectorTopK:       2,
+			FinalTopK:        1,
+			RRFK:             60,
+			FallbackToBM25:   true,
+			RerankCandidateK: 5,
+			RerankTopK:       1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewServiceWithReranker() error = %v", err)
+	}
+	results, err := service.Search(
+		context.Background(),
+		SearchQuery{Query: "checkout timeout runbook", Limit: 1},
+	)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if store.query.Limit != 5 {
+		t.Fatalf("candidate limit = %d, want 5", store.query.Limit)
+	}
+	if len(results) != 1 ||
+		results[0].ChunkID != "checkout" ||
+		results[0].Metadata["rerank_provider"] != "rule_based" ||
+		results[0].Metadata["rerank_score"] == nil ||
+		results[0].Metadata["rerank_reason"] == nil {
+		t.Fatalf("results = %#v", results)
 	}
 }

@@ -44,6 +44,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		metricsHandler = collector.Handler()
 	}
 	embeddingProvider := buildEmbeddingProvider(cfg, logger)
+	reranker := buildReranker(cfg, logger)
 	var elasticsearchClient *elasticsearchplatform.Client
 	knowledgeStore := retrievalknowledge.Store(retrievalknowledge.UnavailableStore{})
 	if cfg.Elasticsearch.Enabled {
@@ -72,17 +73,20 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		}
 		knowledgeStore = store
 	}
-	knowledgeService, err := retrievalknowledge.NewServiceWithConfig(
+	knowledgeService, err := retrievalknowledge.NewServiceWithReranker(
 		knowledgeStore,
 		embeddingProvider,
+		reranker,
 		retrievalknowledge.ServiceConfig{
-			ChunkMaxSize:   cfg.Knowledge.ChunkMaxSize,
-			RetrievalMode:  cfg.Knowledge.RetrievalMode,
-			BM25TopK:       cfg.Knowledge.BM25TopK,
-			VectorTopK:     cfg.Knowledge.VectorTopK,
-			FinalTopK:      cfg.Knowledge.FinalTopK,
-			RRFK:           cfg.Knowledge.RRFK,
-			FallbackToBM25: cfg.Knowledge.FallbackToBM25,
+			ChunkMaxSize:     cfg.Knowledge.ChunkMaxSize,
+			RetrievalMode:    cfg.Knowledge.RetrievalMode,
+			BM25TopK:         cfg.Knowledge.BM25TopK,
+			VectorTopK:       cfg.Knowledge.VectorTopK,
+			FinalTopK:        cfg.Knowledge.FinalTopK,
+			RRFK:             cfg.Knowledge.RRFK,
+			FallbackToBM25:   cfg.Knowledge.FallbackToBM25,
+			RerankCandidateK: cfg.Rerank.CandidateK,
+			RerankTopK:       cfg.Rerank.TopK,
 		},
 	)
 	if err != nil {

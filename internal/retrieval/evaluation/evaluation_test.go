@@ -77,9 +77,12 @@ func TestEvaluateReportsHitAndScores(t *testing.T) {
 		Content:    "Checkout payment timeout investigation.",
 		Score:      1.2,
 		Metadata: map[string]any{
-			"retrieval_mode": "hybrid",
-			"bm25_score":     1.2,
-			"rrf_score":      0.04,
+			"retrieval_mode":  "hybrid",
+			"bm25_score":      1.2,
+			"rrf_score":       0.04,
+			"rerank_provider": "rule_based",
+			"rerank_score":    2.4,
+			"rerank_reason":   "title_overlap",
 		},
 	}}}, []Case{{
 		ID:                 "checkout",
@@ -90,7 +93,10 @@ func TestEvaluateReportsHitAndScores(t *testing.T) {
 	if report.Passed != 1 ||
 		report.Cases[0].RetrievalMode != "hybrid" ||
 		report.Cases[0].BM25Score == nil ||
-		report.Cases[0].RRFScore == nil {
+		report.Cases[0].RRFScore == nil ||
+		report.Cases[0].RerankProvider != "rule_based" ||
+		report.Cases[0].RerankScore == nil ||
+		report.Cases[0].RerankReason != "title_overlap" {
 		t.Fatalf("report = %#v", report)
 	}
 }
