@@ -9,6 +9,7 @@ import (
 	openai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
 )
@@ -55,6 +56,7 @@ func buildAgentRunner(
 		Timeout:       cfg.Agent.Timeout.Value(),
 		PromptVersion: cfg.Agent.PromptVersion,
 		ModelName:     cfg.LLM.Model,
+		Control:       agentControlConfig(cfg.Agent),
 	})
 	if err != nil {
 		logger.Warn("Eino ReAct Agent initialization failed; deterministic fallback selected", "error", err)
@@ -66,7 +68,22 @@ func buildAgentRunner(
 		"prompt_version", cfg.Agent.PromptVersion,
 		"max_iterations", cfg.Agent.MaxIterations,
 	)
-	return agenteino.NewFallbackRunner(einoRunner, deterministic)
+	return agenteino.NewFallbackRunnerWithControl(
+		einoRunner,
+		deterministic,
+		agentControlConfig(cfg.Agent),
+	)
+}
+
+func agentControlConfig(cfg config.AgentConfig) control.Config {
+	return control.Config{
+		MaxIterations:               cfg.MaxIterations,
+		MaxToolCalls:                cfg.MaxToolCalls,
+		MaxConsecutiveToolFailures:  cfg.MaxConsecutiveToolFailures,
+		TotalExecutionTimeout:       cfg.TotalExecutionTimeout.Value(),
+		EnableJSONRepairOnce:        cfg.EnableJSONRepairOnce,
+		EnableRepeatedToolDetection: cfg.EnableRepeatedToolDetection,
+	}
 }
 
 func newOpenAICompatibleModel(

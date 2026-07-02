@@ -411,7 +411,12 @@ func TestLoadAppliesAgentAndLLMEnvironment(t *testing.T) {
 
 	t.Setenv("WATCHOPS_AGENT_MODE", "eino_react")
 	t.Setenv("WATCHOPS_AGENT_MAX_ITERATIONS", "4")
+	t.Setenv("WATCHOPS_AGENT_MAX_TOOL_CALLS", "9")
+	t.Setenv("WATCHOPS_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES", "2")
 	t.Setenv("WATCHOPS_AGENT_TIMEOUT", "12s")
+	t.Setenv("WATCHOPS_AGENT_TOTAL_EXECUTION_TIMEOUT", "14s")
+	t.Setenv("WATCHOPS_AGENT_ENABLE_JSON_REPAIR_ONCE", "false")
+	t.Setenv("WATCHOPS_AGENT_ENABLE_REPEATED_TOOL_DETECTION", "false")
 	t.Setenv("WATCHOPS_AGENT_PROMPT_VERSION", "watchops_agent_v1")
 	t.Setenv("WATCHOPS_LLM_ENABLED", "true")
 	t.Setenv("WATCHOPS_LLM_BASE_URL", "http://model.local/v1")
@@ -425,7 +430,12 @@ func TestLoadAppliesAgentAndLLMEnvironment(t *testing.T) {
 	}
 	if cfg.Agent.Mode != "eino_react" ||
 		cfg.Agent.MaxIterations != 4 ||
+		cfg.Agent.MaxToolCalls != 9 ||
+		cfg.Agent.MaxConsecutiveToolFailures != 2 ||
 		cfg.Agent.Timeout.Value() != 12*time.Second ||
+		cfg.Agent.TotalExecutionTimeout.Value() != 14*time.Second ||
+		cfg.Agent.EnableJSONRepairOnce ||
+		cfg.Agent.EnableRepeatedToolDetection ||
 		!cfg.LLM.Enabled ||
 		cfg.LLM.Model != "test-model" ||
 		cfg.LLM.Temperature != 0.4 ||

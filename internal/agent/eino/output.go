@@ -1,9 +1,11 @@
 package eino
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -58,6 +60,17 @@ func parseAgentOutput(
 		return output
 	}
 	output.Metadata["output_parse_success"] = true
+	missingSections := missingRequiredSections(stripJSONFence(content))
+	if len(missingSections) > 0 {
+		output.Metadata["missing_required_sections"] = true
+		output.Metadata["missing_sections"] = missingSections
+		output.Limitations = append(output.Limitations, Limitation{
+			Code:    "AGENT_OUTPUT_MISSING_REQUIRED_SECTIONS",
+			Message: "The model response omitted one or more required answer sections.",
+		})
+	} else {
+		output.Metadata["missing_required_sections"] = false
+	}
 
 	allowedEvidence := make(map[string]struct{}, len(evidence))
 	for _, item := range evidence {
@@ -129,6 +142,60 @@ func parseAgentOutput(
 		})
 	}
 	return output
+}
+
+func missingRequiredSections(content string) []string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil
+	}
+	required := []string{"conclusions", "inferences", "recommendations", "limitations"}
+	missing := make([]string, 0, len(required))
+	for _, key := range required {
+		if _, ok := raw[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+func parseAgentOutputControlled(
+	ctx context.Context,
+	controller *control.Controller,
+	content string,
+	evidence []common.EvidenceItem,
+	toolRuns []ToolRun,
+	toolLimitations []Limitation,
+	metadata map[string]any,
+) AgentOutput {
+	output := parseAgentOutput(content, evidence, toolRuns, toolLimitations, metadata)
+	if parseSuccess, _ := output.Metadata["output_parse_success"].(bool); parseSuccess {
+		return output
+	}
+	if controller == nil || !controller.Config().EnableJSONRepairOnce {
+		return output
+	}
+	repaired, ok := controller.RepairJSON(ctx, stripJSONFence(content))
+	output.Metadata["json_repair_attempted"] = true
+	if !ok {
+		output.Metadata["json_repair_success"] = false
+		return output
+	}
+	repairedMetadata := cloneOutputMetadata(metadata)
+	repairedMetadata["json_repair_attempted"] = true
+	repairedMetadata["json_repair_success"] = true
+	repairedOutput := parseAgentOutput(
+		repaired,
+		evidence,
+		toolRuns,
+		toolLimitations,
+		repairedMetadata,
+	)
+	if parseSuccess, _ := repairedOutput.Metadata["output_parse_success"].(bool); parseSuccess {
+		return repairedOutput
+	}
+	repairedOutput.Metadata["json_repair_success"] = false
+	return repairedOutput
 }
 
 func validEvidenceIDs(values []string, allowed map[string]struct{}) ([]string, bool) {

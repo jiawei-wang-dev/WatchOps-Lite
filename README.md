@@ -38,6 +38,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 
 - Gin HTTP API with thin handlers, structured errors, request IDs, and graceful shutdown
 - Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
+- Lightweight Agent Failure Controller for parse repair, empty-evidence limitations, repeated failure boundaries, and deterministic fallback
 - Compiled native Eino Graph for Chat context, prompt, Agent, evidence, memory, and response orchestration
 - Lightweight on-call Skills rendered into the Agent prompt as bounded diagnostic guidance
 - Deterministic Agent fallback that requires no API key
@@ -72,6 +73,8 @@ The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, knowledge search, alert lookup, or service topology lookup. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 
 Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing for both core and auxiliary tools. The four core evidence tools remain the main reliability-analysis story; `query_alerts` and `get_service_topology` provide optional OnCall context. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
+
+The Agent Failure Controller is a safety layer around the existing Agent execution. It tracks tool-call counts, consecutive failures, repeated tool patterns, evidence count, limitations, elapsed time, and JSON parse status. It can attempt one local JSON repair pass and can trigger the existing deterministic fallback when the LLM crosses a failure boundary. It does not plan, rank, select, or execute tools.
 
 See [the native Eino refactor plan](docs/eino-native-refactor-plan.md) for the pinned API audit and migration boundaries.
 

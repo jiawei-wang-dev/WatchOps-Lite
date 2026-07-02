@@ -199,6 +199,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: Agent Failure Controller — Completed
+
+Delivered:
+
+- Lightweight controller for common Agent failure boundaries
+- Safe defaults for max iterations, max tool calls, consecutive tool failures, total execution timeout, one-shot JSON repair, and repeated tool detection
+- Execution-state tracking for tool calls, successes, failures, evidence count, limitations, repeated signatures, and elapsed time
+- One local JSON repair attempt before falling back from invalid final output
+- Controlled deterministic fallback for invalid final JSON, repeated tool failures, tool-call overflow, and total timeout boundaries
+- Empty-evidence limitations that prevent unsupported root-cause claims
+- OpenTelemetry spans for controller evaluation, JSON repair, and controlled fallback
+
+Exit criteria:
+
+- Public Chat API schema, evidence schema, Tool Runtime behavior, Redis/MySQL memory behavior, Eino ReAct/Tools behavior, and demo scripts remain unchanged.
+- The controller does not introduce a planner, policy engine, correlation engine, multi-agent system, MCP, UEM, or auto-remediation.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -24,6 +25,7 @@ type ReActRunnerConfig struct {
 	Timeout       time.Duration
 	PromptVersion string
 	ModelName     string
+	Control       control.Config
 }
 
 type reactGenerator interface {
@@ -36,6 +38,7 @@ type ReActRunner struct {
 	config    ReActRunnerConfig
 	toolNames []string
 	toolCount int
+	control   *control.Controller
 }
 
 func NewReActRunner(
@@ -56,6 +59,9 @@ func NewReActRunner(
 	promptBuilder, err := NewPromptBuilder(config.PromptVersion)
 	if err != nil {
 		return nil, err
+	}
+	if control.IsZero(config.Control) {
+		config.Control = control.DefaultConfig()
 	}
 
 	baseTools := make([]einotool.BaseTool, 0, len(tools))
@@ -93,6 +99,7 @@ func NewReActRunner(
 		config:    config,
 		toolNames: toolNames,
 		toolCount: len(toolNames),
+		control:   control.New(config.Control),
 	}, nil
 }
 
@@ -128,6 +135,7 @@ func (r *ReActRunner) runPrepared(
 	input AgentInput,
 	messages []*schema.Message,
 ) (AgentOutput, error) {
+	startedAt := time.Now()
 	ctx, span := observability.StartSpan(
 		ctx,
 		"agent.eino.run",
@@ -164,7 +172,9 @@ func (r *ReActRunner) runPrepared(
 		"agent.output.parse",
 		attribute.String("prompt_version", r.config.PromptVersion),
 	)
-	output := parseAgentOutput(
+	output := parseAgentOutputControlled(
+		ctx,
+		r.control,
 		content,
 		evidenceItems,
 		toolRuns,
@@ -191,12 +201,69 @@ func (r *ReActRunner) runPrepared(
 		observability.MarkError(parseSpan, "Agent output parsing failed")
 	}
 	parseSpan.End()
+	state := control.BuildState(
+		controlToolRuns(toolRuns),
+		len(output.Evidence),
+		len(output.Limitations),
+		control.Since(startedAt),
+		parseSuccess,
+		outputMetadataBool(output.Metadata, "missing_required_sections"),
+		r.config.MaxIterations,
+	)
+	evaluation := r.control.Evaluate(ctx, state)
+	appendControlLimitations(&output, evaluation.Limitations)
+	if evaluation.FailureReason != "" {
+		output.Metadata["failure_reason"] = evaluation.FailureReason
+		output.Metadata["failure_controller_triggered"] = evaluation.Controlled
+		output.Metadata["failure_controller_fallback_required"] = evaluation.ShouldFallback
+	}
 	span.SetAttributes(
 		attribute.Bool("output_parse_success", parseSuccess),
 		attribute.Int("evidence_count", len(output.Evidence)),
 		attribute.Int("tool_run_count", len(output.ToolRuns)),
+		attribute.String("failure_reason", evaluation.FailureReason),
 	)
 	return output, nil
+}
+
+func controlToolRuns(toolRuns []ToolRun) []control.ToolRun {
+	result := make([]control.ToolRun, 0, len(toolRuns))
+	for _, run := range toolRuns {
+		result = append(result, control.ToolRun{
+			Tool:          run.Tool,
+			Success:       run.Success,
+			ErrorCode:     string(run.ErrorCode),
+			EvidenceCount: run.EvidenceCount,
+		})
+	}
+	return result
+}
+
+func appendControlLimitations(output *AgentOutput, limitations []control.Limitation) {
+	for _, limitation := range limitations {
+		if hasLimitationCode(output.Limitations, limitation.Code) {
+			continue
+		}
+		output.Limitations = append(output.Limitations, Limitation{
+			Code:    limitation.Code,
+			Message: limitation.Message,
+			Tool:    limitation.Tool,
+		})
+	}
+}
+
+func hasLimitationCode(limitations []Limitation, code string) bool {
+	for _, limitation := range limitations {
+		if limitation.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func outputMetadataBool(metadata map[string]any, key string) bool {
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 func collectToolResults(iterator *react.Iterator[*schema.Message]) (

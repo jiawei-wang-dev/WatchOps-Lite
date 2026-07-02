@@ -162,10 +162,15 @@ type LongTermMemoryConfig struct {
 }
 
 type AgentConfig struct {
-	Mode          string   `json:"mode"`
-	MaxIterations int      `json:"max_iterations"`
-	Timeout       Duration `json:"timeout"`
-	PromptVersion string   `json:"prompt_version"`
+	Mode                        string   `json:"mode"`
+	MaxIterations               int      `json:"max_iterations"`
+	MaxToolCalls                int      `json:"max_tool_calls"`
+	MaxConsecutiveToolFailures  int      `json:"max_consecutive_tool_failures"`
+	Timeout                     Duration `json:"timeout"`
+	TotalExecutionTimeout       Duration `json:"total_execution_timeout"`
+	EnableJSONRepairOnce        bool     `json:"enable_json_repair_once"`
+	EnableRepeatedToolDetection bool     `json:"enable_repeated_tool_detection"`
+	PromptVersion               string   `json:"prompt_version"`
 }
 
 type LLMConfig struct {
@@ -284,10 +289,15 @@ func Default() Config {
 			TopK: 3,
 		},
 		Agent: AgentConfig{
-			Mode:          "deterministic",
-			MaxIterations: 6,
-			Timeout:       Duration(30 * time.Second),
-			PromptVersion: "watchops_agent_v1",
+			Mode:                        "deterministic",
+			MaxIterations:               6,
+			MaxToolCalls:                12,
+			MaxConsecutiveToolFailures:  3,
+			Timeout:                     Duration(30 * time.Second),
+			TotalExecutionTimeout:       Duration(30 * time.Second),
+			EnableJSONRepairOnce:        true,
+			EnableRepeatedToolDetection: true,
+			PromptVersion:               "watchops_agent_v1",
 		},
 		LLM: LLMConfig{
 			Enabled:        false,
@@ -408,6 +418,7 @@ func applyEnvironment(cfg *Config) error {
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
+		{"AGENT_TOTAL_EXECUTION_TIMEOUT", &cfg.Agent.TotalExecutionTimeout},
 		{"LLM_REQUEST_TIMEOUT", &cfg.LLM.RequestTimeout},
 		{"TELEMETRY_EXPORT_TIMEOUT", &cfg.Telemetry.ExportTimeout},
 	}
@@ -436,6 +447,8 @@ func applyEnvironment(cfg *Config) error {
 		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
 		{"LONG_TERM_MEMORY_TOP_K", &cfg.LongTermMemory.TopK},
 		{"AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations},
+		{"AGENT_MAX_TOOL_CALLS", &cfg.Agent.MaxToolCalls},
+		{"AGENT_MAX_CONSECUTIVE_TOOL_FAILURES", &cfg.Agent.MaxConsecutiveToolFailures},
 	}
 	for _, item := range integerValues {
 		if err := setInteger(item.name, item.target); err != nil {
@@ -526,6 +539,20 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sLLM_ENABLED must be a boolean: %w", envPrefix, err)
 		}
 		cfg.LLM.Enabled = parsed
+	}
+	if value, ok := lookup("AGENT_ENABLE_JSON_REPAIR_ONCE"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sAGENT_ENABLE_JSON_REPAIR_ONCE must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Agent.EnableJSONRepairOnce = parsed
+	}
+	if value, ok := lookup("AGENT_ENABLE_REPEATED_TOOL_DETECTION"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sAGENT_ENABLE_REPEATED_TOOL_DETECTION must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Agent.EnableRepeatedToolDetection = parsed
 	}
 	if value, ok := lookup("RUNTIME_METRICS_ENABLED"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -822,8 +849,17 @@ func (cfg Config) Validate() error {
 	if cfg.Agent.MaxIterations <= 0 || cfg.Agent.MaxIterations > 20 {
 		return errors.New("agent.max_iterations must be between 1 and 20")
 	}
+	if cfg.Agent.MaxToolCalls <= 0 || cfg.Agent.MaxToolCalls > 100 {
+		return errors.New("agent.max_tool_calls must be between 1 and 100")
+	}
+	if cfg.Agent.MaxConsecutiveToolFailures <= 0 || cfg.Agent.MaxConsecutiveToolFailures > 20 {
+		return errors.New("agent.max_consecutive_tool_failures must be between 1 and 20")
+	}
 	if cfg.Agent.Timeout <= 0 {
 		return errors.New("agent.timeout must be greater than zero")
+	}
+	if cfg.Agent.TotalExecutionTimeout <= 0 {
+		return errors.New("agent.total_execution_timeout must be greater than zero")
 	}
 	if strings.TrimSpace(cfg.Agent.PromptVersion) == "" {
 		return errors.New("agent.prompt_version is required")

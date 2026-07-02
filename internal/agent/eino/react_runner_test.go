@@ -142,6 +142,36 @@ func TestReActRunnerReturnsSafeLimitationForMalformedOutput(t *testing.T) {
 	}
 }
 
+func TestReActRunnerRepairsInvalidJSONOnce(t *testing.T) {
+	tools, _ := BuildMockTools()
+	chatModel := &scriptedToolCallingModel{
+		responses: []*schema.Message{schema.AssistantMessage(`prefix {
+			"conclusions":[],
+			"inferences":[],
+			"recommendations":[],
+			"limitations":[],
+		} suffix`, nil)},
+	}
+	runner, err := NewReActRunner(context.Background(), chatModel, tools, ReActRunnerConfig{
+		MaxIterations: 2,
+		Timeout:       time.Second,
+		PromptVersion: PromptVersionV1,
+		ModelName:     "test-model",
+	})
+	if err != nil {
+		t.Fatalf("NewReActRunner() error = %v", err)
+	}
+
+	output, err := runner.Run(context.Background(), validAgentInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if output.Metadata["output_parse_success"] != true ||
+		output.Metadata["json_repair_success"] != true {
+		t.Fatalf("metadata = %#v, want repaired parse success", output.Metadata)
+	}
+}
+
 func TestFallbackRunnerUsesDeterministicRunnerOnModelFailure(t *testing.T) {
 	tools, _ := BuildMockTools()
 	primary := &runnerStub{err: errors.New("model unavailable")}
@@ -156,6 +186,71 @@ func TestFallbackRunnerUsesDeterministicRunnerOnModelFailure(t *testing.T) {
 		output.Metadata["fallback_reason"] != "llm_unavailable" ||
 		!hasLimitation(output.Limitations, "AGENT_LLM_FALLBACK") {
 		t.Fatalf("output = %#v", output)
+	}
+}
+
+func TestFallbackRunnerUsesDeterministicRunnerAfterRepairFailure(t *testing.T) {
+	tools, _ := BuildMockTools()
+	primary := &runnerStub{output: AgentOutput{
+		Conclusions:     []Conclusion{},
+		Evidence:        []common.EvidenceItem{},
+		Inferences:      []Inference{},
+		Recommendations: []Recommendation{},
+		Limitations: []Limitation{{
+			Code:    "AGENT_OUTPUT_PARSE_FAILED",
+			Message: "invalid JSON",
+		}},
+		ToolRuns: []ToolRun{},
+		Metadata: map[string]any{
+			"output_parse_success":                 false,
+			"failure_controller_fallback_required": true,
+			"failure_reason":                       "invalid_final_json",
+		},
+	}}
+	runner := NewFallbackRunner(primary, NewDeterministicRunner(tools))
+
+	output, err := runner.Run(context.Background(), validAgentInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if output.Metadata["fallback_used"] != true ||
+		output.Metadata["fallback_reason"] != "invalid_final_json" ||
+		!hasLimitation(output.Limitations, "AGENT_LLM_FALLBACK") {
+		t.Fatalf("output = %#v", output)
+	}
+}
+
+func TestFallbackRunnerUsesDeterministicRunnerAfterRepeatedToolFailures(t *testing.T) {
+	tools, _ := BuildMockTools()
+	primary := &runnerStub{output: AgentOutput{
+		Conclusions:     []Conclusion{},
+		Evidence:        []common.EvidenceItem{},
+		Inferences:      []Inference{},
+		Recommendations: []Recommendation{},
+		Limitations: []Limitation{{
+			Code:    "AGENT_CONSECUTIVE_TOOL_FAILURES",
+			Message: "tool failures",
+		}},
+		ToolRuns: []ToolRun{
+			{Tool: "query_logs", Success: false, ErrorCode: common.ErrorCodeTimeout},
+			{Tool: "query_logs", Success: false, ErrorCode: common.ErrorCodeTimeout},
+			{Tool: "query_logs", Success: false, ErrorCode: common.ErrorCodeTimeout},
+		},
+		Metadata: map[string]any{
+			"output_parse_success":                 true,
+			"failure_controller_fallback_required": true,
+			"failure_reason":                       "consecutive_tool_failures",
+		},
+	}}
+	runner := NewFallbackRunner(primary, NewDeterministicRunner(tools))
+
+	output, err := runner.Run(context.Background(), validAgentInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if output.Metadata["fallback_reason"] != "consecutive_tool_failures" ||
+		output.Metadata["fallback_used"] != true {
+		t.Fatalf("metadata = %#v", output.Metadata)
 	}
 }
 
@@ -238,6 +333,21 @@ func TestStructuredParserRejectsInventedEvidenceIDs(t *testing.T) {
 
 	if len(output.Conclusions) != 0 ||
 		!hasLimitation(output.Limitations, "EVIDENCE_REFERENCE_INVALID") {
+		t.Fatalf("output = %#v", output)
+	}
+}
+
+func TestStructuredParserReportsMissingRequiredSections(t *testing.T) {
+	output := parseAgentOutput(
+		`{"conclusions":[]}`,
+		[]common.EvidenceItem{},
+		[]ToolRun{},
+		[]Limitation{},
+		map[string]any{},
+	)
+
+	if output.Metadata["missing_required_sections"] != true ||
+		!hasLimitation(output.Limitations, "AGENT_OUTPUT_MISSING_REQUIRED_SECTIONS") {
 		t.Fatalf("output = %#v", output)
 	}
 }

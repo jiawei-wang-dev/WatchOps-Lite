@@ -78,8 +78,11 @@ The current Agent layer uses:
 - Eino Tool registration and invocation
 - `MessageFuture` to collect executed tool results
 - OpenTelemetry spans for prompt rendering, model calls, tool calls, parsing, and fallback
+- A lightweight Agent Failure Controller for common failure boundaries
 
 WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools. Model-produced evidence is never trusted directly: only IDs found in actual `ToolResult` records can support conclusions or inferences.
+
+The Agent Failure Controller is not a planner, policy engine, or ReAct replacement. It evaluates execution state after Eino ReAct/tool-result collection and around output parsing: total tool calls, failed tools, consecutive failures, repeated tool-call signatures, evidence count, limitation count, elapsed time, invalid JSON, and missing required final-output sections. It may add limitations, attempt one local JSON repair pass, or ask the existing fallback wrapper to use the deterministic runner. It never invents evidence or changes the public Chat response schema.
 
 ### 3.1 Native Eino Chat Graph
 
@@ -332,7 +335,7 @@ http POST /api/v1/chat
         └── graph.build_chat_response
 ```
 
-`workflow.chat` and its `graph.*` children are created by Eino callback lifecycle hooks. When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, and `agent.output.parse` spans. Request-time model failure also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
+`workflow.chat` and its `graph.*` children are created by Eino callback lifecycle hooks. When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, `agent.output.parse`, and `agent.failure_controller.*` spans. Request-time model failure or controlled Agent fallback also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
 
 Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 
