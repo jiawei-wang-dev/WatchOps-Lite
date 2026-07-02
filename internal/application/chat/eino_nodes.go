@@ -12,6 +12,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 )
 
 type graphState struct {
@@ -45,13 +46,32 @@ type diagnosticSkillsBranch struct {
 	cards []string
 }
 
+type userProfileBranch struct {
+	contextLines []string
+}
+
 func normalizeChatInputGraphNode(
 	_ context.Context,
 	command Command,
 ) (normalizedChatInput, error) {
 	command.SessionID = strings.TrimSpace(command.SessionID)
+	command.UserID = strings.TrimSpace(command.UserID)
 	command.Message = strings.TrimSpace(command.Message)
 	return normalizedChatInput{command: command}, nil
+}
+
+func (s *Service) loadUserProfileGraphNode(
+	ctx context.Context,
+	input normalizedChatInput,
+) (userProfileBranch, error) {
+	if input.command.UserID == "" || s.profileLoader == nil {
+		return userProfileBranch{contextLines: []string{}}, nil
+	}
+	value, err := s.profileLoader.LoadProfile(ctx, input.command.UserID)
+	if err != nil {
+		return userProfileBranch{contextLines: []string{}}, nil
+	}
+	return userProfileBranch{contextLines: profile.ContextLines(value)}, nil
 }
 
 func (s *Service) loadSessionContextGraphNode(
@@ -109,6 +129,10 @@ func mergeContextGraphNode(
 	if !ok {
 		return graphState{}, fmt.Errorf("%w: diagnostic skills branch output is unavailable", ErrExecution)
 	}
+	profileBranch, ok := input[nodeLoadUserProfile].(userProfileBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: user profile branch output is unavailable", ErrExecution)
+	}
 	return graphState{
 		command:                   sessionBranch.command,
 		snapshot:                  sessionBranch.snapshot,
@@ -122,6 +146,7 @@ func mergeContextGraphNode(
 				memoryBranch.memories,
 			),
 			DiagnosticSkills:   skillsBranch.cards,
+			UserProfileContext: profileBranch.contextLines,
 			RetrievedKnowledge: []string{},
 			CurrentMessage:     sessionBranch.command.Message,
 			TimeContext:        sessionBranch.command.TimeContext,

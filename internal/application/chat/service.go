@@ -11,6 +11,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -25,6 +26,7 @@ const (
 type Command struct {
 	RequestID   string
 	SessionID   string
+	UserID      string
 	Message     string
 	TimeContext common.TimeRange
 }
@@ -50,6 +52,7 @@ type ServiceConfig struct {
 	SummaryThreshold   int
 	LongTermMemory     longterm.Store
 	LongTermMemoryTopK int
+	ProfileLoader      profile.Loader
 }
 
 type Service struct {
@@ -63,6 +66,7 @@ type Service struct {
 	graphErr           error
 	longTermMemory     longterm.Store
 	longTermMemoryTopK int
+	profileLoader      profile.Loader
 }
 
 func NewService(
@@ -86,6 +90,7 @@ func NewService(
 		summaryThreshold:   config.SummaryThreshold,
 		longTermMemory:     config.LongTermMemory,
 		longTermMemoryTopK: config.LongTermMemoryTopK,
+		profileLoader:      config.ProfileLoader,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -112,6 +117,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	defer span.End()
 
 	command.SessionID = strings.TrimSpace(command.SessionID)
+	command.UserID = strings.TrimSpace(command.UserID)
 	command.Message = strings.TrimSpace(command.Message)
 
 	if command.SessionID == "" {
@@ -121,6 +127,10 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	if command.Message == "" {
 		observability.MarkError(span, "chat validation failed")
 		return Result{}, &ValidationError{Field: "message", Message: "message is required"}
+	}
+	if len(command.UserID) > 128 {
+		observability.MarkError(span, "chat validation failed")
+		return Result{}, &ValidationError{Field: "user_id", Message: "user_id exceeds 128 characters"}
 	}
 	if err := command.TimeContext.Validate(); err != nil {
 		observability.MarkError(span, "chat validation failed")

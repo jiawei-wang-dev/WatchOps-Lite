@@ -61,6 +61,7 @@ Request:
 ```json
 {
   "session_id": "ses_01",
+  "user_id": "optional-oncall-user",
   "message": "Why did checkout error rate increase in the last 20 minutes?",
   "time_context": {
     "from": "2026-06-30T00:00:00Z",
@@ -70,6 +71,8 @@ Request:
 ```
 
 `time_context.from` and `time_context.to` must be RFC3339 timestamps, and `to` must not be earlier than `from`.
+
+`user_id` is optional. When present and a matching MySQL profile exists, the Agent receives bounded OnCall context such as default service, related services, timezone, and simple preferences. It is not an authentication identity and is not echoed in the response.
 
 Successful response shape:
 

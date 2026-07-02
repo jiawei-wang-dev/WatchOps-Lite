@@ -58,6 +58,7 @@ func (h *Chat) Handle(c *gin.Context) {
 	result, err := h.executor.Execute(c.Request.Context(), applicationchat.Command{
 		RequestID: requestID,
 		SessionID: request.SessionID,
+		UserID:    request.UserID,
 		Message:   request.Message,
 		TimeContext: common.TimeRange{
 			From: request.TimeContext.From,
@@ -172,6 +173,7 @@ func (h *Chat) Stream(c *gin.Context) {
 	command := applicationchat.Command{
 		RequestID: requestID,
 		SessionID: request.SessionID,
+		UserID:    request.UserID,
 		Message:   request.Message,
 		TimeContext: common.TimeRange{
 			From: request.TimeContext.From,

@@ -18,6 +18,7 @@ import (
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
@@ -237,6 +238,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	feedbackStore := feedback.Store(feedback.UnavailableStore{})
 	evalStore := eval.Store(eval.UnavailableStore{})
 	var longTermMemoryService *longterm.Service
+	var profileLoader profile.Loader
 	if cfg.MySQL.Enabled {
 		client, err := mysqlplatform.New(mysqlplatform.Config{
 			DSN:             cfg.MySQL.DSN,
@@ -292,6 +294,24 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			}
 			return nil, err
 		}
+		mysqlProfileStore, err := profile.NewMySQLStore(client.DB())
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		profileLoader, err = profile.NewManager(mysqlProfileStore)
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
 		feedbackStore = mysqlFeedbackStore
 		evalStore = mysqlEvalStore
 
@@ -332,6 +352,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			SummaryThreshold:   cfg.Session.SummaryThreshold,
 			LongTermMemory:     longTermMemoryService,
 			LongTermMemoryTopK: cfg.LongTermMemory.TopK,
+			ProfileLoader:      profileLoader,
 		},
 	)
 	evalService, err := eval.NewServiceWithRunner(

@@ -94,7 +94,8 @@ workflow.chat
 ├── fan-out
 │   ├── graph.load_session_context
 │   ├── graph.load_long_term_memory
-│   └── graph.prepare_diagnostic_skills
+│   ├── graph.prepare_diagnostic_skills
+│   └── graph.load_user_profile
 ├── graph.merge_context
 ├── graph.render_prompt_template
 ├── graph.run_react_agent
@@ -103,11 +104,13 @@ workflow.chat
 └── graph.build_chat_response
 ```
 
-After input normalization, Eino fans out the three independent context branches and schedules them eagerly. `graph.merge_context` uses native fan-in with `AllPredecessor`, so prompt rendering starts only after all branch outputs are available. This is a native Eino DAG, not a custom workflow wrapper, and production code does not add goroutines to simulate graph concurrency.
+After input normalization, Eino fans out the independent context branches and schedules them eagerly. `graph.merge_context` uses native fan-in with `AllPredecessor`, so prompt rendering starts only after all branch outputs are available. This is a native Eino DAG, not a custom workflow wrapper, and production code does not add goroutines to simulate graph concurrency.
 
 `graph.render_prompt_template` calls the native Eino `DefaultChatTemplate`. `graph.run_react_agent` delegates to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer. Session failures retain the existing single-turn degradation behavior.
 
 `graph.load_long_term_memory` performs bounded keyword search when MySQL is enabled and supplies concise `confirmed_long_term_memories` before prompt rendering. An unavailable store adds `LONG_TERM_MEMORY_UNAVAILABLE` but does not fail Chat. Eino callbacks instrument graph and node lifecycle without recording prompt or response content.
+
+`graph.load_user_profile` runs only when the additive Chat request field `user_id` is present. It renders a small allowlisted context containing default service, up to ten related services, timezone, and at most five scalar preferences. Profile metadata is excluded. A missing or unavailable profile never fails Chat. This is lightweight OnCall personalization, not authentication, RBAC, tenancy, or a public account system.
 
 ### 3.2 Tool, Skill, and Runtime Boundaries
 
@@ -353,7 +356,8 @@ http POST /api/v1/chat
         │   ├── graph.load_session_context
         │   │   └── session.load_context
         │   ├── graph.load_long_term_memory
-        │   └── graph.prepare_diagnostic_skills
+        │   ├── graph.prepare_diagnostic_skills
+        │   └── graph.load_user_profile
         ├── graph.merge_context
         ├── graph.render_prompt_template
         ├── graph.run_react_agent

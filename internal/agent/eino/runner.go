@@ -45,6 +45,7 @@ type AgentInput struct {
 	RecentMessages            []session.Message
 	ConfirmedLongTermMemories []string
 	DiagnosticSkills          []string
+	UserProfileContext        []string
 	RetrievedKnowledge        []string
 	CurrentMessage            string
 	TimeContext               common.TimeRange

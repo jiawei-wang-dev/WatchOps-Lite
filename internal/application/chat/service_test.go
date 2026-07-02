@@ -12,6 +12,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -160,6 +161,7 @@ func TestServiceReturnsActiveTraceID(t *testing.T) {
 		"graph.normalize_chat_input",
 		"graph.load_session_context",
 		"graph.load_long_term_memory",
+		"graph.load_user_profile",
 		"graph.prepare_diagnostic_skills",
 		"graph.merge_context",
 		"graph.render_prompt_template",
@@ -384,6 +386,78 @@ func (f *fakeLongTermMemoryStore) Get(
 	string,
 ) (longterm.Memory, error) {
 	return longterm.Memory{}, f.err
+}
+
+type fakeProfileLoader struct {
+	value  profile.Profile
+	err    error
+	userID string
+}
+
+func (f *fakeProfileLoader) LoadProfile(
+	_ context.Context,
+	userID string,
+) (profile.Profile, error) {
+	f.userID = userID
+	return f.value, f.err
+}
+
+func TestNativeEinoGraphLoadsBoundedUserProfileContext(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	loader := &fakeProfileLoader{value: profile.Profile{
+		UserID:         "oncall-1",
+		DefaultService: "checkout",
+		Services:       []string{"checkout", "payment"},
+		Timezone:       "Australia/Melbourne",
+		Preferences:    map[string]any{"notification_style": "concise"},
+		Metadata:       map[string]any{"private": "excluded"},
+	}}
+	service := NewService(
+		runner,
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize: 12,
+			SummaryThreshold: 12,
+			ProfileLoader:    loader,
+		},
+	)
+	command := validCommand()
+	command.UserID = "oncall-1"
+
+	if _, err := service.Execute(context.Background(), command); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	combined := strings.Join(runner.lastInput.UserProfileContext, "\n")
+	if loader.userID != "oncall-1" ||
+		!strings.Contains(combined, "default_service=checkout") ||
+		!strings.Contains(combined, "notification_style:concise") ||
+		strings.Contains(combined, "private") {
+		t.Fatalf("loader=%#v context=%#v", loader, runner.lastInput.UserProfileContext)
+	}
+}
+
+func TestNativeEinoGraphSkipsMissingUserProfile(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	service := NewService(
+		runner,
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize: 12,
+			SummaryThreshold: 12,
+			ProfileLoader:    &fakeProfileLoader{err: profile.ErrNotFound},
+		},
+	)
+	command := validCommand()
+	command.UserID = "missing"
+
+	if _, err := service.Execute(context.Background(), command); err != nil {
+		t.Fatalf("Execute() error = %v, want graceful profile miss", err)
+	}
+	if len(runner.lastInput.UserProfileContext) != 0 {
+		t.Fatalf("profile context = %#v, want empty", runner.lastInput.UserProfileContext)
+	}
 }
 
 func TestNativeEinoGraphLoadsConfirmedLongTermMemory(t *testing.T) {

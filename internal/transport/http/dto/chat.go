@@ -2,6 +2,7 @@ package dto
 
 type ChatRequest struct {
 	SessionID   string      `json:"session_id" binding:"required"`
+	UserID      string      `json:"user_id,omitempty"`
 	Message     string      `json:"message" binding:"required"`
 	TimeContext TimeContext `json:"time_context" binding:"required"`
 }

@@ -51,6 +51,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
 - Session-scoped Chat history read/clear APIs backed by Redis
 - MySQL cross-session incident memory created only from evidence-backed positive feedback or explicit trusted sources
+- Optional MySQL OnCall user profiles rendered as bounded Agent context
 - Elasticsearch BM25, optional vector retrieval, RRF hybrid fusion, and deterministic reranking with an optional external provider
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
@@ -67,12 +68,12 @@ The Chat application path is a compiled native `compose.Graph[Command, Result]`:
 
 ```text
 normalize input
-  -> [load session context | load optional long-term memory | prepare diagnostic skills]
+  -> [load session context | load optional long-term memory | prepare diagnostic skills | load optional user profile]
   -> merge context -> render Eino PromptTemplate -> run Eino ReAct
   -> collect evidence -> persist session memory -> build response
 ```
 
-The three independent context branches use native Eino Graph fan-out/fan-in with `AllPredecessor` triggering; no custom workflow wrapper or application-managed goroutines are used. The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
+The independent context branches use native Eino Graph fan-out/fan-in with `AllPredecessor` triggering; no custom workflow wrapper or application-managed goroutines are used. When an optional `user_id` is supplied, `load_user_profile` adds only bounded service, timezone, and simple preference context. Profiles are OnCall personalization metadata—not authentication, accounts, RBAC, or tenant management. The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, knowledge search, alert lookup, or service topology lookup. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 
@@ -217,6 +218,7 @@ curl --fail-with-body http://localhost:8080/api/v1/chat \
   -H 'Content-Type: application/json' \
   -d '{
     "session_id": "demo-checkout-session",
+    "user_id": "optional-oncall-user",
     "message": "Why did checkout errors increase? Check metrics, logs, and the runbook.",
     "time_context": {
       "from": "2026-06-30T00:00:00Z",

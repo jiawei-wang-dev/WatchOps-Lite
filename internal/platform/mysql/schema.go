@@ -71,4 +71,17 @@ var SchemaStatements = []string{
 		INDEX idx_long_term_memory_service_updated (service, updated_at),
 		INDEX idx_long_term_memory_updated_at (updated_at)
 	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+	`CREATE TABLE IF NOT EXISTS user_profiles (
+		user_id VARCHAR(128) PRIMARY KEY,
+		display_name VARCHAR(128) NOT NULL,
+		default_service VARCHAR(128) NOT NULL,
+		services JSON NOT NULL,
+		timezone VARCHAR(64) NOT NULL,
+		preferences JSON NOT NULL,
+		metadata JSON NOT NULL,
+		created_at TIMESTAMP(6) NOT NULL,
+		updated_at TIMESTAMP(6) NOT NULL,
+		INDEX idx_user_profiles_default_service (default_service),
+		INDEX idx_user_profiles_updated_at (updated_at)
+	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
 }

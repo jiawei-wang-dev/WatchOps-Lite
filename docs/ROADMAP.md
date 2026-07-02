@@ -583,6 +583,20 @@ The feature reuses the existing Redis session Store and static no-build frontend
 
 Exit status: complete.
 
+## Enhancement: Lightweight User Profile Context — Completed
+
+Delivered:
+
+- Minimal `user_profiles` MySQL model and upsert/get Store
+- Optional `user_id` Chat request field
+- Native Eino `graph.load_user_profile` parallel context branch
+- Bounded prompt context for default service, related services, timezone, and scalar preferences
+- Graceful skip for absent, missing, or unavailable profiles
+
+Profiles are contextual OnCall preferences only. They do not provide authentication, accounts, RBAC, tenancy, or a public management API, and profile metadata is never dumped into the Agent prompt.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

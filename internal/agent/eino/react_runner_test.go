@@ -288,6 +288,10 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 	}}
 	input.ConfirmedLongTermMemories = []string{"Checkout is owned by the payments team."}
 	input.DiagnosticSkills = []string{"metric_inspection: inspect service signals"}
+	input.UserProfileContext = []string{
+		"default_service=checkout",
+		"timezone=Australia/Melbourne",
+	}
 	input.RetrievedKnowledge = []string{"No knowledge is preloaded; use search_knowledge."}
 
 	messages, err := builder.Build(context.Background(), input)
@@ -305,6 +309,9 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		"Checkout is owned by the payments team.",
 		"Available diagnostic skills:",
 		"metric_inspection: inspect service signals",
+		"User profile context:",
+		"default_service=checkout",
+		"timezone=Australia/Melbourne",
 		"No knowledge is preloaded; use search_knowledge.",
 		input.CurrentMessage,
 		input.TimeContext.From,

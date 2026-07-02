@@ -12,6 +12,7 @@ const (
 	nodeNormalizeChatInput   = "normalize_chat_input"
 	nodeLoadSessionContext   = "load_session_context"
 	nodeLoadLongTermMemory   = "load_long_term_memory"
+	nodeLoadUserProfile      = "load_user_profile"
 	nodePrepareSkills        = "prepare_diagnostic_skills"
 	nodeMergeContext         = "merge_context"
 	nodeRenderPromptTemplate = "render_prompt_template"
@@ -57,6 +58,10 @@ func compileChatGraph(
 			node: compose.InvokableLambda(prepareDiagnosticSkillsGraphNode),
 		},
 		{
+			key:  nodeLoadUserProfile,
+			node: compose.InvokableLambda(service.loadUserProfileGraphNode),
+		},
+		{
 			key:  nodeMergeContext,
 			node: compose.InvokableLambda(mergeContextGraphNode),
 		},
@@ -96,6 +101,8 @@ func compileChatGraph(
 			options = append(options, compose.WithOutputKey(nodeLoadLongTermMemory))
 		case nodePrepareSkills:
 			options = append(options, compose.WithOutputKey(nodePrepareSkills))
+		case nodeLoadUserProfile:
+			options = append(options, compose.WithOutputKey(nodeLoadUserProfile))
 		}
 		if err := graph.AddLambdaNode(current.key, current.node, options...); err != nil {
 			return nil, fmt.Errorf("add Eino Chat graph node %q: %w", current.key, err)
@@ -107,9 +114,11 @@ func compileChatGraph(
 		{nodeNormalizeChatInput, nodeLoadSessionContext},
 		{nodeNormalizeChatInput, nodeLoadLongTermMemory},
 		{nodeNormalizeChatInput, nodePrepareSkills},
+		{nodeNormalizeChatInput, nodeLoadUserProfile},
 		{nodeLoadSessionContext, nodeMergeContext},
 		{nodeLoadLongTermMemory, nodeMergeContext},
 		{nodePrepareSkills, nodeMergeContext},
+		{nodeLoadUserProfile, nodeMergeContext},
 		{nodeMergeContext, nodeRenderPromptTemplate},
 		{nodeRenderPromptTemplate, nodeRunReActAgent},
 		{nodeRunReActAgent, nodeCollectToolEvidence},
