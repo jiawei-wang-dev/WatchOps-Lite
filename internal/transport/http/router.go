@@ -34,6 +34,7 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	api := router.Group("/api/v1")
 	chatHandler := handler.NewChat(dependencies.Chat)
 	api.POST("/chat", chatHandler.Handle)
+	api.POST("/chat/stream", chatHandler.Stream)
 
 	knowledgeHandler := handler.NewKnowledge(dependencies.Knowledge)
 	knowledgeAPI := api.Group("/knowledge")

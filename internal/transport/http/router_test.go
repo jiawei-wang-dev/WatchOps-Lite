@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -160,6 +161,62 @@ func TestRouterServesChatForErrorRateQuestion(t *testing.T) {
 	}
 
 	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
+}
+
+func TestRouterStreamsChatEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+
+	requestBody := []byte(`{
+		"session_id": "ses_stream",
+		"message": "Why did checkout error rate increase in the last 20 minutes?",
+		"time_context": {
+			"from": "2026-06-30T00:00:00Z",
+			"to": "2026-06-30T00:20:00Z"
+		}
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/chat/stream", bytes.NewReader(requestBody))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", "req-stream-test")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status code = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
+	}
+
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		"event: workflow_started",
+		"event: graph_node_started",
+		"event: graph_node_completed",
+		"event: tool_call_started",
+		"event: tool_call_completed",
+		"event: evidence_collected",
+		"event: final_answer",
+		"event: workflow_completed",
+		`"request_id":"req-stream-test"`,
+		`"session_id":"ses_stream"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("stream body missing %q:\n%s", expected, body)
+		}
+	}
+
+	finalIndex := strings.Index(body, "event: final_answer")
+	completedIndex := strings.Index(body, "event: workflow_completed")
+	if finalIndex < 0 || completedIndex < 0 || finalIndex > completedIndex {
+		t.Fatalf("final_answer must appear before workflow_completed:\n%s", body)
+	}
+	for _, forbidden := range []string{"chain_of_thought", "raw_prompt", "private reasoning"} {
+		if strings.Contains(strings.ToLower(body), forbidden) {
+			t.Fatalf("stream body contains forbidden reasoning or prompt field %q:\n%s", forbidden, body)
+		}
+	}
 }
 
 func TestRouterCreatesEndToEndChatTrace(t *testing.T) {

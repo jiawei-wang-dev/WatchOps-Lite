@@ -214,6 +214,23 @@ curl --fail-with-body http://localhost:8080/api/v1/chat \
   }'
 ```
 
+### Streaming Chat
+
+```bash
+curl -N --fail-with-body http://localhost:8080/api/v1/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "session_id": "demo-checkout-session",
+    "message": "Why did checkout errors increase? Check metrics, logs, and the runbook.",
+    "time_context": {
+      "from": "2026-06-30T00:00:00Z",
+      "to": "2026-06-30T00:20:00Z"
+    }
+  }'
+```
+
+`POST /api/v1/chat/stream` uses Server-Sent Events to expose bounded workflow progress such as graph node lifecycle, tool-call status, evidence count, and the final structured answer. The `final_answer` event uses the same JSON shape as `POST /api/v1/chat`, followed by `workflow_completed`. Streaming never exposes chain-of-thought, raw prompts, raw tool arguments, or unredacted tool output.
+
 ### Ingest Knowledge
 
 Use the JSON-safe seed script:

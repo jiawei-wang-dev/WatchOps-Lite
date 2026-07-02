@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cloudwego/eino/callbacks"
+	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -21,26 +22,42 @@ func newChatGraphCallbacks() callbacks.Handler {
 			if spanName == "" {
 				return ctx
 			}
+			emitChatGraphStreamEvent(ctx, info, true)
 			ctx, span := observability.StartSpan(ctx, spanName)
 			return context.WithValue(ctx, graphCallbackSpanKey{}, span)
 		}).
 		OnEndFn(func(
 			ctx context.Context,
-			_ *callbacks.RunInfo,
+			info *callbacks.RunInfo,
 			_ callbacks.CallbackOutput,
 		) context.Context {
+			emitChatGraphStreamEvent(ctx, info, false)
 			endChatGraphCallbackSpan(ctx, "")
 			return ctx
 		}).
 		OnErrorFn(func(
 			ctx context.Context,
-			_ *callbacks.RunInfo,
+			info *callbacks.RunInfo,
 			_ error,
 		) context.Context {
+			emitChatGraphStreamEvent(ctx, info, false)
 			endChatGraphCallbackSpan(ctx, "native Eino graph node failed")
 			return ctx
 		}).
 		Build()
+}
+
+func emitChatGraphStreamEvent(ctx context.Context, info *callbacks.RunInfo, started bool) {
+	if info == nil || info.Name == "" || info.Name == graphName {
+		return
+	}
+	eventType := "graph_node_completed"
+	if started {
+		eventType = "graph_node_started"
+	}
+	agenteino.EmitStreamEvent(ctx, eventType, map[string]any{
+		"node": info.Name,
+	})
 }
 
 func chatGraphSpanName(info *callbacks.RunInfo) string {

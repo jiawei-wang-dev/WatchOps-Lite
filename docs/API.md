@@ -137,6 +137,53 @@ Successful response shape:
 
 The actual error-rate route calls both `query_metrics` and `query_logs`; the shortened example above shows one result.
 
+## Streaming Chat
+
+```http
+POST /api/v1/chat/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+The request body is identical to `POST /api/v1/chat`. The endpoint keeps the existing Chat response contract unchanged and streams bounded execution progress as Server-Sent Events.
+
+Response headers include:
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+Example event sequence:
+
+```text
+event: workflow_started
+data: {"request_id":"req_01","latency_ms":0}
+
+event: graph_node_started
+data: {"request_id":"req_01","node":"load_session_context"}
+
+event: tool_call_started
+data: {"request_id":"req_01","tool":"query_metrics"}
+
+event: tool_call_completed
+data: {"request_id":"req_01","tool":"query_metrics","source_type":"metrics","evidence_count":1,"latency_ms":12}
+
+event: evidence_collected
+data: {"request_id":"req_01","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","evidence_count":2,"tool_run_count":2}
+
+event: final_answer
+data: {"request_id":"req_01","session_id":"ses_01","answer":{},"tool_runs":[],"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","metadata":{}}
+
+event: workflow_completed
+data: {"request_id":"req_01","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","latency_ms":128}
+```
+
+Allowed event types are `workflow_started`, `graph_node_started`, `graph_node_completed`, `memory_loaded`, `tool_call_started`, `tool_call_completed`, `tool_call_failed`, `evidence_collected`, `failure_controller_triggered`, `final_answer`, `workflow_completed`, and `workflow_failed`.
+
+Stream event payloads intentionally include only operational metadata such as request ID, trace ID, latency, node/tool name, source type, counts, and structured error code. They must not expose chain-of-thought, raw prompts, raw model output, raw tool arguments, raw sensitive logs, or unredacted tool output.
+
 ### Agent Modes
 
 `agent.mode=deterministic` remains the default and uses transparent rules:

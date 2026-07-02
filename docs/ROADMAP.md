@@ -254,6 +254,26 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: SSE Streaming Chat — Completed
+
+Delivered:
+
+- `POST /api/v1/chat/stream` Server-Sent Events endpoint
+- Reuse of the existing Gin handler validation and Chat application service
+- Reuse of the native Eino Chat graph, ReAct runner, Tool Runtime, Tool Guard, Agent Failure Controller, memory, evidence, feedback/eval, and tracing paths
+- Bounded stream events for workflow lifecycle, Eino graph node lifecycle, memory status, tool-call status, evidence count, failure-controller activation, final answer, and workflow completion/failure
+- `final_answer` event carrying the existing public Chat response JSON
+- Tests for route registration, SSE content type, expected event sequence, final event ordering, and no exposed reasoning/prompt fields
+
+Exit criteria:
+
+- `POST /api/v1/chat` remains unchanged.
+- Public Chat response schema, Evidence schema, Tool Runtime behavior, Tool Guard behavior, Agent Failure Controller behavior, memory, feedback/eval, ReAct graph behavior, and demo scripts remain unchanged.
+- Streaming does not expose chain-of-thought, raw prompts, raw tool arguments, raw model output, raw sensitive logs, or unredacted tool output.
+- No benchmark, frontend, MCP, UEM, policy engine, correlation engine, planner, multi-agent system, or auto-remediation is introduced.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

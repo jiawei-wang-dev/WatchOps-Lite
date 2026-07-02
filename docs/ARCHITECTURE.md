@@ -144,6 +144,8 @@ sequenceDiagram
     H-->>C: Answer, request_id, and trace_id
 ```
 
+`POST /api/v1/chat/stream` follows the same application path and does not introduce a second Agent workflow. The Gin handler writes Server-Sent Events for bounded progress only: workflow lifecycle, Eino graph node lifecycle, memory status, tool-call status, evidence count, failure-controller activation, final structured answer, and workflow completion. The `final_answer` event carries the same public Chat response JSON as `POST /api/v1/chat`; stream events do not expose chain-of-thought, raw prompts, raw tool arguments, raw model output, or unredacted tool output.
+
 A context write failure must not be hidden. If an answer was generated but short-term persistence failed, the API may return the answer while adding a limitation and telemetry event explaining that the next turn might not remember it.
 
 ## 5. Context Architecture

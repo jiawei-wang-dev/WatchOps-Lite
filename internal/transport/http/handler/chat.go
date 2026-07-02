@@ -2,8 +2,11 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
@@ -13,6 +16,14 @@ import (
 
 type ChatExecutor interface {
 	Execute(context.Context, applicationchat.Command) (applicationchat.Result, error)
+}
+
+type ChatStreamer interface {
+	Stream(
+		context.Context,
+		applicationchat.Command,
+		applicationchat.StreamEmitter,
+	) (applicationchat.Result, error)
 }
 
 type Chat struct {
@@ -53,6 +64,91 @@ func (h *Chat) Handle(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, mapChatResponse(result))
+}
+
+func (h *Chat) Stream(c *gin.Context) {
+	requestID := c.GetString("request_id")
+
+	var request dto.ChatRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "request body is invalid", requestID)
+		return
+	}
+
+	streamer, ok := h.executor.(ChatStreamer)
+	if !ok {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "chat streaming is not available", requestID)
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		writeError(c, http.StatusInternalServerError, "INTERNAL", "streaming is not supported", requestID)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(http.StatusOK)
+
+	started := time.Now()
+	command := applicationchat.Command{
+		RequestID: requestID,
+		SessionID: request.SessionID,
+		Message:   request.Message,
+		TimeContext: common.TimeRange{
+			From: request.TimeContext.From,
+			To:   request.TimeContext.To,
+		},
+	}
+	writeEvent := func(eventType string, data any) {
+		_ = writeSSE(c.Writer, flusher, eventType, data)
+	}
+	emit := func(event applicationchat.StreamEvent) {
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		writeEvent(event.Type, event.Data)
+	}
+
+	result, err := streamer.Stream(c.Request.Context(), command, emit)
+	if err != nil {
+		statusCode := "INTERNAL"
+		message := "chat request could not be completed"
+		var validationErr *applicationchat.ValidationError
+		if errors.As(err, &validationErr) {
+			statusCode = "INVALID_ARGUMENT"
+			message = validationErr.Message
+		}
+		writeEvent("workflow_failed", map[string]any{
+			"request_id": requestID,
+			"error_code": statusCode,
+			"message":    message,
+			"latency_ms": time.Since(started).Milliseconds(),
+		})
+		return
+	}
+
+	response := mapChatResponse(result)
+	writeEvent("final_answer", response)
+	writeEvent("workflow_completed", map[string]any{
+		"request_id": requestID,
+		"trace_id":   result.TraceID,
+		"latency_ms": time.Since(started).Milliseconds(),
+	})
+}
+
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) error {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, encoded); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func mapChatResponse(result applicationchat.Result) dto.ChatResponse {

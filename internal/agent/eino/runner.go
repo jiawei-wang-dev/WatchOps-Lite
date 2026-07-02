@@ -251,13 +251,20 @@ func (r *DeterministicRunner) invoke(
 		return common.ToolResult{}, run, toolErr
 	}
 
+	EmitStreamEvent(ctx, "tool_call_started", map[string]any{"tool": call.name})
 	rawResult, err := assembledTool.InvokableRun(ctx, string(arguments))
 	run.DurationMS = time.Since(startedAt).Milliseconds()
 	if err != nil {
 		toolErr := safeToolError(call.name, err)
 		run.ErrorCode = toolErr.Code
+		EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
+			"tool":       call.name,
+			"error_code": string(toolErr.Code),
+			"latency_ms": run.DurationMS,
+		})
 		return common.ToolResult{}, run, toolErr
 	}
+	emitToolResultStreamEvent(ctx, call.name, rawResult)
 
 	var result common.ToolResult
 	if err := json.Unmarshal([]byte(rawResult), &result); err != nil {
@@ -270,6 +277,11 @@ func (r *DeterministicRunner) invoke(
 			"continue with the remaining evidence",
 		)
 		run.ErrorCode = toolErr.Code
+		EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
+			"tool":       call.name,
+			"error_code": string(toolErr.Code),
+			"latency_ms": run.DurationMS,
+		})
 		return common.ToolResult{}, run, toolErr
 	}
 

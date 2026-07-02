@@ -341,6 +341,9 @@ func (t *agentTool) InvokableRun(
 	arguments string,
 	options ...einotool.Option,
 ) (string, error) {
+	EmitStreamEvent(ctx, "tool_call_started", map[string]any{
+		"tool": t.name,
+	})
 	ctx, span := observability.StartSpan(
 		ctx,
 		"agent.tool_call",
@@ -350,6 +353,7 @@ func (t *agentTool) InvokableRun(
 
 	result, err := t.delegate.InvokableRun(ctx, arguments, options...)
 	if err == nil {
+		emitToolResultStreamEvent(ctx, t.name, result)
 		return result, nil
 	}
 	observability.MarkError(span, "Agent tool call failed")
@@ -364,9 +368,49 @@ func (t *agentTool) InvokableRun(
 	}
 	encoded, marshalErr := json.Marshal(failure)
 	if marshalErr != nil {
+		EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
+			"tool":       t.name,
+			"error_code": string(common.ErrorCodeInternal),
+		})
 		return "", fmt.Errorf("encode safe tool failure")
 	}
+	EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
+		"tool":       t.name,
+		"error_code": string(toolError.Code),
+	})
 	return string(encoded), nil
+}
+
+func emitToolResultStreamEvent(ctx context.Context, toolName string, encoded string) {
+	var result common.ToolResult
+	if err := json.Unmarshal([]byte(encoded), &result); err != nil {
+		EmitStreamEvent(ctx, "tool_call_completed", map[string]any{
+			"tool": toolName,
+		})
+		return
+	}
+	eventType := "tool_call_completed"
+	data := map[string]any{
+		"tool":           result.Tool,
+		"evidence_count": len(result.Evidence),
+		"latency_ms":     result.DurationMS,
+	}
+	if result.Tool == "" {
+		data["tool"] = toolName
+	}
+	if len(result.Evidence) > 0 {
+		data["source_type"] = result.Evidence[0].SourceType
+	}
+	if result.Error != nil {
+		eventType = "tool_call_failed"
+		data["error_code"] = string(result.Error.Code)
+		if result.Error.Details != nil {
+			if errorType, _ := result.Error.Details["error_type"].(string); errorType != "" {
+				data["error_type"] = errorType
+			}
+		}
+	}
+	EmitStreamEvent(ctx, eventType, data)
 }
 
 type tracedToolCallingModel struct {
