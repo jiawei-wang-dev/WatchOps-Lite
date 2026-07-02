@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
@@ -25,11 +26,26 @@ type AgentRunner interface {
 	Run(ctx context.Context, input AgentInput) (AgentOutput, error)
 }
 
+// PromptRenderingRunner lets the application graph render a native Eino
+// prompt before invoking an Agent. Deterministic runners intentionally do not
+// implement it because they do not use a model prompt.
+type PromptRenderingRunner interface {
+	RenderPrompt(ctx context.Context, input AgentInput) ([]*schema.Message, error)
+	RunPrepared(
+		ctx context.Context,
+		input AgentInput,
+		messages []*schema.Message,
+	) (AgentOutput, error)
+}
+
 type AgentInput struct {
-	SessionSummary session.Summary
-	RecentMessages []session.Message
-	CurrentMessage string
-	TimeContext    common.TimeRange
+	SessionSummary     session.Summary
+	RecentMessages     []session.Message
+	LongTermMemories   []string
+	DiagnosticSkills   []string
+	RetrievedKnowledge []string
+	CurrentMessage     string
+	TimeContext        common.TimeRange
 }
 
 type AgentOutput struct {

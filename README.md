@@ -9,7 +9,7 @@ WatchOps-Lite turns an incident question into a bounded investigation: it builds
 ```mermaid
 flowchart LR
     C["SRE / API client"] --> G["Gin HTTP API"]
-    G --> A["Explicit Chat workflow"]
+    G --> A["Native Eino compose.Graph"]
     A --> M["Redis context"]
     A --> E["Eino ReAct Agent<br/>or deterministic fallback"]
     S["Business skills<br/>(descriptive only)"] -. explains .-> E
@@ -35,7 +35,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 
 - Gin HTTP API with thin handlers, structured errors, request IDs, and graceful shutdown
 - Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
-- Explicit Chat workflow nodes for context, Agent execution, evidence collection, memory, and response construction
+- Compiled native Eino Graph for Chat context, prompt, Agent, evidence, memory, and response orchestration
 - Lightweight on-call Skills that describe existing tool combinations without adding another execution engine
 - Deterministic Agent fallback that requires no API key
 - `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
@@ -54,18 +54,21 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 
 ## Orchestration, Tools, and Skills
 
-The Chat application path is an explicit, traced workflow:
+The Chat application path is a compiled native `compose.Graph[Command, Result]`:
 
 ```text
-load context -> build Agent input -> run Eino ReAct
-             -> collect evidence -> persist memory -> build response
+load session context -> load optional long-term memory -> build prompt input
+-> render Eino PromptTemplate -> run Eino ReAct -> collect evidence
+-> persist session memory -> build response
 ```
 
-Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools. The workflow wrapper exposes application boundaries in code and Jaeger without replacing the existing ReAct graph.
+The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. The long-term-memory node is currently an explicit no-op because durable Agent memory is not implemented. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named on-call diagnostic routine that documents when one or more existing tools are useful. Skills do not register tools, discover plugins, or alter ReAct behavior.
 
 Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
+
+See [the native Eino refactor plan](docs/eino-native-refactor-plan.md) for the pinned API audit and migration boundaries.
 
 ## Quick Start
 

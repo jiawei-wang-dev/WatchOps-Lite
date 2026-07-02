@@ -144,18 +144,41 @@ func TestServiceReturnsActiveTraceID(t *testing.T) {
 	for _, expected := range []string{
 		"chat.execute",
 		"workflow.chat",
-		"graph.load_context",
-		"graph.build_agent_input",
+		"graph.load_session_context",
+		"graph.load_long_term_memory",
+		"graph.build_prompt_input",
+		"graph.render_prompt_template",
 		"graph.run_react_agent",
-		"graph.collect_evidence",
-		"graph.persist_memory",
-		"graph.build_response",
+		"graph.collect_tool_evidence",
+		"graph.persist_session_memory",
+		"graph.build_chat_response",
 		"session.load_context",
 		"session.persist_context",
 	} {
 		if !names[expected] {
 			t.Fatalf("spans = %#v, missing %q", names, expected)
 		}
+	}
+}
+
+func TestNativeEinoGraphCompilesAndInvokes(t *testing.T) {
+	service := newTestService(
+		&fakeRunner{output: emptyAgentOutput()},
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		12,
+		12,
+	)
+	if service.graphErr != nil || service.graph == nil {
+		t.Fatalf("native Eino graph: runner=%T error=%v", service.graph, service.graphErr)
+	}
+
+	result, err := service.graph.Invoke(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("native Eino graph Invoke() error = %v", err)
+	}
+	if result.RequestID != validCommand().RequestID ||
+		result.SessionID != validCommand().SessionID {
+		t.Fatalf("result = %#v, want unchanged Chat identifiers", result)
 	}
 }
 
@@ -195,8 +218,24 @@ func TestServicePassesSummaryAndRecentMessagesToAgent(t *testing.T) {
 
 	if runner.lastInput.SessionSummary.Version != 2 ||
 		len(runner.lastInput.RecentMessages) != 1 ||
+		len(runner.lastInput.DiagnosticSkills) == 0 ||
+		len(runner.lastInput.LongTermMemories) != 0 ||
 		runner.lastInput.CurrentMessage != validCommand().Message {
 		t.Fatalf("AgentInput = %#v, want loaded session context", runner.lastInput)
+	}
+}
+
+func TestNativeEinoGraphPreservesExecutionError(t *testing.T) {
+	service := newTestService(
+		&fakeRunner{err: errors.New("agent failed")},
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		12,
+		12,
+	)
+
+	_, err := service.Execute(context.Background(), validCommand())
+	if !errors.Is(err, ErrExecution) {
+		t.Fatalf("Execute() error = %v, want ErrExecution", err)
 	}
 }
 

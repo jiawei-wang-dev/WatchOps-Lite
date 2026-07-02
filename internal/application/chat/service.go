@@ -56,6 +56,8 @@ type Service struct {
 	recentWindowSize int
 	summaryThreshold int
 	now              func() time.Time
+	graph            chatGraphRunner
+	graphErr         error
 }
 
 func NewService(
@@ -71,7 +73,7 @@ func NewService(
 		config.SummaryThreshold = defaultSummaryThreshold
 	}
 
-	return &Service{
+	service := &Service{
 		runner:           runner,
 		store:            store,
 		summarizer:       summarizer,
@@ -81,6 +83,8 @@ func NewService(
 			return time.Now().UTC()
 		},
 	}
+	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
+	return service
 }
 
 func (s *Service) Execute(ctx context.Context, command Command) (Result, error) {
@@ -116,7 +120,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 		return Result{}, &ValidationError{Field: "time_context", Message: err.Error()}
 	}
 
-	result, err := s.executeWorkflow(ctx, command)
+	result, err := s.executeGraph(ctx, command)
 	if err != nil {
 		observability.MarkError(span, "chat workflow failed")
 		return Result{}, err

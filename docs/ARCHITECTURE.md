@@ -7,8 +7,8 @@ WatchOps-Lite follows a pragmatic ports-and-adapters architecture. Gin, Eino, El
 ```mermaid
 flowchart LR
     U["SRE / Developer"] --> API["Gin HTTP API"]
-    API --> APP["Explicit Chat Workflow"]
-    APP --> AGENT["Eino Graph / ReAct Agent"]
+    API --> APP["Native Eino compose.Graph"]
+    APP --> AGENT["Eino ReAct Agent"]
     SKILLS["Business Skills<br/>(descriptive)"] -. explains .-> AGENT
     AGENT --> CTX["Context Builder"]
     AGENT --> PROMPT["Prompt Renderer"]
@@ -47,7 +47,7 @@ Dependencies point inward: adapters depend on core interfaces, never the reverse
 
 ## 3. Agent Execution Model
 
-The runtime selects either the deterministic runner or a bounded Eino ReAct Graph while preserving the same `AgentRunner`, `AgentInput`, and `AgentOutput` boundary.
+The native outer Chat graph selects either the deterministic runner or a bounded Eino ReAct Agent while preserving the same `AgentRunner`, `AgentInput`, and `AgentOutput` boundary.
 
 ```mermaid
 flowchart TD
@@ -79,23 +79,25 @@ The current Agent layer uses:
 
 WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools. Model-produced evidence is never trusted directly: only IDs found in actual `ToolResult` records can support conclusions or inferences.
 
-### 3.1 Explicit Chat Workflow
+### 3.1 Native Eino Chat Graph
 
-The application wraps the existing Agent runner with a thin, sequential workflow. This is an orchestration boundary, not a replacement Agent graph:
+The application compiles and invokes `compose.Graph[chat.Command, chat.Result]`. Its typed native Eino nodes are:
 
 ```text
 workflow.chat
-├── graph.load_context
-├── graph.build_agent_input
+├── graph.load_session_context
+├── graph.load_long_term_memory
+├── graph.build_prompt_input
+├── graph.render_prompt_template
 ├── graph.run_react_agent
-├── graph.collect_evidence
-├── graph.persist_memory
-└── graph.build_response
+├── graph.collect_tool_evidence
+├── graph.persist_session_memory
+└── graph.build_chat_response
 ```
 
-`graph.run_react_agent` delegates unchanged to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer; the collect node makes that completed boundary observable without changing the response schema. Session failures retain the existing single-turn degradation behavior.
+`graph.render_prompt_template` calls the native Eino `DefaultChatTemplate`. `graph.run_react_agent` delegates to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer. Session failures retain the existing single-turn degradation behavior.
 
-Using a small internal workflow avoids forcing Redis persistence and HTTP response construction into Eino's model/tool graph. Eino remains responsible for PromptTemplate rendering, ChatModel invocation, ReAct iteration, and Tool Calling.
+MySQL durable Agent memory is not implemented, so `graph.load_long_term_memory` is an explicit pass-through returning no memories. It does not query MySQL or imply a delivered feature. Eino callbacks instrument graph and node lifecycle without recording prompt or response content.
 
 ### 3.2 Tool, Skill, and Runtime Boundaries
 
@@ -120,15 +122,15 @@ sequenceDiagram
 
     C->>H: POST /api/v1/chat
     H->>A: Validated command
-    A->>R: graph.load_context
-    A->>G: graph.build_agent_input / graph.run_react_agent
+    A->>R: graph.load_session_context
+    A->>G: graph.render_prompt_template / graph.run_react_agent
     loop Bounded decision loop
         G->>T: Execute typed tool request
         T-->>G: Evidence or structured error
     end
-    G-->>A: graph.collect_evidence
-    A->>R: graph.persist_memory
-    A-->>H: graph.build_response
+    G-->>A: graph.collect_tool_evidence
+    A->>R: graph.persist_session_memory
+    A-->>H: graph.build_chat_response
     H-->>C: Answer, request_id, and trace_id
 ```
 
@@ -289,22 +291,24 @@ Implemented trace hierarchy:
 http POST /api/v1/chat
 └── chat.execute
     └── workflow.chat
-        ├── graph.load_context
+        ├── graph.load_session_context
         │   └── session.load_context
-        ├── graph.build_agent_input
+        ├── graph.load_long_term_memory
+        ├── graph.build_prompt_input
+        ├── graph.render_prompt_template
         ├── graph.run_react_agent
         │   └── agent.run / agent.eino.run
         │       └── tool.runtime.execute
         │           ├── tool.runtime.fallback
         │           └── tool.runtime.timeout
-        ├── graph.collect_evidence
-        ├── graph.persist_memory
+        ├── graph.collect_tool_evidence
+        ├── graph.persist_session_memory
         │   └── session.persist_context
         │       └── session.update_summary
-        └── graph.build_response
+        └── graph.build_chat_response
 ```
 
-When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, and `agent.output.parse` spans. Request-time model failure also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
+`workflow.chat` and its `graph.*` children are created by Eino callback lifecycle hooks. When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, and `agent.output.parse` spans. Request-time model failure also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.
 
 Attributes contain only operational values such as request/session/document IDs, component name, duration, status, result count, tool name, case type, and summary version. User questions, answer bodies, retrieved content, raw logs, credentials, and raw backend errors do not belong in span attributes or events.
 

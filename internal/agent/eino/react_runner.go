@@ -97,6 +97,37 @@ func NewReActRunner(
 }
 
 func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, error) {
+	runContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
+	defer cancel()
+	messages, err := r.RenderPrompt(runContext, input)
+	if err != nil {
+		return AgentOutput{}, err
+	}
+	return r.runPrepared(runContext, input, messages)
+}
+
+func (r *ReActRunner) RenderPrompt(
+	ctx context.Context,
+	input AgentInput,
+) ([]*schema.Message, error) {
+	return r.prompt.Build(ctx, input)
+}
+
+func (r *ReActRunner) RunPrepared(
+	ctx context.Context,
+	input AgentInput,
+	messages []*schema.Message,
+) (AgentOutput, error) {
+	runContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
+	defer cancel()
+	return r.runPrepared(runContext, input, messages)
+}
+
+func (r *ReActRunner) runPrepared(
+	ctx context.Context,
+	input AgentInput,
+	messages []*schema.Message,
+) (AgentOutput, error) {
 	ctx, span := observability.StartSpan(
 		ctx,
 		"agent.eino.run",
@@ -110,16 +141,8 @@ func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, e
 	)
 	defer span.End()
 
-	runContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
-	defer cancel()
-	messages, err := r.prompt.Build(runContext, input)
-	if err != nil {
-		observability.MarkError(span, "Agent prompt rendering failed")
-		return AgentOutput{}, err
-	}
-
 	futureOption, future := react.WithMessageFuture()
-	finalMessage, err := r.agent.Generate(runContext, messages, futureOption)
+	finalMessage, err := r.agent.Generate(ctx, messages, futureOption)
 	if err != nil {
 		observability.MarkError(span, "Eino ReAct execution failed")
 		return AgentOutput{}, fmt.Errorf("Eino ReAct execution failed")
@@ -137,7 +160,7 @@ func (r *ReActRunner) Run(ctx context.Context, input AgentInput) (AgentOutput, e
 	}
 
 	_, parseSpan := observability.StartSpan(
-		runContext,
+		ctx,
 		"agent.output.parse",
 		attribute.String("prompt_version", r.config.PromptVersion),
 	)
@@ -347,3 +370,4 @@ func (m *tracedToolCallingModel) WithTools(
 
 var _ model.ToolCallingChatModel = (*tracedToolCallingModel)(nil)
 var _ einotool.InvokableTool = (*agentTool)(nil)
+var _ PromptRenderingRunner = (*ReActRunner)(nil)

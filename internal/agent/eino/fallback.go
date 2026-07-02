@@ -3,6 +3,7 @@ package eino
 import (
 	"context"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"go.opentelemetry.io/otel/attribute"
@@ -22,8 +23,43 @@ func (r *FallbackRunner) Run(ctx context.Context, input AgentInput) (AgentOutput
 	if err == nil {
 		return output, nil
 	}
+	return r.runFallback(ctx, input, err)
+}
+
+func (r *FallbackRunner) RenderPrompt(
+	ctx context.Context,
+	input AgentInput,
+) ([]*schema.Message, error) {
+	renderer, ok := r.primary.(PromptRenderingRunner)
+	if !ok {
+		return nil, nil
+	}
+	return renderer.RenderPrompt(ctx, input)
+}
+
+func (r *FallbackRunner) RunPrepared(
+	ctx context.Context,
+	input AgentInput,
+	messages []*schema.Message,
+) (AgentOutput, error) {
+	renderer, ok := r.primary.(PromptRenderingRunner)
+	if !ok {
+		return r.Run(ctx, input)
+	}
+	output, err := renderer.RunPrepared(ctx, input, messages)
+	if err == nil {
+		return output, nil
+	}
+	return r.runFallback(ctx, input, err)
+}
+
+func (r *FallbackRunner) runFallback(
+	ctx context.Context,
+	input AgentInput,
+	primaryErr error,
+) (AgentOutput, error) {
 	if ctx.Err() != nil {
-		return AgentOutput{}, err
+		return AgentOutput{}, primaryErr
 	}
 	runtimemetrics.IncAgentFallback("llm_unavailable")
 
@@ -50,3 +86,5 @@ func (r *FallbackRunner) Run(ctx context.Context, input AgentInput) (AgentOutput
 	})
 	return output, nil
 }
+
+var _ PromptRenderingRunner = (*FallbackRunner)(nil)

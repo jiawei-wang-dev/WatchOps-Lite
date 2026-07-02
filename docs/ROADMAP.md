@@ -367,12 +367,14 @@ Verified:
 
 Exit status: complete. WatchOps-Lite enhanced demo is fully verified locally.
 
-## Backend Convergence: Explicit Eino Workflow and Business Skills — Completed
+## Backend Convergence: Native Eino Graph and Business Skills — Completed
 
 Delivered:
 
-- Thin, traced Chat workflow around the existing Eino ReAct runner
-- Explicit context, Agent-input, ReAct, evidence, memory, and response nodes
+- Compiled `compose.Graph[chat.Command, chat.Result]` around the existing Eino ReAct runner
+- Native typed nodes for context, prompt rendering, ReAct, evidence, memory, and response construction
+- Eino callback lifecycle tracing for the graph and each node
+- Native Eino PromptTemplate rendering before Eino ReAct execution
 - Lightweight business Skill definitions for metrics, logs, traces, runbooks, and checkout diagnosis
 - Stable bad-case reason constants for feedback/eval metadata
 - Clear Tool vs Skill vs Tool Runtime documentation
@@ -380,10 +382,10 @@ Delivered:
 
 Constraints preserved:
 
-- no public API, evidence schema, PromptTemplate, ReAct graph, Tool Runtime, or demo-script changes
+- no public API, evidence schema, ReAct behavior, Tool Runtime, or demo-script changes
 - no planner, policy learning, correlation engine, MCP, UEM, skill registry, dynamic discovery, or external dependency
 
-Exit status: complete. Backend orchestration is explicit and interview-friendly without introducing a second Agent execution system.
+Exit status: complete. Backend orchestration uses native Eino Graph, PromptTemplate, ReAct, Tools, and callbacks without introducing a custom Agent framework.
 
 ## Milestone Dependencies
 

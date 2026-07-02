@@ -159,6 +159,27 @@ func TestFallbackRunnerUsesDeterministicRunnerOnModelFailure(t *testing.T) {
 	}
 }
 
+func TestFallbackRunnerUsesDeterministicRunnerAfterPreparedFailure(t *testing.T) {
+	tools, _ := BuildMockTools()
+	primary := &preparedRunnerStub{err: errors.New("model unavailable")}
+	runner := NewFallbackRunner(primary, NewDeterministicRunner(tools))
+	input := validAgentInput()
+
+	messages, err := runner.RenderPrompt(context.Background(), input)
+	if err != nil {
+		t.Fatalf("RenderPrompt() error = %v", err)
+	}
+	output, err := runner.RunPrepared(context.Background(), input, messages)
+	if err != nil {
+		t.Fatalf("RunPrepared() error = %v", err)
+	}
+	if !primary.preparedCalled ||
+		output.Metadata["fallback_used"] != true ||
+		!hasLimitation(output.Limitations, "AGENT_LLM_FALLBACK") {
+		t.Fatalf("primary=%#v output=%#v", primary, output)
+	}
+}
+
 func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 	builder, err := NewPromptBuilder(PromptVersionV1)
 	if err != nil {
@@ -170,6 +191,9 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		Role:    session.RoleUser,
 		Content: "The previous alert mentioned timeouts.",
 	}}
+	input.LongTermMemories = []string{"Checkout is owned by the payments team."}
+	input.DiagnosticSkills = []string{"metric_inspection: inspect service signals"}
+	input.RetrievedKnowledge = []string{"No knowledge is preloaded; use search_knowledge."}
 
 	messages, err := builder.Build(context.Background(), input)
 	if err != nil {
@@ -183,6 +207,9 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		"service reliability analysis assistant",
 		"Earlier checkout investigation",
 		"The previous alert mentioned timeouts.",
+		"Checkout is owned by the payments team.",
+		"metric_inspection: inspect service signals",
+		"No knowledge is preloaded; use search_knowledge.",
 		input.CurrentMessage,
 		input.TimeContext.From,
 		input.TimeContext.To,
@@ -217,6 +244,31 @@ func TestStructuredParserRejectsInventedEvidenceIDs(t *testing.T) {
 type runnerStub struct {
 	output AgentOutput
 	err    error
+}
+
+type preparedRunnerStub struct {
+	err            error
+	preparedCalled bool
+}
+
+func (r *preparedRunnerStub) Run(context.Context, AgentInput) (AgentOutput, error) {
+	return AgentOutput{}, r.err
+}
+
+func (r *preparedRunnerStub) RenderPrompt(
+	context.Context,
+	AgentInput,
+) ([]*schema.Message, error) {
+	return []*schema.Message{schema.UserMessage("prepared")}, nil
+}
+
+func (r *preparedRunnerStub) RunPrepared(
+	context.Context,
+	AgentInput,
+	[]*schema.Message,
+) (AgentOutput, error) {
+	r.preparedCalled = true
+	return AgentOutput{}, r.err
 }
 
 func (r *runnerStub) Run(context.Context, AgentInput) (AgentOutput, error) {

@@ -40,6 +40,15 @@ Session summary:
 Recent messages:
 {{.recent_messages}}
 
+Long-term memories:
+{{.long_term_memories}}
+
+Diagnostic skill cards:
+{{.diagnostic_skills}}
+
+Preloaded knowledge:
+{{.retrieved_knowledge}}
+
 Current message:
 {{.current_message}}
 
@@ -99,13 +108,31 @@ func (b *PromptBuilder) Build(ctx context.Context, input AgentInput) ([]*schema.
 		observability.MarkError(span, "Agent prompt rendering failed")
 		return nil, fmt.Errorf("encode recent messages: %w", err)
 	}
+	longTermMemories, err := json.Marshal(input.LongTermMemories)
+	if err != nil {
+		observability.MarkError(span, "Agent prompt rendering failed")
+		return nil, fmt.Errorf("encode long-term memories: %w", err)
+	}
+	diagnosticSkills, err := json.Marshal(input.DiagnosticSkills)
+	if err != nil {
+		observability.MarkError(span, "Agent prompt rendering failed")
+		return nil, fmt.Errorf("encode diagnostic skills: %w", err)
+	}
+	retrievedKnowledge, err := json.Marshal(input.RetrievedKnowledge)
+	if err != nil {
+		observability.MarkError(span, "Agent prompt rendering failed")
+		return nil, fmt.Errorf("encode retrieved knowledge: %w", err)
+	}
 	messages, err := b.template.Format(ctx, map[string]any{
-		"prompt_version":  b.version,
-		"session_summary": string(summary),
-		"recent_messages": string(recentMessages),
-		"current_message": input.CurrentMessage,
-		"time_from":       input.TimeContext.From,
-		"time_to":         input.TimeContext.To,
+		"prompt_version":      b.version,
+		"session_summary":     string(summary),
+		"recent_messages":     string(recentMessages),
+		"long_term_memories":  string(longTermMemories),
+		"diagnostic_skills":   string(diagnosticSkills),
+		"retrieved_knowledge": string(retrievedKnowledge),
+		"current_message":     input.CurrentMessage,
+		"time_from":           input.TimeContext.From,
+		"time_to":             input.TimeContext.To,
 	})
 	if err != nil {
 		observability.MarkError(span, "Agent prompt rendering failed")
