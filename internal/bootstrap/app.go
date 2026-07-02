@@ -124,9 +124,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cancel()
 	}
 
+	var metricsStore retrievalmetrics.Store
 	var metricsSearcher *retrievalmetrics.Service
 	if strings.EqualFold(cfg.Metrics.Backend, "prometheus") {
-		metricsStore, err := retrievalmetrics.NewPrometheusClient(
+		store, err := retrievalmetrics.NewPrometheusClient(
 			cfg.Metrics.BaseURL,
 			cfg.Metrics.RequestTimeout.Value(),
 		)
@@ -136,6 +137,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			}
 			return nil, err
 		}
+		metricsStore = store
 		metricsSearcher, err = retrievalmetrics.NewService(metricsStore, cfg.Metrics.Queries)
 		if err != nil {
 			if elasticsearchClient != nil {
@@ -177,6 +179,11 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		MetricsFallbackToMock: cfg.Metrics.FallbackToMock,
 		MetricsTimeout:        cfg.Metrics.RequestTimeout.Value(),
 		MetricsSearcher:       metricsSearcher,
+		AlertsBackend:         cfg.Metrics.Backend,
+		AlertsBaseURL:         cfg.Metrics.BaseURL,
+		AlertsFallbackToMock:  cfg.Metrics.FallbackToMock,
+		AlertsTimeout:         cfg.Metrics.RequestTimeout.Value(),
+		AlertsStore:           metricsStore,
 		TracesBackend:         cfg.Traces.Backend,
 		TracesBaseURL:         cfg.Traces.BaseURL,
 		TracesDefaultService:  cfg.Traces.DefaultService,

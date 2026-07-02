@@ -99,7 +99,7 @@ func TestReActRunnerCallsEinoToolAndMapsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if len(chatModel.boundTools) != 4 || chatModel.callCount != 2 {
+	if len(chatModel.boundTools) != 6 || chatModel.callCount != 2 {
 		t.Fatalf("bound tools=%d model calls=%d", len(chatModel.boundTools), chatModel.callCount)
 	}
 	if len(output.Evidence) != 1 ||

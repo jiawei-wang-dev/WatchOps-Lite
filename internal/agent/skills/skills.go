@@ -6,9 +6,11 @@
 package skills
 
 import (
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/alerts"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/logs"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/metrics"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/topology"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/traces"
 )
 
@@ -71,12 +73,14 @@ func RunbookLookupSkill() Skill {
 func CheckoutIncidentDiagnosisSkill() Skill {
 	return Definition{
 		name:        "checkout_incident_diagnosis",
-		description: "for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance.",
+		description: "for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance; optionally use query_alerts and get_service_topology for alert and dependency context.",
 		toolNames: []string{
 			metrics.Name,
 			logs.Name,
 			traces.Name,
 			knowledge.Name,
+			alerts.Name,
+			topology.Name,
 		},
 	}
 }

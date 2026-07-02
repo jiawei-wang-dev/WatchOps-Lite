@@ -233,7 +233,7 @@ func TestDiagnosticSkillCardsAreBoundedPromptGuidance(t *testing.T) {
 		"log_investigation: use query_logs to inspect errors, timeouts, request IDs, and exception messages.",
 		"trace_inspection: use query_traces to inspect slow spans, dependency paths, and bottlenecks.",
 		"runbook_lookup: use search_knowledge to retrieve known runbooks and mitigation steps.",
-		"checkout_incident_diagnosis: for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance.",
+		"checkout_incident_diagnosis: for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance; optionally use query_alerts and get_service_topology for alert and dependency context.",
 	}
 
 	if len(cards) != len(expected) {

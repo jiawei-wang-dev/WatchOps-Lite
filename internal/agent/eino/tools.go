@@ -9,10 +9,12 @@ import (
 	einotool "github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/alerts"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/logs"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/metrics"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/topology"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/traces"
 )
 
@@ -28,6 +30,12 @@ type MockToolsConfig struct {
 	MetricsFallbackToMock bool
 	MetricsTimeout        time.Duration
 	MetricsSearcher       metrics.Searcher
+	AlertsBackend         string
+	AlertsBaseURL         string
+	AlertsFallbackToMock  bool
+	AlertsTimeout         time.Duration
+	AlertsStore           alerts.Store
+	TopologyTimeout       time.Duration
 	TracesBackend         string
 	TracesBaseURL         string
 	TracesDefaultService  string
@@ -81,6 +89,32 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		return nil, fmt.Errorf("build %s tool: %w", metrics.Name, err)
 	}
 
+	alertsRuntime := alerts.NewMockTool(config.AlertsTimeout).Runtime()
+	alertsBackend := config.AlertsBackend
+	if alertsBackend == "" {
+		alertsBackend = config.MetricsBackend
+	}
+	alertsFallbackToMock := config.AlertsFallbackToMock
+	if !alertsFallbackToMock {
+		alertsFallbackToMock = config.MetricsFallbackToMock
+	}
+	if strings.EqualFold(alertsBackend, "prometheus") {
+		alertsRuntime = alerts.NewSearchTool(config.AlertsStore, alerts.SearchToolConfig{
+			Backend:        alertsBackend,
+			BaseURL:        config.AlertsBaseURL,
+			FallbackToMock: alertsFallbackToMock,
+			Timeout:        config.AlertsTimeout,
+		}).Runtime()
+	}
+	alertsTool, err := toolutils.InferTool(
+		alerts.Name,
+		"Query active or recent alert signals for a service.",
+		runtimeExecutor[alerts.Input](alertsRuntime),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build %s tool: %w", alerts.Name, err)
+	}
+
 	tracesRuntime := traces.NewMockTool(config.TracesTimeout).Runtime()
 	if strings.EqualFold(config.TracesBackend, "jaeger") {
 		tracesRuntime = traces.NewSearchTool(config.TracesSearcher, traces.SearchToolConfig{
@@ -117,11 +151,23 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		return nil, fmt.Errorf("build %s tool: %w", knowledge.Name, err)
 	}
 
+	topologyRuntime := topology.NewMockTool(config.TopologyTimeout).Runtime()
+	topologyTool, err := toolutils.InferTool(
+		topology.Name,
+		"Get service dependency topology context for an on-call investigation.",
+		runtimeExecutor[topology.Input](topologyRuntime),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build %s tool: %w", topology.Name, err)
+	}
+
 	return []einotool.InvokableTool{
 		logsTool,
 		metricsTool,
+		alertsTool,
 		tracesTool,
 		knowledgeTool,
+		topologyTool,
 	}, nil
 }
 

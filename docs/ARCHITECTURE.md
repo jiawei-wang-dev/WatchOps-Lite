@@ -17,6 +17,8 @@ flowchart LR
     HARNESS --> METRICS["Metrics Adapter"]
     HARNESS --> TRACES["Traces Adapter"]
     HARNESS --> RAG["Knowledge Search"]
+    HARNESS --> ALERTS["Alerts Context"]
+    HARNESS --> TOPOLOGY["Service Topology"]
     CTX --> REDIS[("Redis")]
     CTX --> MYSQL[("MySQL confirmed memory")]
     RAG --> ES[("Elasticsearch")]
@@ -103,11 +105,13 @@ workflow.chat
 
 | Concept | Responsibility | Explicit non-responsibility |
 | --- | --- | --- |
-| Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, or knowledge retrieval | Multi-step incident diagnosis |
+| Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, knowledge retrieval, alert lookup, or service topology lookup | Multi-step incident diagnosis |
 | Skill | Named business diagnostic routine rendered as bounded Eino PromptTemplate guidance | Registration, discovery, planning, or execution |
 | Tool Runtime | Schema-safe execution, timeout, fallback, errors, normalization, and tracing | Agent intent selection |
 
 The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge inside the Agent prompt. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path, and Tool Runtime remains the only execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, dynamic skill runtime, and evidence-correlation engine.
+
+The four core evidence tools remain `query_metrics`, `query_logs`, `query_traces`, and `search_knowledge`. `query_alerts` and `get_service_topology` are auxiliary OnCall context tools. They use the same Eino tool registration path and Tool Runtime wrapper, but they are not a planner, policy layer, remediation engine, or correlation engine.
 
 ## 4. Chat Data Flow
 
@@ -269,6 +273,14 @@ If Prometheus is unavailable, configured mock fallback returns explicit `METRICS
 The tool maps each selected span to an `EvidenceItem` with source `jaeger`, trace resource identity, bounded summary content, and trace ID, span ID, operation, service, duration, error, and start-time metadata. Raw Jaeger responses and span tags are not copied into evidence or telemetry.
 
 If Jaeger is unavailable, configured mock fallback returns explicit `TRACES_FALLBACK` warning metadata. With fallback disabled, the tool returns `TOOL_DEPENDENCY_UNAVAILABLE`. An available Jaeger instance with no matching spans returns `TRACES_NO_DATA`, not invented evidence.
+
+### 7.6 Auxiliary OnCall Context Tools
+
+`query_alerts` retrieves active or recent alert signals for a service. When Prometheus is configured, it queries the standard `ALERTS` series with bounded service and optional severity labels. If Prometheus alert data is unavailable and fallback is enabled, Tool Runtime returns deterministic `alerts` evidence with explicit fallback metadata.
+
+`get_service_topology` returns deterministic demo dependency context for services such as checkout and payment. It does not require a graph database or new infrastructure. Its `topology` evidence helps the Agent understand upstream/downstream relationships before choosing which core evidence to inspect.
+
+Both auxiliary tools keep the same ToolResult, ToolError, EvidenceItem, timeout, fallback, and tracing contracts as the core tools.
 
 ## 8. Persistence
 

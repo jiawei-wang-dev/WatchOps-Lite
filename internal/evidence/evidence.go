@@ -12,6 +12,8 @@ const (
 	SourceMetrics   Source = "metrics"
 	SourceTraces    Source = "traces"
 	SourceKnowledge Source = "knowledge"
+	SourceAlerts    Source = "alerts"
+	SourceTopology  Source = "topology"
 )
 
 const (
@@ -19,6 +21,8 @@ const (
 	TypeMetricSample   = "metric_sample"
 	TypeTraceSpan      = "trace_span"
 	TypeKnowledgeChunk = "knowledge_chunk"
+	TypeAlertSignal    = "alert_signal"
+	TypeTopology       = "service_topology"
 )
 
 type TimeRange struct {
@@ -69,7 +73,7 @@ func Validate(item Item) error {
 		return errors.New("evidence id is required")
 	}
 	switch item.Source {
-	case SourceLogs, SourceMetrics, SourceTraces, SourceKnowledge:
+	case SourceLogs, SourceMetrics, SourceTraces, SourceKnowledge, SourceAlerts, SourceTopology:
 	default:
 		return errors.New("evidence source is invalid")
 	}
@@ -92,6 +96,10 @@ func defaultType(source Source) string {
 		return TypeTraceSpan
 	case SourceKnowledge:
 		return TypeKnowledgeChunk
+	case SourceAlerts:
+		return TypeAlertSignal
+	case SourceTopology:
+		return TypeTopology
 	default:
 		return "evidence"
 	}

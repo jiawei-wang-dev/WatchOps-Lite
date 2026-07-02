@@ -21,6 +21,29 @@ func TestNormalizeAppliesSourceTypeAndTraceID(t *testing.T) {
 	}
 }
 
+func TestNormalizeAppliesAuxiliarySourceDefaults(t *testing.T) {
+	tests := []struct {
+		source       Source
+		expectedType string
+	}{
+		{SourceAlerts, TypeAlertSignal},
+		{SourceTopology, TypeTopology},
+	}
+
+	for _, test := range tests {
+		item := Normalize(Item{
+			ID:      "evidence-1",
+			Content: "auxiliary context",
+		}, test.source)
+		if item.Source != test.source || item.Type != test.expectedType {
+			t.Fatalf("normalized item = %#v, want source=%s type=%s", item, test.source, test.expectedType)
+		}
+		if err := Validate(item); err != nil {
+			t.Fatalf("Validate() error = %v", err)
+		}
+	}
+}
+
 func TestValidateRejectsUnknownSource(t *testing.T) {
 	err := Validate(Item{
 		ID:      "evidence-1",

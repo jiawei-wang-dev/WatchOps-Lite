@@ -14,10 +14,12 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/alerts"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/logs"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/metrics"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/topology"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/traces"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -149,7 +151,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 	if len(calls) == 0 {
 		output.Limitations = append(output.Limitations, Limitation{
 			Code:    "MORE_CONTEXT_REQUIRED",
-			Message: "No deterministic tool route matched the request; provide an error-rate, latency, trace, or runbook question.",
+			Message: "No deterministic tool route matched the request; provide an error-rate, latency, trace, runbook, alert, or topology question.",
 		})
 		return output, nil
 	}
@@ -299,7 +301,29 @@ func (r *DeterministicRunner) findTool(ctx context.Context, name string) (einoto
 func planToolCalls(input AgentInput) []plannedToolCall {
 	message := strings.ToLower(strings.TrimSpace(input.CurrentMessage))
 	service := inferService(message)
-	calls := make([]plannedToolCall, 0, 3)
+	calls := make([]plannedToolCall, 0, 4)
+
+	if strings.Contains(message, "alert") || strings.Contains(message, "firing") {
+		calls = append(calls, plannedToolCall{
+			name: alerts.Name,
+			arguments: alerts.Input{
+				Service: service,
+				Window:  "30m",
+			},
+		})
+	}
+
+	if strings.Contains(message, "topology") ||
+		strings.Contains(message, "dependency") ||
+		strings.Contains(message, "dependencies") {
+		calls = append(calls, plannedToolCall{
+			name: topology.Name,
+			arguments: topology.Input{
+				Service: service,
+				Depth:   1,
+			},
+		})
+	}
 
 	if strings.Contains(message, "error rate") {
 		calls = append(calls,
@@ -383,7 +407,7 @@ func inferService(message string) string {
 
 	for index, word := range words {
 		switch word {
-		case "error", "slow", "trace", "latency":
+		case "alert", "firing", "topology", "dependency", "dependencies", "error", "slow", "trace", "latency":
 			if index > 0 && isServiceCandidate(words[index-1]) {
 				return words[index-1]
 			}
@@ -447,6 +471,10 @@ func conclusionFor(toolName string, evidenceIDs []string) Conclusion {
 		text = "Trace evidence identifies the slowest or error-marked spans."
 	case knowledge.Name:
 		text = "Knowledge evidence contains a relevant diagnostic procedure."
+	case alerts.Name:
+		text = "Alert evidence reports active or recent alert signals for the service."
+	case topology.Name:
+		text = "Topology evidence describes service dependencies relevant to the incident."
 	}
 	return Conclusion{Text: text, EvidenceIDs: evidenceIDs}
 }
@@ -462,6 +490,10 @@ func recommendationFor(toolName string, evidenceIDs []string) Recommendation {
 		text = "Inspect the cited slow span and its downstream dependency."
 	case knowledge.Name:
 		text = "Follow the cited runbook steps and verify each action against live evidence."
+	case alerts.Name:
+		text = "Compare the alert state with metrics, logs, and traces before escalating."
+	case topology.Name:
+		text = "Use the dependency context to decide which upstream or downstream evidence to inspect next."
 	}
 	return Recommendation{Text: text, EvidenceIDs: evidenceIDs}
 }

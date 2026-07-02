@@ -19,6 +19,8 @@ flowchart LR
     T --> P["query_metrics"]
     T --> R["query_traces"]
     T --> K["search_knowledge"]
+    T --> AL["query_alerts<br/>(auxiliary)"]
+    T --> TP["get_service_topology<br/>(auxiliary)"]
     L --> ES
     P --> PROM[("Prometheus")]
     R --> J
@@ -39,7 +41,8 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Compiled native Eino Graph for Chat context, prompt, Agent, evidence, memory, and response orchestration
 - Lightweight on-call Skills rendered into the Agent prompt as bounded diagnostic guidance
 - Deterministic Agent fallback that requires no API key
-- `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
+- Core evidence tools: `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
+- Auxiliary OnCall context tools: `query_alerts` and `get_service_topology`
 - Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
@@ -66,9 +69,9 @@ load session context -> load optional long-term memory -> build prompt input
 
 The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
-A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
+A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, knowledge search, alert lookup, or service topology lookup. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 
-Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
+Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing for both core and auxiliary tools. The four core evidence tools remain the main reliability-analysis story; `query_alerts` and `get_service_topology` provide optional OnCall context. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 
 See [the native Eino refactor plan](docs/eino-native-refactor-plan.md) for the pinned API audit and migration boundaries.
 

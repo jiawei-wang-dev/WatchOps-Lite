@@ -17,7 +17,7 @@ func TestDiagnosticSkillsDescribeExistingTools(t *testing.T) {
 		{RunbookLookupSkill(), []string{"search_knowledge"}},
 		{
 			CheckoutIncidentDiagnosisSkill(),
-			[]string{"query_metrics", "query_logs", "query_traces", "search_knowledge"},
+			[]string{"query_metrics", "query_logs", "query_traces", "search_knowledge", "query_alerts", "get_service_topology"},
 		},
 	}
 
@@ -44,5 +44,27 @@ func TestToolNamesReturnsCopy(t *testing.T) {
 
 	if skill.ToolNames()[0] != "query_metrics" {
 		t.Fatalf("ToolNames() exposed mutable skill state")
+	}
+}
+
+func TestAuxiliaryToolsOnlyAppearInCheckoutSkill(t *testing.T) {
+	coreSkills := []Skill{
+		MetricInspectionSkill(),
+		LogInvestigationSkill(),
+		TraceInspectionSkill(),
+		RunbookLookupSkill(),
+	}
+	for _, skill := range coreSkills {
+		description := skill.Description()
+		if strings.Contains(description, "query_alerts") ||
+			strings.Contains(description, "get_service_topology") {
+			t.Fatalf("%s description should not mention auxiliary tools: %q", skill.Name(), description)
+		}
+	}
+
+	checkout := CheckoutIncidentDiagnosisSkill()
+	if !strings.Contains(checkout.Description(), "optionally use query_alerts") ||
+		!strings.Contains(checkout.Description(), "get_service_topology") {
+		t.Fatalf("checkout description = %q, want optional auxiliary context", checkout.Description())
 	}
 }

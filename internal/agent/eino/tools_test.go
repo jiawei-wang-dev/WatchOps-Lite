@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	einotool "github.com/cloudwego/eino/components/tool"
 	retrievallogs "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/logs"
 	retrievalmetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/metrics"
 	retrievaltraces "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/traces"
@@ -67,10 +68,12 @@ func TestBuildMockTools(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"query_logs":       false,
-		"query_metrics":    false,
-		"query_traces":     false,
-		"search_knowledge": false,
+		"query_logs":           false,
+		"query_metrics":        false,
+		"query_alerts":         false,
+		"query_traces":         false,
+		"search_knowledge":     false,
+		"get_service_topology": false,
 	}
 	if len(tools) != len(expected) {
 		t.Fatalf("tool count = %d, want %d", len(tools), len(expected))
@@ -98,6 +101,71 @@ func TestBuildMockTools(t *testing.T) {
 			t.Fatalf("tool %q was not assembled", name)
 		}
 	}
+}
+
+func TestEinoAuxiliaryToolInvocationReturnsNormalizedResult(t *testing.T) {
+	tools, err := BuildMockTools()
+	if err != nil {
+		t.Fatalf("BuildMockTools() error = %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		arguments  string
+		sourceType string
+	}{
+		{
+			name:       "query_alerts",
+			sourceType: "alerts",
+			arguments:  `{"service":"checkout","severity":"warning","window":"30m"}`,
+		},
+		{
+			name:       "get_service_topology",
+			sourceType: "topology",
+			arguments:  `{"service":"checkout","depth":1}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assembledTool, ok := findTestTool(t, tools, test.name)
+			if !ok {
+				t.Fatalf("%s tool not found", test.name)
+			}
+			output, err := assembledTool.InvokableRun(context.Background(), test.arguments)
+			if err != nil {
+				t.Fatalf("InvokableRun() error = %v", err)
+			}
+			var result common.ToolResult
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("decode tool output: %v", err)
+			}
+			if !result.Success ||
+				result.Tool != test.name ||
+				len(result.Evidence) != 1 ||
+				result.Evidence[0].SourceType != test.sourceType {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func findTestTool(
+	t *testing.T,
+	tools []einotool.InvokableTool,
+	name string,
+) (einotool.InvokableTool, bool) {
+	t.Helper()
+	for _, assembledTool := range tools {
+		info, infoErr := assembledTool.Info(context.Background())
+		if infoErr != nil {
+			t.Fatalf("tool Info() error = %v", infoErr)
+		}
+		if info.Name == name {
+			return assembledTool, true
+		}
+	}
+	return nil, false
 }
 
 func TestEinoToolInvocationReturnsNormalizedResult(t *testing.T) {

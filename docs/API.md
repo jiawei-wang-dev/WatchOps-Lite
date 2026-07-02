@@ -146,9 +146,11 @@ The actual error-rate route calls both `query_metrics` and `query_logs`; the sho
 | `error rate` | `query_metrics`, `query_logs` |
 | `trace` or `slow` | `query_traces` |
 | `runbook`, `playbook`, `knowledge`, `how should`, or `how do` | `search_knowledge` |
+| `alert` or `firing` | `query_alerts` |
+| `topology`, `dependency`, or `dependencies` | `get_service_topology` |
 | No recognized phrase | No tool call; `MORE_CONTEXT_REQUIRED` limitation |
 
-With `agent.mode=eino_react` and complete LLM configuration, Eino's ReAct Graph exposes the same four tools to the configured OpenAI-compatible ChatModel. The model may select tools iteratively within the configured timeout and maximum-iteration bound.
+With `agent.mode=eino_react` and complete LLM configuration, Eino's ReAct Graph exposes the four core tools plus the two auxiliary OnCall context tools to the configured OpenAI-compatible ChatModel. The model may select tools iteratively within the configured timeout and maximum-iteration bound.
 
 Eino responses include metadata such as:
 

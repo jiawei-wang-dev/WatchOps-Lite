@@ -166,7 +166,7 @@ Delivered:
 
 - OpenAI-compatible Eino `ToolCallingChatModel`
 - Versioned `watchops_agent_v1` Eino PromptTemplate
-- Bounded Eino ReAct Graph using the four existing tools
+- Bounded Eino ReAct Graph using the four core evidence tools
 - Collection and normalization of actual `ToolResult` messages
 - Structured final-output parser with evidence-ID allowlisting
 - Deterministic startup and request-time fallback
@@ -179,7 +179,25 @@ Exit criteria:
 - Missing configuration and runtime model failure do not break Chat.
 - The deterministic runner remains independently testable.
 
-Exit status: complete. Multi-agent workflows, planning agents, LLM session summarization, automatic eval execution, and advanced token/cost budgets remain deferred.
+Exit status: complete. Multi-agent workflows, planning agents, automatic remediation, and advanced token/cost budgets remain deferred.
+
+## Enhancement: Auxiliary OnCall Tools — Completed
+
+Delivered:
+
+- `query_alerts` for Prometheus ALERTS-backed or deterministic alert context
+- `get_service_topology` for deterministic service dependency context
+- Eino tool registration through the existing tool assembly path
+- Tool Runtime timeout, fallback, structured error, evidence normalization, and tracing coverage
+- Diagnostic Skill card update that mentions auxiliary tools only as optional checkout context
+
+Exit criteria:
+
+- The four core evidence tools remain metrics, logs, traces, and knowledge.
+- The auxiliary tools do not introduce a planner, policy engine, correlation engine, MCP, UEM, or remediation workflow.
+- Existing Chat API response schema and demo scripts remain unchanged.
+
+Exit status: complete.
 
 ## Phase 9: MVP Demo Packaging — Completed
 

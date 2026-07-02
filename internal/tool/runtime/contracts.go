@@ -14,6 +14,8 @@ const (
 	SourceMetrics   = evidence.SourceMetrics
 	SourceTraces    = evidence.SourceTraces
 	SourceKnowledge = evidence.SourceKnowledge
+	SourceAlerts    = evidence.SourceAlerts
+	SourceTopology  = evidence.SourceTopology
 )
 
 const (
