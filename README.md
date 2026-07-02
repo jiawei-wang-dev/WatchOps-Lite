@@ -58,6 +58,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - MySQL upvote/downvote feedback, good/bad eval cases, and synchronous rule-based eval runs
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
 - Reproducible Docker Compose and scripted demo flow
+- Repeatable local Agent benchmark for latency, tool/evidence cost, fallback signals, and trace visibility
 
 ## Orchestration, Tools, and Skills
 
@@ -334,13 +335,22 @@ make verify
 
 `scripts/verify.sh` checks formatting, confirms `go mod tidy` is stable, runs all tests and vet checks, and validates the Git diff.
 
+Run the small local Agent benchmark against a running server:
+
+```bash
+make benchmark-agent
+```
+
+It prints a summary and writes ignored JSON and Markdown reports under `tmp/`. This is a local regression aid, not a production load test. See [the performance report guide](docs/performance-report.md).
+
 ## Project Layout
 
 ```text
 .
 ├── cmd/
 │   ├── server/                 # Application process entry point
-│   └── demo-metrics/           # Static local Prometheus scrape target
+│   ├── demo-metrics/           # Static local Prometheus scrape target
+│   └── agent-benchmark/        # Local black-box Agent benchmark CLI
 ├── configs/                    # Default and local-demo configuration
 ├── demo/                       # Safe runbook and deterministic log events
 ├── docs/                       # Architecture, API, roadmap, and ADRs

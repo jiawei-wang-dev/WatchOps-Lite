@@ -274,6 +274,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: Local Agent Benchmark — Completed
+
+Delivered:
+
+- Six versioned reliability-analysis cases covering metrics, logs, traces, knowledge, alerts, and topology
+- Lightweight black-box benchmark CLI and `scripts/benchmark_agent.sh`
+- `make benchmark-agent` convenience target
+- JSON and Markdown reports under the ignored local `tmp/` directory
+- Measurements for success rate, latency distribution, tool runs, evidence, detectable fallbacks, limitations, empty evidence, request/trace IDs, and one SSE final-answer check
+- Honest interpretation and limitations in `docs/performance-report.md`
+
+Exit criteria:
+
+- Existing Chat and SSE APIs, Eino graph/ReAct behavior, runtime controls, Evidence, memory, feedback/eval, and demo scripts remain unchanged.
+- The benchmark uses only existing public response fields and does not claim production throughput or readiness.
+- No frontend, new infrastructure, MCP, UEM, planner, policy engine, correlation engine, multi-agent system, or auto-remediation is introduced.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

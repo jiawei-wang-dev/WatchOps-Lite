@@ -1,0 +1,44 @@
+[
+  {
+    "id": "checkout_error_rate",
+    "session_id": "benchmark-checkout-error-rate",
+    "message": "Why is the checkout error rate high in the last 20 minutes?",
+    "expected_behavior": "Inspect checkout metrics and return evidence-backed conclusions or explicit limitations.",
+    "notes": "Exercises the primary metrics investigation path."
+  },
+  {
+    "id": "payment_timeout",
+    "session_id": "benchmark-payment-timeout",
+    "message": "Are payment timeouts causing checkout failures in the last 20 minutes?",
+    "expected_behavior": "Inspect relevant metrics and logs without asserting an unsupported root cause.",
+    "notes": "Exercises cross-tool diagnostic behavior."
+  },
+  {
+    "id": "slow_trace",
+    "session_id": "benchmark-slow-trace",
+    "message": "Analyze slow checkout traces from the last 20 minutes and identify the bottleneck.",
+    "expected_behavior": "Query traces and distinguish observed span evidence from inference.",
+    "notes": "Exercises the trace inspection path."
+  },
+  {
+    "id": "checkout_runbook",
+    "session_id": "benchmark-checkout-runbook",
+    "message": "Find the checkout incident runbook and summarize the recommended mitigation steps.",
+    "expected_behavior": "Search knowledge and cite retrieved runbook evidence.",
+    "notes": "Exercises knowledge retrieval."
+  },
+  {
+    "id": "checkout_alerts",
+    "session_id": "benchmark-checkout-alerts",
+    "message": "Check active checkout alerts for the last 20 minutes.",
+    "expected_behavior": "Use the alert context tool and report active signals or limitations.",
+    "notes": "Exercises the auxiliary alert tool."
+  },
+  {
+    "id": "checkout_topology",
+    "session_id": "benchmark-checkout-topology",
+    "message": "Show the checkout service topology and its relevant dependencies.",
+    "expected_behavior": "Use the topology context tool and report bounded dependency information.",
+    "notes": "Exercises the auxiliary topology tool."
+  }
+]

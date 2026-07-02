@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify eval-retrieval
+.PHONY: run test lint fmt verify eval-retrieval benchmark-agent
 
 CONFIG ?= configs/config.json
 
@@ -19,3 +19,6 @@ verify:
 
 eval-retrieval:
 	./scripts/eval_retrieval.sh
+
+benchmark-agent:
+	./scripts/benchmark_agent.sh
