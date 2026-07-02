@@ -37,7 +37,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Gin HTTP API with thin handlers, structured errors, request IDs, and graceful shutdown
 - Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
 - Compiled native Eino Graph for Chat context, prompt, Agent, evidence, memory, and response orchestration
-- Lightweight on-call Skills that describe existing tool combinations without adding another execution engine
+- Lightweight on-call Skills rendered into the Agent prompt as bounded diagnostic guidance
 - Deterministic Agent fallback that requires no API key
 - `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
 - Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
@@ -66,7 +66,7 @@ load session context -> load optional long-term memory -> build prompt input
 
 The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
-A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named on-call diagnostic routine that documents when one or more existing tools are useful. Skills do not register tools, discover plugins, or alter ReAct behavior.
+A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 
 Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 

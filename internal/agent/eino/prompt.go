@@ -43,7 +43,7 @@ Recent messages:
 Confirmed long-term memories:
 {{.confirmed_long_term_memories}}
 
-Diagnostic skill cards:
+Available diagnostic skills:
 {{.diagnostic_skills}}
 
 Preloaded knowledge:

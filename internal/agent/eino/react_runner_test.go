@@ -208,6 +208,7 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		"Earlier checkout investigation",
 		"The previous alert mentioned timeouts.",
 		"Checkout is owned by the payments team.",
+		"Available diagnostic skills:",
 		"metric_inspection: inspect service signals",
 		"No knowledge is preloaded; use search_knowledge.",
 		input.CurrentMessage,

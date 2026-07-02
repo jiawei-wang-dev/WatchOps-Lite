@@ -192,10 +192,9 @@ func diagnosticSkillCards() []string {
 	cards := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		cards = append(cards, fmt.Sprintf(
-			"%s: %s Tools: %s.",
+			"%s: %s",
 			definition.Name(),
 			definition.Description(),
-			strings.Join(definition.ToolNames(), ", "),
 		))
 	}
 	return cards

@@ -39,7 +39,7 @@ func (s Definition) ToolNames() []string {
 func MetricInspectionSkill() Skill {
 	return Definition{
 		name:        "metric_inspection",
-		description: "Inspect service rates, errors, saturation, and latency signals before forming an incident hypothesis.",
+		description: "use query_metrics to inspect error rate, latency, traffic, and saturation.",
 		toolNames:   []string{metrics.Name},
 	}
 }
@@ -47,7 +47,7 @@ func MetricInspectionSkill() Skill {
 func LogInvestigationSkill() Skill {
 	return Definition{
 		name:        "log_investigation",
-		description: "Inspect bounded service logs for errors, timeouts, and request-level details.",
+		description: "use query_logs to inspect errors, timeouts, request IDs, and exception messages.",
 		toolNames:   []string{logs.Name},
 	}
 }
@@ -55,7 +55,7 @@ func LogInvestigationSkill() Skill {
 func TraceInspectionSkill() Skill {
 	return Definition{
 		name:        "trace_inspection",
-		description: "Inspect distributed traces to locate slow or failed operations and dependency paths.",
+		description: "use query_traces to inspect slow spans, dependency paths, and bottlenecks.",
 		toolNames:   []string{traces.Name},
 	}
 }
@@ -63,7 +63,7 @@ func TraceInspectionSkill() Skill {
 func RunbookLookupSkill() Skill {
 	return Definition{
 		name:        "runbook_lookup",
-		description: "Retrieve operational procedures and mitigation guidance from the knowledge base.",
+		description: "use search_knowledge to retrieve known runbooks and mitigation steps.",
 		toolNames:   []string{knowledge.Name},
 	}
 }
@@ -71,7 +71,7 @@ func RunbookLookupSkill() Skill {
 func CheckoutIncidentDiagnosisSkill() Skill {
 	return Definition{
 		name:        "checkout_incident_diagnosis",
-		description: "Describe the checkout investigation sequence from service signals to logs, traces, and runbook guidance.",
+		description: "for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance.",
 		toolNames: []string{
 			metrics.Name,
 			logs.Name,

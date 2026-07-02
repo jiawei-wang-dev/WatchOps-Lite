@@ -9,7 +9,7 @@ flowchart LR
     U["SRE / Developer"] --> API["Gin HTTP API"]
     API --> APP["Native Eino compose.Graph"]
     APP --> AGENT["Eino ReAct Agent"]
-    SKILLS["Business Skills<br/>(descriptive)"] -. explains .-> AGENT
+    SKILLS["Business Skills<br/>(prompt guidance)"] -. explains .-> AGENT
     AGENT --> CTX["Context Builder"]
     AGENT --> PROMPT["Prompt Renderer"]
     AGENT --> HARNESS["Tool Harness"]
@@ -104,10 +104,10 @@ workflow.chat
 | Concept | Responsibility | Explicit non-responsibility |
 | --- | --- | --- |
 | Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, or knowledge retrieval | Multi-step incident diagnosis |
-| Skill | Named business diagnostic routine describing when existing tools are useful | Registration, discovery, planning, or execution |
+| Skill | Named business diagnostic routine rendered as bounded Eino PromptTemplate guidance | Registration, discovery, planning, or execution |
 | Tool Runtime | Schema-safe execution, timeout, fallback, errors, normalization, and tracing | Agent intent selection |
 
-The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path, and Tool Runtime remains the only execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, and evidence-correlation engine.
+The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge inside the Agent prompt. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path, and Tool Runtime remains the only execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, dynamic skill runtime, and evidence-correlation engine.
 
 ## 4. Chat Data Flow
 

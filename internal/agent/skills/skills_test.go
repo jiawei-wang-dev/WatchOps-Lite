@@ -2,6 +2,7 @@ package skills
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,12 @@ func TestDiagnosticSkillsDescribeExistingTools(t *testing.T) {
 	for _, test := range tests {
 		if test.skill.Name() == "" || test.skill.Description() == "" {
 			t.Fatalf("skill = %#v, want name and description", test.skill)
+		}
+		for _, tool := range test.tools {
+			if !strings.Contains(test.skill.Description(), tool) &&
+				test.skill.Name() != "checkout_incident_diagnosis" {
+				t.Fatalf("%s description = %q, want mention of %s", test.skill.Name(), test.skill.Description(), tool)
+			}
 		}
 		if got := test.skill.ToolNames(); !reflect.DeepEqual(got, test.tools) {
 			t.Fatalf("%s tools = %#v, want %#v", test.skill.Name(), got, test.tools)

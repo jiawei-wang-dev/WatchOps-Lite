@@ -226,6 +226,33 @@ func TestServicePassesSummaryAndRecentMessagesToAgent(t *testing.T) {
 	}
 }
 
+func TestDiagnosticSkillCardsAreBoundedPromptGuidance(t *testing.T) {
+	cards := diagnosticSkillCards()
+	expected := []string{
+		"metric_inspection: use query_metrics to inspect error rate, latency, traffic, and saturation.",
+		"log_investigation: use query_logs to inspect errors, timeouts, request IDs, and exception messages.",
+		"trace_inspection: use query_traces to inspect slow spans, dependency paths, and bottlenecks.",
+		"runbook_lookup: use search_knowledge to retrieve known runbooks and mitigation steps.",
+		"checkout_incident_diagnosis: for checkout incidents, usually inspect metrics, then logs, then traces, then runbook guidance.",
+	}
+
+	if len(cards) != len(expected) {
+		t.Fatalf("skill card count = %d, want %d: %#v", len(cards), len(expected), cards)
+	}
+	for i, expectedCard := range expected {
+		if cards[i] != expectedCard {
+			t.Fatalf("card[%d] = %q, want %q", i, cards[i], expectedCard)
+		}
+	}
+	for _, card := range cards {
+		for _, forbidden := range []string{"Skill.Run", "registry", "planner", "policy"} {
+			if strings.Contains(card, forbidden) {
+				t.Fatalf("skill card %q contains execution-engine wording %q", card, forbidden)
+			}
+		}
+	}
+}
+
 type fakeLongTermMemoryStore struct {
 	memories []longterm.Memory
 	err      error
