@@ -177,6 +177,14 @@ The log seed uses stable IDs, shifts fixture timestamps into the current 20-minu
 
 Runtime Prometheus instrumentation is enabled by default and exposed at `http://localhost:8080/metrics`. Set `WATCHOPS_RUNTIME_METRICS_ENABLED=false` to omit the endpoint. The local Prometheus configuration scrapes this endpoint separately from the demo service signals consumed by `query_metrics`.
 
+Evaluate local knowledge retrieval quality after seeding the demo runbook:
+
+```bash
+make eval-retrieval
+```
+
+See [Retrieval Evaluation](docs/retrieval-evaluation.md) for the case format, report fields, and empty-recall behavior.
+
 Query the demo Prometheus signal directly:
 
 ```bash

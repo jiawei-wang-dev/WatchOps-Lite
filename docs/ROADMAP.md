@@ -237,6 +237,23 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: Retrieval Evaluation — Completed
+
+Delivered:
+
+- Versioned retrieval eval cases in `testdata/retrieval_eval_cases.json`
+- Lightweight `cmd/retrieval-eval` command and `scripts/eval_retrieval.sh`
+- `make eval-retrieval` convenience target
+- Report fields for case ID, query, retrieval mode, top-k IDs, matched keywords, hit/miss, score fields, empty recall, and pass rate
+- Interview-friendly documentation in `docs/retrieval-evaluation.md`
+
+Exit criteria:
+
+- No public API schema, Eino ReAct, Tool Runtime, Tool Guard, Evidence, memory, feedback/eval, or demo-script behavior changes.
+- No heavy reranker, new vector database, external paid dependency, planner, policy engine, correlation engine, MCP, UEM, multi-agent, or auto-remediation.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

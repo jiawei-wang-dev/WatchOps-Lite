@@ -1,0 +1,50 @@
+[
+  {
+    "id": "checkout-error-rate-runbook",
+    "query": "checkout high error rate runbook",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "error rate", "runbook"],
+    "expected_source_type": "knowledge",
+    "notes": "Should retrieve the checkout high error-rate runbook seeded by the local demo."
+  },
+  {
+    "id": "payment-timeout-investigation",
+    "query": "checkout payment timeout errors",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "payment", "timeout"],
+    "expected_source_type": "knowledge",
+    "notes": "Should retrieve checkout/payment timeout investigation guidance."
+  },
+  {
+    "id": "slow-trace-critical-path",
+    "query": "slow checkout trace payment critical path",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "trace", "payment"],
+    "expected_source_type": "knowledge",
+    "notes": "Should retrieve guidance that tells the operator to inspect slow checkout spans."
+  },
+  {
+    "id": "redis-latency-context",
+    "query": "checkout redis latency connection pool exhaustion",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "redis", "latency"],
+    "expected_source_type": "knowledge",
+    "notes": "May miss in the minimal demo corpus; useful for observing empty or partial recall."
+  },
+  {
+    "id": "runbook-lookup",
+    "query": "how should I mitigate checkout dependency timeout retry amplification",
+    "service": "checkout",
+    "expected_keywords": ["mitigation", "timeout", "retry"],
+    "expected_source_type": "knowledge",
+    "notes": "Should retrieve mitigation guidance from the checkout runbook."
+  },
+  {
+    "id": "alert-investigation",
+    "query": "checkout alert high error rate payment dependency",
+    "service": "checkout",
+    "expected_keywords": ["alert", "error rate", "payment"],
+    "expected_source_type": "knowledge",
+    "notes": "Should retrieve runbook context for an alert-driven checkout investigation."
+  }
+]

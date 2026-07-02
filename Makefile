@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify
+.PHONY: run test lint fmt verify eval-retrieval
 
 CONFIG ?= configs/config.json
 
@@ -16,3 +16,6 @@ fmt:
 
 verify:
 	./scripts/verify.sh
+
+eval-retrieval:
+	./scripts/eval_retrieval.sh
