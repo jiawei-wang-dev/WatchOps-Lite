@@ -65,7 +65,7 @@ Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking to
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named on-call diagnostic routine that documents when one or more existing tools are useful. Skills do not register tools, discover plugins, or alter ReAct behavior.
 
-`internal/tool/policy` provides optional, static ordering hints only. It is not a planner, does not learn, never authorizes fallback, and is not required by the Agent execution path. Timeout and fallback behavior remain centralized in Tool Runtime.
+Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 
 ## Quick Start
 

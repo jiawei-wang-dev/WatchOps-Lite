@@ -374,14 +374,14 @@ Delivered:
 - Thin, traced Chat workflow around the existing Eino ReAct runner
 - Explicit context, Agent-input, ReAct, evidence, memory, and response nodes
 - Lightweight business Skill definitions for metrics, logs, traces, runbooks, and checkout diagnosis
-- Advisory-only policy helper with no learning, fallback authority, or hard Agent dependency
 - Stable bad-case reason constants for feedback/eval metadata
-- Clear Tool vs Skill vs Policy vs Tool Runtime documentation
+- Clear Tool vs Skill vs Tool Runtime documentation
+- Deliberate removal of unused policy and evidence-correlation helpers
 
 Constraints preserved:
 
 - no public API, evidence schema, PromptTemplate, ReAct graph, Tool Runtime, or demo-script changes
-- no planner, MCP, UEM, skill registry, dynamic discovery, or external dependency
+- no planner, policy learning, correlation engine, MCP, UEM, skill registry, dynamic discovery, or external dependency
 
 Exit status: complete. Backend orchestration is explicit and interview-friendly without introducing a second Agent execution system.
 

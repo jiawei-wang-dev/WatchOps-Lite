@@ -97,16 +97,15 @@ workflow.chat
 
 Using a small internal workflow avoids forcing Redis persistence and HTTP response construction into Eino's model/tool graph. Eino remains responsible for PromptTemplate rendering, ChatModel invocation, ReAct iteration, and Tool Calling.
 
-### 3.2 Tool, Skill, and Policy Boundaries
+### 3.2 Tool, Skill, and Runtime Boundaries
 
 | Concept | Responsibility | Explicit non-responsibility |
 | --- | --- | --- |
 | Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, or knowledge retrieval | Multi-step incident diagnosis |
 | Skill | Named business diagnostic routine describing when existing tools are useful | Registration, discovery, planning, or execution |
-| Policy helper | Optional static ordering hints and explanation strings | ReAct decisions, learning, optimization, timeout, or fallback |
 | Tool Runtime | Schema-safe execution, timeout, fallback, errors, normalization, and tracing | Agent intent selection |
 
-The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge. It does not force that sequence or change ReAct behavior. The policy package has no hard dependency from Eino execution and never authorizes mock fallback; Tool Runtime remains the only execution-control boundary.
+The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path, and Tool Runtime remains the only execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, and evidence-correlation engine.
 
 ## 4. Chat Data Flow
 
@@ -190,7 +189,7 @@ Trace spans include `knowledge.embedding`, `knowledge.search.bm25`, `knowledge.s
 
 ## 7. Tool Harness
 
-Eino owns tool schema exposure, registration, and invocation. WatchOps-Lite adds one unified Tool Runtime for bounded execution and domain contracts, not a custom Tool Registry. The advisory policy helper is separate from this runtime.
+Eino owns tool schema exposure, registration, and invocation. WatchOps-Lite adds one unified Tool Runtime for bounded execution and domain contracts, not a custom Tool Registry or planner.
 
 Tool execution lifecycle:
 
