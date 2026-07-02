@@ -379,6 +379,8 @@ Attributes contain only operational values such as request/session/document IDs,
 
 Jaeger is the local trace visualization backend. Prometheus has two deliberately separate roles: `query_metrics` reads allowlisted service-reliability signals as Agent evidence, while `GET /metrics` exposes WatchOps-Lite runtime telemetry for scraping.
 
+The local Prometheus also evaluates version-controlled demo alert rules. `query_alerts` reads the standard `ALERTS` series and normalizes firing rules as auxiliary evidence. These rules exist only to make the local OnCall scenario repeatable; WatchOps-Lite does not bundle Alertmanager, paging, escalation policy, or production routing.
+
 Runtime metrics include:
 
 - HTTP request count and latency by bounded route

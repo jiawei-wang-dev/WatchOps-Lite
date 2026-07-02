@@ -55,6 +55,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Elasticsearch BM25, optional vector retrieval, RRF hybrid fusion, and deterministic reranking with an optional external provider
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
+- Local Prometheus demo alert rules consumed by `query_alerts`
 - Prometheus runtime metrics at `GET /metrics` for HTTP, Chat, tools, RAG, memory, fallbacks, and eval runs
 - Jaeger-backed `query_traces` with trace-ID or bounded service/time search and explicit mock fallback
 - MySQL upvote/downvote feedback, good/bad eval cases, and synchronous rule-based eval runs
@@ -186,6 +187,8 @@ export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Knowledge, feedback, and eval scripts create additional records.
 
 `configs/config.example.json` selects Elasticsearch logs, Prometheus metrics, and Jaeger traces with explicit mock fallback. If a backend is unavailable, Chat continues with `LOGS_FALLBACK`, `METRICS_FALLBACK`, or `TRACES_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps all three observability tools in mock mode.
+
+The local Prometheus mounts `configs/prometheus/alert_rules.yml` with checkout error-rate/latency, payment timeout, and Redis latency rules. `query_alerts` reads the resulting `ALERTS` series. Alertmanager, paging, and production incident routing are intentionally not included; when Prometheus alerts are unavailable, the existing mock fallback remains active.
 
 Runtime Prometheus instrumentation is enabled by default and exposed at `http://localhost:8080/metrics`. Set `WATCHOPS_RUNTIME_METRICS_ENABLED=false` to omit the endpoint. The local Prometheus configuration scrapes this endpoint separately from the demo service signals consumed by `query_metrics`.
 

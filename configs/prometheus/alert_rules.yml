@@ -1,0 +1,37 @@
+groups:
+  - name: watchops-demo-alerts
+    interval: 5s
+    rules:
+      - alert: CheckoutHighErrorRate
+        expr: watchops_checkout_error_rate{service="checkout"} > 0.05
+        for: 10s
+        labels:
+          service: checkout
+          severity: critical
+        annotations:
+          summary: Checkout error rate is above 5%.
+      - alert: CheckoutHighLatency
+        expr: watchops_checkout_p95_latency_seconds{service="checkout"} > 1
+        for: 10s
+        labels:
+          service: checkout
+          severity: warning
+        annotations:
+          summary: Checkout p95 latency is above one second.
+      - alert: PaymentTimeoutSpike
+        expr: watchops_checkout_timeout_total{service="checkout"} > 20
+        for: 10s
+        labels:
+          service: checkout
+          dependency: payment
+          severity: critical
+        annotations:
+          summary: Checkout payment dependency timeouts are elevated.
+      - alert: RedisLatencyHigh
+        expr: watchops_redis_latency_seconds{service="redis"} > 0.1
+        for: 10s
+        labels:
+          service: redis
+          severity: warning
+        annotations:
+          summary: Redis latency is above 100 milliseconds.

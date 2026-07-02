@@ -597,6 +597,12 @@ Profiles are contextual OnCall preferences only. They do not provide authenticat
 
 Exit status: complete.
 
+## Enhancement: Demo Prometheus Alert Rules — Completed
+
+Delivered four local rules for checkout error rate, checkout latency, payment timeouts, and Redis latency. Prometheus mounts and evaluates the rules, while `query_alerts` reads standard `ALERTS` data with its existing mock fallback. Alertmanager, paging, and production incident routing remain intentionally excluded.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

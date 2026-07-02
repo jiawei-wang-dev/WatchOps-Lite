@@ -19,6 +19,7 @@ func TestMetricsHandlerExposesCheckoutMetrics(t *testing.T) {
 		"watchops_checkout_p95_latency_seconds",
 		"watchops_payment_dependency_latency_seconds",
 		"watchops_checkout_timeout_total",
+		"watchops_redis_latency_seconds",
 	} {
 		if !strings.Contains(recorder.Body.String(), metricName) {
 			t.Fatalf("response does not contain %q", metricName)

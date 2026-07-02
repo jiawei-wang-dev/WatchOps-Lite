@@ -24,6 +24,9 @@ watchops_payment_dependency_latency_seconds{service="checkout",dependency="payme
 # HELP watchops_checkout_timeout_total Demonstration checkout timeout count.
 # TYPE watchops_checkout_timeout_total counter
 watchops_checkout_timeout_total{service="checkout",environment="demo"} 37
+# HELP watchops_redis_latency_seconds Demonstration Redis operation latency.
+# TYPE watchops_redis_latency_seconds gauge
+watchops_redis_latency_seconds{service="redis",environment="demo"} 0.12
 `
 
 func main() {

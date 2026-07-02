@@ -202,6 +202,8 @@ Stream event payloads intentionally include only operational metadata such as re
 
 With `agent.mode=eino_react` and complete LLM configuration, Eino's ReAct Graph exposes the four core tools plus the two auxiliary OnCall context tools to the configured OpenAI-compatible ChatModel. The model may select tools iteratively within the configured timeout and maximum-iteration bound.
 
+In the local Compose demo, `query_alerts` reads Prometheus `ALERTS` produced by the bundled checkout, payment, and Redis rules. If the Prometheus query is unavailable, the tool retains its explicit mock fallback and reports that fallback in its warning metadata.
+
 Eino responses include metadata such as:
 
 ```json
