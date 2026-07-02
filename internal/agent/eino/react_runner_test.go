@@ -191,7 +191,7 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		Role:    session.RoleUser,
 		Content: "The previous alert mentioned timeouts.",
 	}}
-	input.LongTermMemories = []string{"Checkout is owned by the payments team."}
+	input.ConfirmedLongTermMemories = []string{"Checkout is owned by the payments team."}
 	input.DiagnosticSkills = []string{"metric_inspection: inspect service signals"}
 	input.RetrievedKnowledge = []string{"No knowledge is preloaded; use search_knowledge."}
 

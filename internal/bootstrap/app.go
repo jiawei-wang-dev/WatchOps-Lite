@@ -13,6 +13,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/eval"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
@@ -224,6 +225,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	var mysqlClient *mysqlplatform.Client
 	feedbackStore := feedback.Store(feedback.UnavailableStore{})
 	evalStore := eval.Store(eval.UnavailableStore{})
+	var longTermMemoryService *longterm.Service
 	if cfg.MySQL.Enabled {
 		client, err := mysqlplatform.New(mysqlplatform.Config{
 			DSN:             cfg.MySQL.DSN,
@@ -258,6 +260,27 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			}
 			return nil, err
 		}
+		mysqlLongTermStore, err := longterm.NewMySQLStore(client.DB())
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
+		longTermMemoryService, err = longterm.NewService(
+			mysqlLongTermStore,
+			cfg.LongTermMemory.TopK,
+		)
+		if err != nil {
+			_ = client.Close()
+			_ = redisClient.Close()
+			if elasticsearchClient != nil {
+				_ = elasticsearchClient.Close(context.Background())
+			}
+			return nil, err
+		}
 		feedbackStore = mysqlFeedbackStore
 		evalStore = mysqlEvalStore
 
@@ -265,11 +288,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		if err := client.Ping(mysqlContext); err != nil {
 			logger.Warn("MySQL is not ready; startup will continue", "error", err)
 		} else if err := client.EnsureSchema(mysqlContext); err != nil {
-			logger.Warn("MySQL feedback and eval schema is not ready; startup will continue", "error", err)
+			logger.Warn("MySQL application schema is not ready; startup will continue", "error", err)
 		}
 		cancel()
 	}
-	feedbackService, err := feedback.NewService(feedbackStore)
+	feedbackService, err := feedback.NewServiceWithLongTermMemory(
+		feedbackStore,
+		longTermMemoryService,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -291,8 +317,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		sessionStore,
 		summarizer,
 		applicationchat.ServiceConfig{
-			RecentWindowSize: cfg.Session.RecentWindowSize,
-			SummaryThreshold: cfg.Session.SummaryThreshold,
+			RecentWindowSize:   cfg.Session.RecentWindowSize,
+			SummaryThreshold:   cfg.Session.SummaryThreshold,
+			LongTermMemory:     longTermMemoryService,
+			LongTermMemoryTopK: cfg.LongTermMemory.TopK,
 		},
 	)
 	evalService, err := eval.NewServiceWithRunner(

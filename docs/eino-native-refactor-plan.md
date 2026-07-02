@@ -35,7 +35,7 @@ WatchOps-Lite pins `github.com/cloudwego/eino v0.9.12`. The audit used the pinne
 
 ## Migration Boundaries and Risks
 
-- MySQL long-term memory is not implemented. The native graph includes an explicit pass-through `load_long_term_memory` node with an empty result; it does not query MySQL or imply a delivered feature.
+- MySQL long-term memory was implemented after this audit. The native graph's `load_long_term_memory` node now performs bounded confirmed-memory search and safely degrades when MySQL is unavailable.
 - Eino ChatTemplate accepts a variables map and returns messages, while the Chat graph must retain application state for later Redis persistence. The graph therefore uses a typed Lambda render node that calls the existing native `DefaultChatTemplate`; it does not introduce a custom template engine.
 - The deterministic runner has no model prompt. The render node is a safe no-op for runners that do not implement prompt rendering.
 - The existing ReAct graph, Tool Runtime, evidence schema, public API, and deterministic fallback remain unchanged.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
@@ -45,19 +46,23 @@ func (e *ValidationError) Error() string {
 }
 
 type ServiceConfig struct {
-	RecentWindowSize int
-	SummaryThreshold int
+	RecentWindowSize   int
+	SummaryThreshold   int
+	LongTermMemory     longterm.Store
+	LongTermMemoryTopK int
 }
 
 type Service struct {
-	runner           agenteino.AgentRunner
-	store            session.Store
-	summarizer       session.Summarizer
-	recentWindowSize int
-	summaryThreshold int
-	now              func() time.Time
-	graph            chatGraphRunner
-	graphErr         error
+	runner             agenteino.AgentRunner
+	store              session.Store
+	summarizer         session.Summarizer
+	recentWindowSize   int
+	summaryThreshold   int
+	now                func() time.Time
+	graph              chatGraphRunner
+	graphErr           error
+	longTermMemory     longterm.Store
+	longTermMemoryTopK int
 }
 
 func NewService(
@@ -74,11 +79,13 @@ func NewService(
 	}
 
 	service := &Service{
-		runner:           runner,
-		store:            store,
-		summarizer:       summarizer,
-		recentWindowSize: config.RecentWindowSize,
-		summaryThreshold: config.SummaryThreshold,
+		runner:             runner,
+		store:              store,
+		summarizer:         summarizer,
+		recentWindowSize:   config.RecentWindowSize,
+		summaryThreshold:   config.SummaryThreshold,
+		longTermMemory:     config.LongTermMemory,
+		longTermMemoryTopK: config.LongTermMemoryTopK,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},

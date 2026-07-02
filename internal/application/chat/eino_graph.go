@@ -44,7 +44,7 @@ func compileChatGraph(
 		},
 		{
 			key:  nodeLoadLongTermMemory,
-			node: compose.InvokableLambda(loadLongTermMemoryGraphNode),
+			node: compose.InvokableLambda(service.loadLongTermMemoryGraphNode),
 		},
 		{
 			key: nodeBuildPromptInput,

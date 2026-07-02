@@ -18,7 +18,7 @@ flowchart LR
     HARNESS --> TRACES["Traces Adapter"]
     HARNESS --> RAG["Knowledge Search"]
     CTX --> REDIS[("Redis")]
-    CTX -. planned long-term memory .-> MYSQL[("MySQL")]
+    CTX --> MYSQL[("MySQL confirmed memory")]
     RAG --> ES[("Elasticsearch")]
     LOGS --> ES
     METRICS --> PROM[("Prometheus")]
@@ -97,7 +97,7 @@ workflow.chat
 
 `graph.render_prompt_template` calls the native Eino `DefaultChatTemplate`. `graph.run_react_agent` delegates to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer. Session failures retain the existing single-turn degradation behavior.
 
-MySQL durable Agent memory is not implemented, so `graph.load_long_term_memory` is an explicit pass-through returning no memories. It does not query MySQL or imply a delivered feature. Eino callbacks instrument graph and node lifecycle without recording prompt or response content.
+`graph.load_long_term_memory` performs bounded keyword search when MySQL is enabled and supplies concise `confirmed_long_term_memories` before prompt rendering. An unavailable store adds `LONG_TERM_MEMORY_UNAVAILABLE` but does not fail Chat. Eino callbacks instrument graph and node lifecycle without recording prompt or response content.
 
 ### 3.2 Tool, Skill, and Runtime Boundaries
 
@@ -160,9 +160,19 @@ Context budgeting follows this order:
 2. Move older recent messages into the summary.
 3. Shorten RAG chunks while retaining source references.
 4. Compress tool output into statistics and representative samples.
-5. Remove low-relevance future long-term memories.
+5. Bound confirmed long-term memories to the configured top-k.
 
 Summary tracing uses `summary.llm`, `summary.parse`, and `summary.fallback`. Attributes record only mode, prompt version, message count, parse status, and fallback status—not message or model-output content.
+
+### 5.3 Memory and Knowledge Separation
+
+| Capability | Backend | Scope | Trust boundary |
+| --- | --- | --- | --- |
+| Session memory | Redis | Current session, recent messages, rolling summary, TTL | Conversation context; may contain unresolved claims |
+| Long-term memory | MySQL | Cross-session confirmed incident findings | Positive feedback, good eval cases, or manual trusted seeds only |
+| Knowledge RAG | Elasticsearch | Runbooks, documents, and indexed chunks | Curated document ingestion |
+
+Long-term search matches title, summary, service, and tags with a configured default top-k of three. Prompt input contains only title, short summary, service, and evidence IDs; raw metadata and full answer snapshots are excluded. Positive feedback requires evidence IDs and a usable confirmed summary. Downvotes never create memory.
 
 ## 6. RAG Architecture
 
@@ -262,14 +272,16 @@ If Jaeger is unavailable, configured mock fallback returns explicit `TRACES_FALL
 
 ## 8. Persistence
 
-The MVP creates two MySQL tables:
+MySQL stores feedback, eval state, and confirmed long-term memory:
 
 | Table | Purpose | Important fields |
 | --- | --- | --- |
 | `feedback` | Raw user feedback | request_id, rating, reason, prompt_version |
 | `eval_cases` | Manually seeded good and bad cases | feedback_id, case_type, expected_behavior |
+| `eval_runs` / `eval_case_results` | Rule-based regression execution | status, result, trace_id, failure reasons |
+| `long_term_memories` | Cross-session confirmed incident memory | source, service, summary, evidence IDs, tags |
 
-Long-term memory, durable document metadata, review state, and audit records remain planned rather than implied by the current schema.
+Durable document metadata, review state, and general audit records remain deferred.
 
 ### 8.1 Rule-based Eval Runs
 
@@ -332,7 +344,7 @@ The local Compose stack provisions Grafana with Prometheus as a read-only dataso
 | Dependency | Behavior when unavailable |
 | --- | --- |
 | Redis | Process a single turn and clearly report loss of short-term continuity |
-| MySQL | Feedback and eval APIs return a structured dependency error; Chat is unaffected |
+| MySQL | Feedback/eval APIs return a structured dependency error; Chat continues without long-term memory and reports a limitation |
 | Elasticsearch | Knowledge APIs return a structured dependency error; logs and knowledge tools use their configured mock fallback |
 | Logs | Return real Elasticsearch evidence, explicit mock fallback, or structured unavailability according to configuration |
 | Prometheus | Metrics tool uses explicit mock fallback or structured unavailability according to configuration |

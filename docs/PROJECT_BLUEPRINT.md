@@ -281,7 +281,7 @@ MySQL stores:
 - `feedback`
 - `eval_cases`
 
-Elasticsearch stores chunk content and fields required for BM25 and metadata filtering. MySQL currently stores feedback and eval cases; long-term memory, document lifecycle metadata, and audit records are deferred.
+Elasticsearch stores chunk content and fields required for BM25 and metadata filtering. MySQL stores feedback, eval state, and bounded confirmed long-term incident memory; document lifecycle metadata and audit records remain deferred.
 
 ## 6. Common API Conventions
 

@@ -51,6 +51,21 @@ func TestRuntimeMetricsDefaultsAndEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestLongTermMemoryDefaultsAndEnvironmentOverride(t *testing.T) {
+	cfg := Default()
+	if cfg.LongTermMemory.TopK != 3 {
+		t.Fatalf("LongTermMemory.TopK = %d, want 3", cfg.LongTermMemory.TopK)
+	}
+
+	t.Setenv("WATCHOPS_LONG_TERM_MEMORY_TOP_K", "5")
+	if err := applyEnvironment(&cfg); err != nil {
+		t.Fatalf("apply environment: %v", err)
+	}
+	if cfg.LongTermMemory.TopK != 5 {
+		t.Fatalf("LongTermMemory.TopK = %d, want 5", cfg.LongTermMemory.TopK)
+	}
+}
+
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"unknown": true}`), 0o600); err != nil {

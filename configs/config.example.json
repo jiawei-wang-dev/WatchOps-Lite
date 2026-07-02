@@ -91,6 +91,9 @@
     "conn_max_lifetime": "30m",
     "request_timeout": "5s"
   },
+  "long_term_memory": {
+    "top_k": 3
+  },
   "agent": {
     "mode": "deterministic",
     "max_iterations": 6,

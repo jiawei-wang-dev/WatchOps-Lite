@@ -51,6 +51,7 @@ type Config struct {
 	Metrics        MetricsConfig        `json:"metrics"`
 	Traces         TracesConfig         `json:"traces"`
 	MySQL          MySQLConfig          `json:"mysql"`
+	LongTermMemory LongTermMemoryConfig `json:"long_term_memory"`
 	Agent          AgentConfig          `json:"agent"`
 	LLM            LLMConfig            `json:"llm"`
 	Telemetry      TelemetryConfig      `json:"telemetry"`
@@ -154,6 +155,10 @@ type MySQLConfig struct {
 	MaxIdleConns    int      `json:"max_idle_conns"`
 	ConnMaxLifetime Duration `json:"conn_max_lifetime"`
 	RequestTimeout  Duration `json:"request_timeout"`
+}
+
+type LongTermMemoryConfig struct {
+	TopK int `json:"top_k"`
 }
 
 type AgentConfig struct {
@@ -274,6 +279,9 @@ func Default() Config {
 			MaxIdleConns:    5,
 			ConnMaxLifetime: Duration(30 * time.Minute),
 			RequestTimeout:  Duration(3 * time.Second),
+		},
+		LongTermMemory: LongTermMemoryConfig{
+			TopK: 3,
 		},
 		Agent: AgentConfig{
 			Mode:          "deterministic",
@@ -426,6 +434,7 @@ func applyEnvironment(cfg *Config) error {
 		{"TRACES_DEFAULT_LIMIT", &cfg.Traces.DefaultLimit},
 		{"MYSQL_MAX_OPEN_CONNS", &cfg.MySQL.MaxOpenConns},
 		{"MYSQL_MAX_IDLE_CONNS", &cfg.MySQL.MaxIdleConns},
+		{"LONG_TERM_MEMORY_TOP_K", &cfg.LongTermMemory.TopK},
 		{"AGENT_MAX_ITERATIONS", &cfg.Agent.MaxIterations},
 	}
 	for _, item := range integerValues {
@@ -801,6 +810,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.MySQL.Enabled && strings.TrimSpace(cfg.MySQL.DSN) == "" {
 		return errors.New("mysql.dsn is required when MySQL is enabled")
+	}
+	if cfg.LongTermMemory.TopK < 1 || cfg.LongTermMemory.TopK > 20 {
+		return errors.New("long_term_memory.top_k must be between 1 and 20")
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Agent.Mode)) {
 	case "deterministic", "eino_react":

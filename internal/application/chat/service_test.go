@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -219,10 +220,138 @@ func TestServicePassesSummaryAndRecentMessagesToAgent(t *testing.T) {
 	if runner.lastInput.SessionSummary.Version != 2 ||
 		len(runner.lastInput.RecentMessages) != 1 ||
 		len(runner.lastInput.DiagnosticSkills) == 0 ||
-		len(runner.lastInput.LongTermMemories) != 0 ||
+		len(runner.lastInput.ConfirmedLongTermMemories) != 0 ||
 		runner.lastInput.CurrentMessage != validCommand().Message {
 		t.Fatalf("AgentInput = %#v, want loaded session context", runner.lastInput)
 	}
+}
+
+type fakeLongTermMemoryStore struct {
+	memories []longterm.Memory
+	err      error
+	query    longterm.SearchQuery
+}
+
+func (f *fakeLongTermMemoryStore) Save(context.Context, longterm.Memory) error {
+	return f.err
+}
+
+func (f *fakeLongTermMemoryStore) Search(
+	_ context.Context,
+	query longterm.SearchQuery,
+) ([]longterm.Memory, error) {
+	f.query = query
+	return f.memories, f.err
+}
+
+func (f *fakeLongTermMemoryStore) Get(
+	context.Context,
+	string,
+) (longterm.Memory, error) {
+	return longterm.Memory{}, f.err
+}
+
+func TestNativeEinoGraphLoadsConfirmedLongTermMemory(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	memoryStore := &fakeLongTermMemoryStore{memories: []longterm.Memory{{
+		ID:          "mem-1",
+		Service:     "checkout",
+		Title:       "Confirmed checkout timeout",
+		Summary:     "Payment dependency latency caused bounded checkout timeouts.",
+		EvidenceIDs: []string{"metric-1", "log-1"},
+	}}}
+	service := NewService(
+		runner,
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			LongTermMemory:     memoryStore,
+			LongTermMemoryTopK: 3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if memoryStore.query.Limit != 3 ||
+		memoryStore.query.Query != validCommand().Message {
+		t.Fatalf("memory query = %#v", memoryStore.query)
+	}
+	if len(runner.lastInput.ConfirmedLongTermMemories) != 1 ||
+		!strings.Contains(
+			runner.lastInput.ConfirmedLongTermMemories[0],
+			"Payment dependency latency",
+		) {
+		t.Fatalf("AgentInput memories = %#v", runner.lastInput.ConfirmedLongTermMemories)
+	}
+	if result.Agent.Metadata["long_term_memory_count"] != 1 {
+		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
+}
+
+func TestNativeEinoGraphContinuesWhenNoLongTermMemoriesAreFound(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	service := NewService(
+		runner,
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			LongTermMemory:     &fakeLongTermMemoryStore{memories: []longterm.Memory{}},
+			LongTermMemoryTopK: 3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(runner.lastInput.ConfirmedLongTermMemories) != 0 ||
+		result.Agent.Metadata["long_term_memory_count"] != 0 {
+		t.Fatalf(
+			"input=%#v metadata=%#v",
+			runner.lastInput,
+			result.Agent.Metadata,
+		)
+	}
+	if hasAgentLimitation(result.Agent.Limitations, "LONG_TERM_MEMORY_UNAVAILABLE") {
+		t.Fatalf("limitations = %#v, want no unavailable warning", result.Agent.Limitations)
+	}
+}
+
+func TestChatContinuesWhenLongTermMemoryIsUnavailable(t *testing.T) {
+	service := NewService(
+		&fakeRunner{output: emptyAgentOutput()},
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			LongTermMemory:     &fakeLongTermMemoryStore{err: longterm.ErrUnavailable},
+			LongTermMemoryTopK: 3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want safe degradation", err)
+	}
+	if !hasAgentLimitation(result.Agent.Limitations, "LONG_TERM_MEMORY_UNAVAILABLE") {
+		t.Fatalf("limitations = %#v", result.Agent.Limitations)
+	}
+}
+
+func hasAgentLimitation(values []agenteino.Limitation, code string) bool {
+	for _, value := range values {
+		if value.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNativeEinoGraphPreservesExecutionError(t *testing.T) {

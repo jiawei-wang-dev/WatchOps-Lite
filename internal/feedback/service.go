@@ -8,24 +8,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 type Service struct {
-	store Store
-	now   func() time.Time
-	newID func() (string, error)
+	store        Store
+	memoryWriter longterm.Store
+	now          func() time.Time
+	newID        func() (string, error)
 }
 
 func NewService(store Store) (*Service, error) {
+	return NewServiceWithLongTermMemory(store, nil)
+}
+
+func NewServiceWithLongTermMemory(
+	store Store,
+	memoryWriter longterm.Store,
+) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: store is required", ErrInvalidArgument)
 	}
 	return &Service{
-		store: store,
-		now:   func() time.Time { return time.Now().UTC() },
-		newID: func() (string, error) { return generateID("fb_") },
+		store:        store,
+		memoryWriter: memoryWriter,
+		now:          func() time.Time { return time.Now().UTC() },
+		newID:        func() (string, error) { return generateID("fb_") },
 	}, nil
 }
 
@@ -82,9 +92,18 @@ func (s *Service) Create(ctx context.Context, value Feedback) (CreateResult, err
 		observability.MarkError(span, "feedback persistence failed")
 		return CreateResult{}, err
 	}
+	memorySaved := false
+	if s.memoryWriter != nil && value.Rating == RatingUp {
+		if memory, ok := confirmedMemoryFromFeedback(value); ok {
+			if err := s.memoryWriter.Save(ctx, memory); err == nil {
+				memorySaved = true
+			}
+		}
+	}
 	span.SetAttributes(
 		attribute.String("feedback_id", value.ID),
 		attribute.String("rating", string(value.Rating)),
+		attribute.Bool("long_term_memory_saved", memorySaved),
 	)
 	return CreateResult{FeedbackID: value.ID, Status: "created"}, nil
 }

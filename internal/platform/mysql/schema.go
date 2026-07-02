@@ -55,4 +55,20 @@ var SchemaStatements = []string{
 		INDEX idx_eval_case_results_run_id (run_id),
 		INDEX idx_eval_case_results_case_id (case_id)
 	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
+	`CREATE TABLE IF NOT EXISTS long_term_memories (
+		id VARCHAR(64) PRIMARY KEY,
+		source_type VARCHAR(32) NOT NULL,
+		source_id VARCHAR(64) NOT NULL,
+		service VARCHAR(128) NOT NULL,
+		title VARCHAR(255) NOT NULL,
+		summary TEXT NOT NULL,
+		evidence_ids JSON NOT NULL,
+		tags JSON NOT NULL,
+		metadata JSON NOT NULL,
+		created_at TIMESTAMP(6) NOT NULL,
+		updated_at TIMESTAMP(6) NOT NULL,
+		UNIQUE KEY uk_long_term_memory_source (source_type, source_id),
+		INDEX idx_long_term_memory_service_updated (service, updated_at),
+		INDEX idx_long_term_memory_updated_at (updated_at)
+	) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`,
 }

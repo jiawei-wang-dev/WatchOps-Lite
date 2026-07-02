@@ -1,6 +1,6 @@
 # WatchOps-Lite: Agentic RAG for Service Reliability
 
-A Go-based Agentic RAG assistant for service reliability analysis, combining Eino ReAct tool calling, Elasticsearch RAG and logs, Prometheus metrics, Redis session memory, MySQL feedback/eval seed, and OpenTelemetry tracing.
+A Go-based Agentic RAG assistant for service reliability analysis, combining Eino ReAct tool calling, Elasticsearch RAG and logs, Prometheus metrics, Redis session memory, confirmed MySQL long-term memory, feedback/eval, and OpenTelemetry tracing.
 
 WatchOps-Lite turns an incident question into a bounded investigation: it builds session context, selects read-only tools, gathers normalized evidence, and returns conclusions, inferences, recommendations, limitations, and tool-run metadata without treating unsupported model output as fact.
 
@@ -11,6 +11,7 @@ flowchart LR
     C["SRE / API client"] --> G["Gin HTTP API"]
     G --> A["Native Eino compose.Graph"]
     A --> M["Redis context"]
+    A --> LM["MySQL confirmed memory"]
     A --> E["Eino ReAct Agent<br/>or deterministic fallback"]
     S["Business skills<br/>(descriptive only)"] -. explains .-> E
     E --> T["Eino tool calling"]
@@ -43,6 +44,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
+- MySQL cross-session incident memory created only from evidence-backed positive feedback or explicit trusted sources
 - Elasticsearch BM25, optional vector retrieval, and RRF hybrid fusion with BM25 fallback
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
@@ -62,13 +64,21 @@ load session context -> load optional long-term memory -> build prompt input
 -> persist session memory -> build response
 ```
 
-The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. The long-term-memory node is currently an explicit no-op because durable Agent memory is not implemented. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
+The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named on-call diagnostic routine that documents when one or more existing tools are useful. Skills do not register tools, discover plugins, or alter ReAct behavior.
 
 Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 
 See [the native Eino refactor plan](docs/eino-native-refactor-plan.md) for the pinned API audit and migration boundaries.
+
+## Memory and Knowledge Boundaries
+
+- **Redis session memory** keeps the current conversation's recent messages and rolling summary with TTL.
+- **MySQL long-term memory** carries bounded, evidence-backed incident knowledge across sessions. Positive feedback can create it; negative feedback never does.
+- **Elasticsearch knowledge RAG** stores and retrieves documents, runbooks, and chunks. It is not used as a conversation-memory database.
+
+Long-term memory stores short summaries and evidence IDs, not raw model output or full prompt metadata. With MySQL disabled, Chat simply runs without cross-session memory.
 
 ## Quick Start
 
@@ -272,7 +282,7 @@ defaults < JSON configuration file < WATCHOPS_* environment variables
 - `configs/config.local.json`: ignored developer copy
 - `.env.example`: complete environment-variable reference; not loaded automatically
 
-The application remains runnable when optional Elasticsearch, MySQL, telemetry, or LLM integrations are disabled. Redis failures degrade Chat to single-turn behavior with an explicit limitation.
+The application remains runnable when optional Elasticsearch, MySQL, telemetry, or LLM integrations are disabled. Redis failures degrade Chat to single-turn behavior; enabled-but-unavailable MySQL adds a long-term-memory limitation without failing Chat.
 
 ## Development
 
@@ -310,6 +320,7 @@ make verify
     ├── config/                 # Configuration loading and validation
     ├── eval/                   # Eval-case policy and MySQL store
     ├── feedback/               # Feedback policy and MySQL store
+    ├── memory/longterm/        # Confirmed MySQL cross-session memory
     ├── memory/session/         # Redis context and rolling summary
     ├── observability/          # Structured logs and OpenTelemetry
     ├── platform/               # Elasticsearch and MySQL clients
@@ -330,7 +341,7 @@ make verify
 - Eval cases are executed by deterministic rules; LLM-as-judge and prompt A/B testing remain deferred.
 - The included Grafana dashboard is intentionally demo-focused, not a production SRE dashboard.
 - The LLM Agent is optional and disabled by default.
-- MySQL currently stores feedback and eval cases, not long-term memory, document metadata, or audit records.
+- Long-term memories use bounded SQL keyword search; semantic memory retrieval and automatic model-authored memory remain intentionally unsupported.
 
 ## Roadmap
 

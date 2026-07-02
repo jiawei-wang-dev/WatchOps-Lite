@@ -132,7 +132,7 @@ Exit criteria:
 - Upvotes can seed good cases for future regression coverage.
 - MySQL failures do not break Chat, health, or knowledge endpoints.
 
-Exit status: complete. Long-term memory, document metadata, redaction/review workflow, audit records, JSON export, automatic evaluation, scoring, and LLM judging remain deferred.
+Exit status: complete. Document metadata, redaction/review workflow, audit records, JSON export, scoring, and LLM judging remain deferred. Confirmed long-term memory was added in a later enhancement.
 
 ## Phase 7: OpenTelemetry and Jaeger Tracing — Completed
 
@@ -387,6 +387,22 @@ Constraints preserved:
 
 Exit status: complete. Backend orchestration uses native Eino Graph, PromptTemplate, ReAct, Tools, and callbacks without introducing a custom Agent framework.
 
+## Enhancement: MySQL Confirmed Long-term Memory — Completed
+
+Delivered:
+
+- `long_term_memories` MySQL schema and bounded keyword retrieval
+- Domain Store and Service with `feedback_up`, `eval_good_case`, and `manual` source types
+- Evidence-backed positive-feedback memory creation; downvotes never create memory
+- Native Eino `load_long_term_memory` graph node before prompt rendering
+- Bounded `confirmed_long_term_memories` prompt input with a default top-k of three
+- Safe Chat degradation and `LONG_TERM_MEMORY_UNAVAILABLE` when enabled MySQL cannot be queried
+- `longterm_memory.search` and `longterm_memory.save` spans without prompt or answer content
+
+The implementation keeps Redis session context, MySQL cross-session confirmed memory, and Elasticsearch document RAG as separate responsibilities. Automatic model-authored memory and vector memory search are intentionally excluded.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -409,12 +425,13 @@ flowchart LR
     S4 --> S5["Stage 5 Grafana Dashboard (complete)"]
     S5 --> S6["Stage 6 Enhanced Demo Verification (complete)"]
     S6 --> C1["Backend convergence (complete)"]
+    C1 --> M1["MySQL confirmed memory (complete)"]
 ```
 
 ## Deferred Work
 
 - Advanced trace critical-path, dependency-graph, and anomaly analytics
-- MySQL long-term memory, audit records, and document lifecycle metadata
+- MySQL audit records and document lifecycle metadata
 - Eval-case review/export, release comparison, and optional future LLM judge
 - Multi-agent orchestration
 - Automated production changes

@@ -39,13 +39,13 @@ type PromptRenderingRunner interface {
 }
 
 type AgentInput struct {
-	SessionSummary     session.Summary
-	RecentMessages     []session.Message
-	LongTermMemories   []string
-	DiagnosticSkills   []string
-	RetrievedKnowledge []string
-	CurrentMessage     string
-	TimeContext        common.TimeRange
+	SessionSummary            session.Summary
+	RecentMessages            []session.Message
+	ConfirmedLongTermMemories []string
+	DiagnosticSkills          []string
+	RetrievedKnowledge        []string
+	CurrentMessage            string
+	TimeContext               common.TimeRange
 }
 
 type AgentOutput struct {
