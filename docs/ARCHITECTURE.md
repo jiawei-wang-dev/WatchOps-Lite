@@ -110,11 +110,14 @@ workflow.chat
 | --- | --- | --- |
 | Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, knowledge retrieval, alert lookup, or service topology lookup | Multi-step incident diagnosis |
 | Skill | Named business diagnostic routine rendered as bounded Eino PromptTemplate guidance | Registration, discovery, planning, or execution |
+| Tool Guard | Tool allowlist, read-only boundary, common argument validation, and sensitive metadata redaction | Tool choice, planning, or execution |
 | Tool Runtime | Schema-safe execution, timeout, fallback, errors, normalization, and tracing | Agent intent selection |
 
-The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge inside the Agent prompt. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path, and Tool Runtime remains the only execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, dynamic skill runtime, and evidence-correlation engine.
+The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge inside the Agent prompt. It does not force that sequence or change ReAct behavior. Eino ReAct remains the only tool-selection path. Tool Guard is a safety validation/redaction layer, and Tool Runtime remains the execution-control boundary. The architecture intentionally omits a parallel planner, policy-learning layer, dynamic skill runtime, and evidence-correlation engine.
 
 The four core evidence tools remain `query_metrics`, `query_logs`, `query_traces`, and `search_knowledge`. `query_alerts` and `get_service_topology` are auxiliary OnCall context tools. They use the same Eino tool registration path and Tool Runtime wrapper, but they are not a planner, policy layer, remediation engine, or correlation engine.
+
+All current tools are read-only. Tool Guard rejects unsupported tool names, invalid service names, excessive time windows or limits, invalid trace IDs and severities, and excessive topology depth before external dependency calls. It redacts sensitive metadata keys such as password, token, secret, api_key, authorization, cookie, and credential from tool output where practical.
 
 ## 4. Chat Data Flow
 
@@ -325,6 +328,7 @@ http POST /api/v1/chat
         ├── graph.render_prompt_template
         ├── graph.run_react_agent
         │   └── agent.run / agent.eino.run
+        │       ├── tool.guard.validate
         │       └── tool.runtime.execute
         │           ├── tool.runtime.fallback
         │           └── tool.runtime.timeout

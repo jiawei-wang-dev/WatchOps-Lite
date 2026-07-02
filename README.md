@@ -45,6 +45,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Core evidence tools: `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
 - Auxiliary OnCall context tools: `query_alerts` and `get_service_topology`
 - Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
+- Tool Guard allowlist, read-only boundary, parameter validation, and sensitive metadata redaction
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
@@ -72,7 +73,7 @@ The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, knowledge search, alert lookup, or service topology lookup. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 
-Eino ReAct performs tool selection and tool calling. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing for both core and auxiliary tools. The four core evidence tools remain the main reliability-analysis story; `query_alerts` and `get_service_topology` provide optional OnCall context. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
+Eino ReAct performs tool selection and tool calling. Tool Guard validates the allowlist, read-only boundary, common parameters, and sensitive output redaction before evidence reaches the Agent. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing for both core and auxiliary tools. The four core evidence tools remain the main reliability-analysis story; `query_alerts` and `get_service_topology` provide optional OnCall context. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 
 The Agent Failure Controller is a safety layer around the existing Agent execution. It tracks tool-call counts, consecutive failures, repeated tool patterns, evidence count, limitations, elapsed time, and JSON parse status. It can attempt one local JSON repair pass and can trigger the existing deterministic fallback when the LLM crosses a failure boundary. It does not plan, rank, select, or execute tools.
 

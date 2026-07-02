@@ -353,7 +353,7 @@ func TestEinoToolInvocationUsesConfiguredJaegerTraces(t *testing.T) {
 		}
 		output, invokeErr := assembledTool.InvokableRun(context.Background(), `{
 			"service":"watchops-lite",
-			"trace_id":"trace-001",
+			"trace_id":"9df0c1f254cffbe547fc944e821871d0",
 			"time_range":{
 				"from":"2026-07-01T05:00:00Z",
 				"to":"2026-07-01T05:20:00Z"

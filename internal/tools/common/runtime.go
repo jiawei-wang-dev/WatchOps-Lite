@@ -3,12 +3,16 @@ package common
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/guard"
 	toolruntime "github.com/jiawei-wang-dev/WatchOps-Lite/internal/tool/runtime"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+var defaultGuard = guard.Default()
 
 func ExecuteRuntime(
 	ctx context.Context,
@@ -20,7 +24,32 @@ func ExecuteRuntime(
 		"tool."+toolRuntime.Name(),
 		attribute.String("tool.name", toolRuntime.Name()),
 	)
+	validation := defaultGuard.Validate(ctx, toolRuntime.Name(), input)
+	if !validation.Allowed {
+		startedAt := time.Now().UTC()
+		result := toolruntime.Result{
+			Tool:       toolRuntime.Name(),
+			SourceType: toolRuntime.SourceType(),
+			Evidence:   []evidence.Item{},
+			Warnings:   []toolruntime.Warning{},
+			Metadata: map[string]any{
+				"guard_rejected": true,
+			},
+			Error:      validation.Error,
+			StartedAt:  startedAt,
+			FinishedAt: startedAt,
+		}
+		span.SetAttributes(
+			attribute.Bool("tool.success", false),
+			attribute.String("tool.error_code", validation.Error.Code),
+			attribute.Bool("tool.guard_rejected", true),
+		)
+		observability.MarkError(span, "tool guard validation failed")
+		span.End()
+		return FromRuntimeResult(result)
+	}
 	result := toolRuntime.Execute(ctx, input)
+	result = defaultGuard.SanitizeResult(result)
 	errorCode := ""
 	if result.Error != nil {
 		errorCode = result.Error.Code

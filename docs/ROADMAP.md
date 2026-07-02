@@ -218,6 +218,25 @@ Exit criteria:
 
 Exit status: complete.
 
+## Enhancement: Tool Guard — Completed
+
+Delivered:
+
+- Allowlist for the four core evidence tools and two auxiliary OnCall tools
+- Read-only boundary for all current tools
+- Common parameter validation for service, time window, limit/top_k, trace ID, severity, and topology depth
+- Sensitive key redaction for tool payload, metadata, evidence metadata, and structured error details
+- `tool.guard.validate` tracing with safe validation attributes
+
+Exit criteria:
+
+- Eino ReAct still chooses tools.
+- Tool execution still goes through Tool Runtime.
+- Public Chat API schema, Evidence schema, demo scripts, memory, feedback/eval, and ReAct graph behavior remain unchanged.
+- Tool Guard is not a planner, policy engine, correlation engine, MCP, UEM, or auto-remediation layer.
+
+Exit status: complete.
+
 ## Phase 9: MVP Demo Packaging — Completed
 
 Delivered:

@@ -14,7 +14,7 @@ func TestMockToolSuccess(t *testing.T) {
 			From: "2026-06-30T00:00:00Z",
 			To:   "2026-06-30T00:20:00Z",
 		},
-		TraceID: "trace-123",
+		TraceID: "9df0c1f254cffbe547fc944e821871d0",
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
