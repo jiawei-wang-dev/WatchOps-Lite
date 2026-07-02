@@ -5,10 +5,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ELASTICSEARCH_URL="${WATCHOPS_ELASTICSEARCH_URL:-http://localhost:9200}"
 LOGS_INDEX="${WATCHOPS_LOGS_INDEX:-watchops_logs}"
-LOGS_PATH="${ROOT_DIR}/demo/logs/checkout_logs.jsonl"
+LOGS_PATH="${1:-${ROOT_DIR}/demo/logs/checkout_logs.jsonl}"
 bulk_file="$(mktemp)"
 response_file="$(mktemp)"
 trap 'rm -f "${bulk_file}" "${response_file}"' EXIT
+
+if [[ ! -f "${LOGS_PATH}" ]]; then
+  echo "Log JSONL file does not exist: ${LOGS_PATH}" >&2
+  exit 1
+fi
 
 if ! curl --fail --silent --show-error "${ELASTICSEARCH_URL}" >/dev/null; then
   echo "Elasticsearch is unavailable at ${ELASTICSEARCH_URL}." >&2

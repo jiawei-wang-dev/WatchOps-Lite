@@ -186,6 +186,18 @@ export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 
 The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Knowledge, feedback, and eval scripts create additional records.
 
+Generate a larger repeatable JSONL scenario without overwriting the committed fixture:
+
+```bash
+./scripts/generate_demo_logs.sh \
+  --scenario checkout-timeout \
+  --count 200 \
+  --seed 42
+./scripts/demo_seed_logs.sh tmp/generated_checkout_logs.jsonl
+```
+
+Available scenarios are `checkout-timeout`, `payment-errors`, and `redis-latency`. Generation uses the current UTC time by default; pass `--now 2026-07-03T02:00:00Z` with `--seed` for byte-for-byte deterministic output.
+
 `configs/config.example.json` selects Elasticsearch logs, Prometheus metrics, and Jaeger traces with explicit mock fallback. If a backend is unavailable, Chat continues with `LOGS_FALLBACK`, `METRICS_FALLBACK`, or `TRACES_FALLBACK` warning metadata. The dependency-light `configs/config.json` keeps all three observability tools in mock mode.
 
 The local Prometheus mounts `configs/prometheus/alert_rules.yml` with checkout error-rate/latency, payment timeout, and Redis latency rules. `query_alerts` reads the resulting `ALERTS` series. Alertmanager, paging, and production incident routing are intentionally not included; when Prometheus alerts are unavailable, the existing mock fallback remains active.

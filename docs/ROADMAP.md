@@ -603,6 +603,12 @@ Delivered four local rules for checkout error rate, checkout latency, payment ti
 
 Exit status: complete.
 
+## Enhancement: Demo Log Generator — Completed
+
+Delivered a dependency-light Go JSONL generator with checkout timeout, payment error, and Redis latency scenarios; bounded event counts; current-time windows; and deterministic `--seed` plus `--now` output. The existing fixture remains unchanged, and `demo_seed_logs.sh` accepts an optional generated JSONL path while preserving its default behavior.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid
