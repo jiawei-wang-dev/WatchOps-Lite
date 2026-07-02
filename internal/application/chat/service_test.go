@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
@@ -145,9 +146,11 @@ func TestServiceReturnsActiveTraceID(t *testing.T) {
 	for _, expected := range []string{
 		"chat.execute",
 		"workflow.chat",
+		"graph.normalize_chat_input",
 		"graph.load_session_context",
 		"graph.load_long_term_memory",
-		"graph.build_prompt_input",
+		"graph.prepare_diagnostic_skills",
+		"graph.merge_context",
 		"graph.render_prompt_template",
 		"graph.run_react_agent",
 		"graph.collect_tool_evidence",
@@ -180,6 +183,100 @@ func TestNativeEinoGraphCompilesAndInvokes(t *testing.T) {
 	if result.RequestID != validCommand().RequestID ||
 		result.SessionID != validCommand().SessionID {
 		t.Fatalf("result = %#v, want unchanged Chat identifiers", result)
+	}
+}
+
+type blockingSessionStore struct {
+	*fakeSessionStore
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (f *blockingSessionStore) LoadContext(
+	ctx context.Context,
+	sessionID string,
+) (session.ContextSnapshot, error) {
+	f.started <- nodeLoadSessionContext
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return session.ContextSnapshot{}, ctx.Err()
+	}
+	return f.fakeSessionStore.LoadContext(ctx, sessionID)
+}
+
+type blockingLongTermMemoryStore struct {
+	*fakeLongTermMemoryStore
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (f *blockingLongTermMemoryStore) Search(
+	ctx context.Context,
+	query longterm.SearchQuery,
+) ([]longterm.Memory, error) {
+	f.started <- nodeLoadLongTermMemory
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return f.fakeLongTermMemoryStore.Search(ctx, query)
+}
+
+func TestNativeEinoGraphRunsIndependentContextBranchesConcurrently(t *testing.T) {
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	sessionStore := &blockingSessionStore{
+		fakeSessionStore: &fakeSessionStore{snapshot: emptySessionSnapshot()},
+		started:          started,
+		release:          release,
+	}
+	memoryStore := &blockingLongTermMemoryStore{
+		fakeLongTermMemoryStore: &fakeLongTermMemoryStore{},
+		started:                 started,
+		release:                 release,
+	}
+	service := NewService(
+		&fakeRunner{output: emptyAgentOutput()},
+		sessionStore,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			LongTermMemory:     memoryStore,
+			LongTermMemoryTopK: 3,
+		},
+	)
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := service.Execute(context.Background(), validCommand())
+		result <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case node := <-started:
+			seen[node] = true
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatalf(
+				"context branches did not overlap: started=%v",
+				seen,
+			)
+		}
+	}
+	close(release)
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Execute() did not finish after releasing context branches")
 	}
 }
 

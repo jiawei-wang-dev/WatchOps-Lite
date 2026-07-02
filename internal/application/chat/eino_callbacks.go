@@ -68,9 +68,11 @@ func chatGraphSpanName(info *callbacks.RunInfo) string {
 		return "workflow.chat"
 	}
 	switch info.Name {
-	case nodeLoadSessionContext,
+	case nodeNormalizeChatInput,
+		nodeLoadSessionContext,
 		nodeLoadLongTermMemory,
-		nodeBuildPromptInput,
+		nodePrepareSkills,
+		nodeMergeContext,
 		nodeRenderPromptTemplate,
 		nodeRunReActAgent,
 		nodeCollectToolEvidence,

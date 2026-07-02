@@ -553,6 +553,21 @@ The implementation keeps Redis session context, MySQL cross-session confirmed me
 
 Exit status: complete.
 
+## Enhancement: Native Eino Parallel Context Branches — Completed
+
+Delivered:
+
+- Native Eino Graph fan-out after normalized Chat input
+- Independent session-memory, long-term-memory, and diagnostic-skill branches
+- Native `AllPredecessor` fan-in before prompt rendering
+- Branch, merge, and downstream lifecycle spans through existing Eino callbacks
+- SSE visibility for the new graph-node lifecycle without changing the public Chat response
+- Concurrency and compatibility tests covering the compiled Eino graph
+
+The implementation uses Eino's DAG scheduling directly. It does not add a custom workflow abstraction, application-managed branch goroutines, a planner, or a policy engine. ReAct, Tool Guard, Tool Runtime, Failure Controller, memory behavior, streaming, and API contracts remain unchanged.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

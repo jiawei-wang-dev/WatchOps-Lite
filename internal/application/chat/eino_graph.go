@@ -9,9 +9,11 @@ import (
 
 const (
 	graphName                = "watchops_chat"
+	nodeNormalizeChatInput   = "normalize_chat_input"
 	nodeLoadSessionContext   = "load_session_context"
 	nodeLoadLongTermMemory   = "load_long_term_memory"
-	nodeBuildPromptInput     = "build_prompt_input"
+	nodePrepareSkills        = "prepare_diagnostic_skills"
+	nodeMergeContext         = "merge_context"
 	nodeRenderPromptTemplate = "render_prompt_template"
 	nodeRunReActAgent        = "run_react_agent"
 	nodeCollectToolEvidence  = "collect_tool_evidence"
@@ -37,6 +39,10 @@ func compileChatGraph(
 		node *compose.Lambda
 	}{
 		{
+			key:  nodeNormalizeChatInput,
+			node: compose.InvokableLambda(normalizeChatInputGraphNode),
+		},
+		{
 			key: nodeLoadSessionContext,
 			node: compose.InvokableLambda(
 				service.loadSessionContextGraphNode,
@@ -47,10 +53,12 @@ func compileChatGraph(
 			node: compose.InvokableLambda(service.loadLongTermMemoryGraphNode),
 		},
 		{
-			key: nodeBuildPromptInput,
-			node: compose.InvokableLambda(
-				buildPromptInputGraphNode,
-			),
+			key:  nodePrepareSkills,
+			node: compose.InvokableLambda(prepareDiagnosticSkillsGraphNode),
+		},
+		{
+			key:  nodeMergeContext,
+			node: compose.InvokableLambda(mergeContextGraphNode),
 		},
 		{
 			key: nodeRenderPromptTemplate,
@@ -80,20 +88,29 @@ func compileChatGraph(
 		},
 	}
 	for _, current := range nodes {
-		if err := graph.AddLambdaNode(
-			current.key,
-			current.node,
-			compose.WithNodeName(current.key),
-		); err != nil {
+		options := []compose.GraphAddNodeOpt{compose.WithNodeName(current.key)}
+		switch current.key {
+		case nodeLoadSessionContext:
+			options = append(options, compose.WithOutputKey(nodeLoadSessionContext))
+		case nodeLoadLongTermMemory:
+			options = append(options, compose.WithOutputKey(nodeLoadLongTermMemory))
+		case nodePrepareSkills:
+			options = append(options, compose.WithOutputKey(nodePrepareSkills))
+		}
+		if err := graph.AddLambdaNode(current.key, current.node, options...); err != nil {
 			return nil, fmt.Errorf("add Eino Chat graph node %q: %w", current.key, err)
 		}
 	}
 
 	edges := [][2]string{
-		{compose.START, nodeLoadSessionContext},
-		{nodeLoadSessionContext, nodeLoadLongTermMemory},
-		{nodeLoadLongTermMemory, nodeBuildPromptInput},
-		{nodeBuildPromptInput, nodeRenderPromptTemplate},
+		{compose.START, nodeNormalizeChatInput},
+		{nodeNormalizeChatInput, nodeLoadSessionContext},
+		{nodeNormalizeChatInput, nodeLoadLongTermMemory},
+		{nodeNormalizeChatInput, nodePrepareSkills},
+		{nodeLoadSessionContext, nodeMergeContext},
+		{nodeLoadLongTermMemory, nodeMergeContext},
+		{nodePrepareSkills, nodeMergeContext},
+		{nodeMergeContext, nodeRenderPromptTemplate},
 		{nodeRenderPromptTemplate, nodeRunReActAgent},
 		{nodeRunReActAgent, nodeCollectToolEvidence},
 		{nodeCollectToolEvidence, nodePersistSessionMemory},
@@ -111,7 +128,11 @@ func compileChatGraph(
 		}
 	}
 
-	runnable, err := graph.Compile(ctx, compose.WithGraphName(graphName))
+	runnable, err := graph.Compile(
+		ctx,
+		compose.WithGraphName(graphName),
+		compose.WithNodeTriggerMode(compose.AllPredecessor),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("compile native Eino Chat graph: %w", err)
 	}

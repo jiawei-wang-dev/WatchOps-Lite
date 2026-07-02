@@ -65,12 +65,13 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 The Chat application path is a compiled native `compose.Graph[Command, Result]`:
 
 ```text
-load session context -> load optional long-term memory -> build prompt input
--> render Eino PromptTemplate -> run Eino ReAct -> collect evidence
--> persist session memory -> build response
+normalize input
+  -> [load session context | load optional long-term memory | prepare diagnostic skills]
+  -> merge context -> render Eino PromptTemplate -> run Eino ReAct
+  -> collect evidence -> persist session memory -> build response
 ```
 
-The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
+The three independent context branches use native Eino Graph fan-out/fan-in with `AllPredecessor` triggering; no custom workflow wrapper or application-managed goroutines are used. The graph uses typed Eino Lambda nodes and Eino callbacks for OpenTelemetry node spans. When MySQL is enabled, `load_long_term_memory` retrieves at most `long_term_memory.top_k` concise confirmed memories before prompt rendering. Search failure adds a limitation and Chat continues. Eino PromptTemplate performs prompt assembly; Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools.
 
 A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, knowledge search, alert lookup, or service topology lookup. A **Skill** is a named business-level diagnostic routine that explains when one or more existing tools are useful. Skills are rendered into the Eino PromptTemplate as concise diagnostic cards; they do not register tools, discover plugins, execute code, or alter ReAct behavior.
 

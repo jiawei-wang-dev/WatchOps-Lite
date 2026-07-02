@@ -26,55 +26,107 @@ type graphState struct {
 	agentOutput               agenteino.AgentOutput
 }
 
+type normalizedChatInput struct {
+	command Command
+}
+
+type sessionContextBranch struct {
+	command         Command
+	snapshot        session.ContextSnapshot
+	memoryAvailable bool
+}
+
+type longTermMemoryBranch struct {
+	memories    []longterm.Memory
+	unavailable bool
+}
+
+type diagnosticSkillsBranch struct {
+	cards []string
+}
+
+func normalizeChatInputGraphNode(
+	_ context.Context,
+	command Command,
+) (normalizedChatInput, error) {
+	command.SessionID = strings.TrimSpace(command.SessionID)
+	command.Message = strings.TrimSpace(command.Message)
+	return normalizedChatInput{command: command}, nil
+}
+
 func (s *Service) loadSessionContextGraphNode(
 	ctx context.Context,
-	command Command,
-) (graphState, error) {
-	snapshot, available := s.loadContext(ctx, command.SessionID)
-	return graphState{
-		command:          command,
-		snapshot:         snapshot,
-		memoryAvailable:  available,
-		longTermMemories: []longterm.Memory{},
+	input normalizedChatInput,
+) (sessionContextBranch, error) {
+	snapshot, available := s.loadContext(ctx, input.command.SessionID)
+	return sessionContextBranch{
+		command:         input.command,
+		snapshot:        snapshot,
+		memoryAvailable: available,
 	}, nil
 }
 
 func (s *Service) loadLongTermMemoryGraphNode(
 	ctx context.Context,
-	state graphState,
-) (graphState, error) {
+	input normalizedChatInput,
+) (longTermMemoryBranch, error) {
 	if s.longTermMemory == nil {
-		return state, nil
+		return longTermMemoryBranch{memories: []longterm.Memory{}}, nil
 	}
 	memories, err := s.longTermMemory.Search(ctx, longterm.SearchQuery{
-		Query: state.command.Message,
+		Query: input.command.Message,
 		Limit: s.longTermMemoryTopK,
 	})
 	if err != nil {
-		state.longTermMemoryUnavailable = true
-		state.longTermMemories = []longterm.Memory{}
-		return state, nil
+		return longTermMemoryBranch{
+			memories:    []longterm.Memory{},
+			unavailable: true,
+		}, nil
 	}
-	state.longTermMemories = memories
-	return state, nil
+	return longTermMemoryBranch{memories: memories}, nil
 }
 
-func buildPromptInputGraphNode(
+func prepareDiagnosticSkillsGraphNode(
 	_ context.Context,
-	state graphState,
+	_ normalizedChatInput,
+) (diagnosticSkillsBranch, error) {
+	return diagnosticSkillsBranch{cards: diagnosticSkillCards()}, nil
+}
+
+func mergeContextGraphNode(
+	_ context.Context,
+	input map[string]any,
 ) (graphState, error) {
-	state.agentInput = agenteino.AgentInput{
-		SessionSummary: state.snapshot.Summary,
-		RecentMessages: state.snapshot.RecentMessages,
-		ConfirmedLongTermMemories: confirmedLongTermMemoryPrompt(
-			state.longTermMemories,
-		),
-		DiagnosticSkills:   diagnosticSkillCards(),
-		RetrievedKnowledge: []string{},
-		CurrentMessage:     state.command.Message,
-		TimeContext:        state.command.TimeContext,
+	sessionBranch, ok := input[nodeLoadSessionContext].(sessionContextBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: session context branch output is unavailable", ErrExecution)
 	}
-	return state, nil
+	memoryBranch, ok := input[nodeLoadLongTermMemory].(longTermMemoryBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: long-term memory branch output is unavailable", ErrExecution)
+	}
+	skillsBranch, ok := input[nodePrepareSkills].(diagnosticSkillsBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: diagnostic skills branch output is unavailable", ErrExecution)
+	}
+	return graphState{
+		command:                   sessionBranch.command,
+		snapshot:                  sessionBranch.snapshot,
+		memoryAvailable:           sessionBranch.memoryAvailable,
+		longTermMemories:          memoryBranch.memories,
+		longTermMemoryUnavailable: memoryBranch.unavailable,
+		agentInput: agenteino.AgentInput{
+			SessionSummary: sessionBranch.snapshot.Summary,
+			RecentMessages: sessionBranch.snapshot.RecentMessages,
+			ConfirmedLongTermMemories: confirmedLongTermMemoryPrompt(
+				memoryBranch.memories,
+			),
+			DiagnosticSkills:   skillsBranch.cards,
+			RetrievedKnowledge: []string{},
+			CurrentMessage:     sessionBranch.command.Message,
+			TimeContext:        sessionBranch.command.TimeContext,
+		},
+	}, nil
 }
 
 func (s *Service) renderPromptTemplateGraphNode(

@@ -90,15 +90,20 @@ The application compiles and invokes `compose.Graph[chat.Command, chat.Result]`.
 
 ```text
 workflow.chat
-├── graph.load_session_context
-├── graph.load_long_term_memory
-├── graph.build_prompt_input
+├── graph.normalize_chat_input
+├── fan-out
+│   ├── graph.load_session_context
+│   ├── graph.load_long_term_memory
+│   └── graph.prepare_diagnostic_skills
+├── graph.merge_context
 ├── graph.render_prompt_template
 ├── graph.run_react_agent
 ├── graph.collect_tool_evidence
 ├── graph.persist_session_memory
 └── graph.build_chat_response
 ```
+
+After input normalization, Eino fans out the three independent context branches and schedules them eagerly. `graph.merge_context` uses native fan-in with `AllPredecessor`, so prompt rendering starts only after all branch outputs are available. This is a native Eino DAG, not a custom workflow wrapper, and production code does not add goroutines to simulate graph concurrency.
 
 `graph.render_prompt_template` calls the native Eino `DefaultChatTemplate`. `graph.run_react_agent` delegates to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer. Session failures retain the existing single-turn degradation behavior.
 
@@ -127,12 +132,20 @@ sequenceDiagram
     participant H as HTTP Handler
     participant A as Chat Use Case
     participant R as Redis
+    participant M as MySQL
     participant G as Eino Agent
     participant T as Tool Harness
 
     C->>H: POST /api/v1/chat
     H->>A: Validated command
-    A->>R: graph.load_session_context
+    par Native Eino context fan-out
+        A->>R: graph.load_session_context
+    and
+        A->>M: graph.load_long_term_memory
+    and
+        A->>A: graph.prepare_diagnostic_skills
+    end
+    A->>A: graph.merge_context
     A->>G: graph.render_prompt_template / graph.run_react_agent
     loop Bounded decision loop
         G->>T: Execute typed tool request
@@ -327,10 +340,13 @@ Implemented trace hierarchy:
 http POST /api/v1/chat
 └── chat.execute
     └── workflow.chat
-        ├── graph.load_session_context
-        │   └── session.load_context
-        ├── graph.load_long_term_memory
-        ├── graph.build_prompt_input
+        ├── graph.normalize_chat_input
+        ├── context branches (native Eino fan-out)
+        │   ├── graph.load_session_context
+        │   │   └── session.load_context
+        │   ├── graph.load_long_term_memory
+        │   └── graph.prepare_diagnostic_skills
+        ├── graph.merge_context
         ├── graph.render_prompt_template
         ├── graph.run_react_agent
         │   └── agent.run / agent.eino.run
