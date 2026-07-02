@@ -18,6 +18,19 @@ const (
 	CaseTypeBad  CaseType = "bad_case"
 )
 
+// BadCaseReason provides stable metadata values for reviewing failed answers.
+// It intentionally does not add a required database or HTTP field.
+type BadCaseReason string
+
+const (
+	BadCaseReasonNoEvidence         BadCaseReason = "no_evidence"
+	BadCaseReasonWrongTool          BadCaseReason = "wrong_tool"
+	BadCaseReasonIrrelevantAnswer   BadCaseReason = "irrelevant_answer"
+	BadCaseReasonWrongRootCause     BadCaseReason = "wrong_root_cause"
+	BadCaseReasonPoorFormat         BadCaseReason = "poor_format"
+	BadCaseReasonMissingUncertainty BadCaseReason = "missing_uncertainty"
+)
+
 type Case struct {
 	ID                string         `json:"id"`
 	FeedbackID        string         `json:"feedback_id,omitempty"`

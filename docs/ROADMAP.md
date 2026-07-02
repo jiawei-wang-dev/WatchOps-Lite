@@ -367,6 +367,24 @@ Verified:
 
 Exit status: complete. WatchOps-Lite enhanced demo is fully verified locally.
 
+## Backend Convergence: Explicit Eino Workflow and Business Skills — Completed
+
+Delivered:
+
+- Thin, traced Chat workflow around the existing Eino ReAct runner
+- Explicit context, Agent-input, ReAct, evidence, memory, and response nodes
+- Lightweight business Skill definitions for metrics, logs, traces, runbooks, and checkout diagnosis
+- Advisory-only policy helper with no learning, fallback authority, or hard Agent dependency
+- Stable bad-case reason constants for feedback/eval metadata
+- Clear Tool vs Skill vs Policy vs Tool Runtime documentation
+
+Constraints preserved:
+
+- no public API, evidence schema, PromptTemplate, ReAct graph, Tool Runtime, or demo-script changes
+- no planner, MCP, UEM, skill registry, dynamic discovery, or external dependency
+
+Exit status: complete. Backend orchestration is explicit and interview-friendly without introducing a second Agent execution system.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -388,6 +406,7 @@ flowchart LR
     S3 --> S4["Stage 4 Runtime Metrics (complete)"]
     S4 --> S5["Stage 5 Grafana Dashboard (complete)"]
     S5 --> S6["Stage 6 Enhanced Demo Verification (complete)"]
+    S6 --> C1["Backend convergence (complete)"]
 ```
 
 ## Deferred Work

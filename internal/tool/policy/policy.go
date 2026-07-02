@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"math"
 	"sort"
 	"strings"
 
@@ -36,6 +35,9 @@ type ToolStats struct {
 	RelativeCost        float64
 }
 
+// AgentContext is retained for source compatibility with the safe baseline.
+// Policy hints are intentionally static and do not learn from runtime stats or
+// take ownership of fallback decisions.
 type AgentContext struct {
 	Service            string
 	Stats              map[string]ToolStats
@@ -78,38 +80,15 @@ type Plan struct {
 }
 
 type Policy struct {
-	defaultStats map[string]ToolStats
 }
 
 func New() *Policy {
-	return &Policy{defaultStats: map[string]ToolStats{
-		ToolMetrics: {
-			HistoricalLatencyMS: 80,
-			SuccessRate:         0.98,
-			FallbackFrequency:   0.03,
-			RelativeCost:        0.10,
-		},
-		ToolLogs: {
-			HistoricalLatencyMS: 150,
-			SuccessRate:         0.97,
-			FallbackFrequency:   0.05,
-			RelativeCost:        0.20,
-		},
-		ToolKnowledge: {
-			HistoricalLatencyMS: 180,
-			SuccessRate:         0.98,
-			FallbackFrequency:   0.04,
-			RelativeCost:        0.30,
-		},
-		ToolTraces: {
-			HistoricalLatencyMS: 300,
-			SuccessRate:         0.95,
-			FallbackFrequency:   0.08,
-			RelativeCost:        0.60,
-		},
-	}}
+	return &Policy{}
 }
 
+// Rank returns advisory ordering hints. Eino ReAct remains free to choose its
+// tools, while Tool Runtime remains solely responsible for execution and
+// fallback behavior.
 func (p *Policy) Rank(ctx context.Context, request Request) []RankedTool {
 	queryType, relevance := classify(request.Query)
 	ctx, span := observability.StartSpan(
@@ -124,24 +103,19 @@ func (p *Policy) Rank(ctx context.Context, request Request) []RankedTool {
 		if relevanceScore < 0.5 {
 			continue
 		}
-		stats := p.statsFor(toolName, request.Context.Stats)
 		ranked = append(ranked, RankedTool{
-			Name:              toolName,
-			Source:            sourceForTool(toolName),
-			Score:             rankScore(relevanceScore, stats),
-			Relevance:         relevanceScore,
-			ExpectedLatencyMS: stats.HistoricalLatencyMS,
-			SuccessRate:       stats.SuccessRate,
-			FallbackFrequency: stats.FallbackFrequency,
-			RelativeCost:      stats.RelativeCost,
+			Name:      toolName,
+			Source:    sourceForTool(toolName),
+			Score:     relevanceScore,
+			Relevance: relevanceScore,
 		})
 	}
 	sort.SliceStable(ranked, func(left, right int) bool {
 		if ranked[left].Score != ranked[right].Score {
 			return ranked[left].Score > ranked[right].Score
 		}
-		if ranked[left].ExpectedLatencyMS != ranked[right].ExpectedLatencyMS {
-			return ranked[left].ExpectedLatencyMS < ranked[right].ExpectedLatencyMS
+		if priorityForTool(ranked[left].Name) != priorityForTool(ranked[right].Name) {
+			return priorityForTool(ranked[left].Name) < priorityForTool(ranked[right].Name)
 		}
 		return ranked[left].Name < ranked[right].Name
 	})
@@ -149,6 +123,8 @@ func (p *Policy) Rank(ctx context.Context, request Request) []RankedTool {
 	return ranked
 }
 
+// Plan packages advisory hints for callers that used the original safe
+// baseline API. It is not an execution plan and never authorizes fallback.
 func (p *Policy) Plan(ctx context.Context, request Request) Plan {
 	ranked := p.Rank(ctx, request)
 	queryType, _ := classify(request.Query)
@@ -161,7 +137,11 @@ func (p *Policy) Plan(ctx context.Context, request Request) Plan {
 			Reason:   stepReason(item),
 		})
 	}
-	fallback := fallbackDecision(steps, request.Context.RealSourceFailures)
+	fallback := FallbackDecision{
+		AllowMockFallback: false,
+		Condition:         "owned_by_tool_runtime",
+		FailedRealSources: []string{},
+	}
 	_, span := observability.StartSpan(
 		ctx,
 		"tool.policy.plan",
@@ -175,34 +155,6 @@ func (p *Policy) Plan(ctx context.Context, request Request) Plan {
 		Steps:     steps,
 		Fallback:  fallback,
 	}
-}
-
-func (p *Policy) statsFor(name string, overrides map[string]ToolStats) ToolStats {
-	stats := p.defaultStats[name]
-	if override, ok := overrides[name]; ok {
-		if override.HistoricalLatencyMS > 0 {
-			stats.HistoricalLatencyMS = override.HistoricalLatencyMS
-		}
-		if override.SuccessRate >= 0 && override.SuccessRate <= 1 {
-			stats.SuccessRate = override.SuccessRate
-		}
-		if override.FallbackFrequency >= 0 && override.FallbackFrequency <= 1 {
-			stats.FallbackFrequency = override.FallbackFrequency
-		}
-		if override.RelativeCost > 0 {
-			stats.RelativeCost = override.RelativeCost
-		}
-	}
-	return stats
-}
-
-func rankScore(relevance float64, stats ToolStats) float64 {
-	latencyPenalty := math.Min(stats.HistoricalLatencyMS/1000, 1)
-	return relevance*0.55 +
-		stats.SuccessRate*0.25 -
-		latencyPenalty*0.10 -
-		stats.FallbackFrequency*0.05 -
-		stats.RelativeCost*0.05
 }
 
 func classify(query string) (QueryType, map[string]float64) {
@@ -255,22 +207,19 @@ func classify(query string) (QueryType, map[string]float64) {
 	return queryType, relevance
 }
 
-func fallbackDecision(steps []Step, failures map[string]bool) FallbackDecision {
-	decision := FallbackDecision{
-		Condition:         "all_real_sources_failed",
-		FailedRealSources: []string{},
+func priorityForTool(name string) int {
+	switch name {
+	case ToolMetrics:
+		return 1
+	case ToolLogs:
+		return 2
+	case ToolTraces:
+		return 3
+	case ToolKnowledge:
+		return 4
+	default:
+		return 5
 	}
-	if len(steps) == 0 {
-		return decision
-	}
-	for _, step := range steps {
-		if !failures[step.Tool] {
-			return decision
-		}
-		decision.FailedRealSources = append(decision.FailedRealSources, step.Tool)
-	}
-	decision.AllowMockFallback = true
-	return decision
 }
 
 func sourceForTool(name string) evidence.Source {
@@ -289,7 +238,7 @@ func sourceForTool(name string) evidence.Source {
 }
 
 func stepReason(tool RankedTool) string {
-	return "ranked by relevance, historical reliability, latency, fallback frequency, and relative cost"
+	return "advisory relevance hint; Eino ReAct decides whether to call this tool"
 }
 
 func rankedNames(values []RankedTool) []string {

@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -117,45 +116,13 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 		return Result{}, &ValidationError{Field: "time_context", Message: err.Error()}
 	}
 
-	snapshot, memoryAvailable := s.loadContext(ctx, command.SessionID)
-	span.SetAttributes(
-		attribute.Bool("session_memory_available", memoryAvailable),
-		attribute.Int("recent_message_count", len(snapshot.RecentMessages)),
-		attribute.Int64("summary_version", snapshot.Summary.Version),
-	)
-	agentOutput, err := s.runner.Run(ctx, agenteino.AgentInput{
-		SessionSummary: snapshot.Summary,
-		RecentMessages: snapshot.RecentMessages,
-		CurrentMessage: command.Message,
-		TimeContext:    command.TimeContext,
-	})
+	result, err := s.executeWorkflow(ctx, command)
 	if err != nil {
-		observability.MarkError(span, "agent execution failed")
-		return Result{}, fmt.Errorf("%w: %v", ErrExecution, err)
-	}
-	ensureAgentMetadata(&agentOutput)
-	agentOutput.Metadata["session_memory_available"] = memoryAvailable
-
-	if !memoryAvailable {
-		appendMemoryLimitation(&agentOutput)
-	} else if err := s.persistContext(ctx, command, snapshot, agentOutput); err != nil {
-		runtimemetrics.IncSessionMemoryUnavailable()
-		span.SetAttributes(attribute.Bool("session_memory_available", false))
-		agentOutput.Metadata["session_memory_available"] = false
-		appendMemoryLimitation(&agentOutput)
-	}
-
-	traceID := observability.TraceID(ctx)
-	if traceID != "" {
-		agentOutput.Metadata["trace_id"] = traceID
+		observability.MarkError(span, "chat workflow failed")
+		return Result{}, err
 	}
 	success = true
-	return Result{
-		RequestID: command.RequestID,
-		SessionID: command.SessionID,
-		Agent:     agentOutput,
-		TraceID:   traceID,
-	}, nil
+	return result, nil
 }
 
 func (s *Service) loadContext(

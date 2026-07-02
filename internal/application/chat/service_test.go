@@ -141,7 +141,18 @@ func TestServiceReturnsActiveTraceID(t *testing.T) {
 	for _, span := range exporter.GetSpans() {
 		names[span.Name] = true
 	}
-	for _, expected := range []string{"chat.execute", "session.load_context", "session.persist_context"} {
+	for _, expected := range []string{
+		"chat.execute",
+		"workflow.chat",
+		"graph.load_context",
+		"graph.build_agent_input",
+		"graph.run_react_agent",
+		"graph.collect_evidence",
+		"graph.persist_memory",
+		"graph.build_response",
+		"session.load_context",
+		"session.persist_context",
+	} {
 		if !names[expected] {
 			t.Fatalf("spans = %#v, missing %q", names, expected)
 		}

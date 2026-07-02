@@ -7,8 +7,9 @@ WatchOps-Lite follows a pragmatic ports-and-adapters architecture. Gin, Eino, El
 ```mermaid
 flowchart LR
     U["SRE / Developer"] --> API["Gin HTTP API"]
-    API --> APP["Application Use Cases"]
+    API --> APP["Explicit Chat Workflow"]
     APP --> AGENT["Eino Graph / ReAct Agent"]
+    SKILLS["Business Skills<br/>(descriptive)"] -. explains .-> AGENT
     AGENT --> CTX["Context Builder"]
     AGENT --> PROMPT["Prompt Renderer"]
     AGENT --> HARNESS["Tool Harness"]
@@ -78,6 +79,35 @@ The current Agent layer uses:
 
 WatchOps-Lite does not build a parallel Tool Registry. It defines tool I/O contracts, `ToolError`, timeout/fallback behavior, evidence normalization, redaction, and observability wrappers around Eino tools. Model-produced evidence is never trusted directly: only IDs found in actual `ToolResult` records can support conclusions or inferences.
 
+### 3.1 Explicit Chat Workflow
+
+The application wraps the existing Agent runner with a thin, sequential workflow. This is an orchestration boundary, not a replacement Agent graph:
+
+```text
+workflow.chat
+├── graph.load_context
+├── graph.build_agent_input
+├── graph.run_react_agent
+├── graph.collect_evidence
+├── graph.persist_memory
+└── graph.build_response
+```
+
+`graph.run_react_agent` delegates unchanged to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer; the collect node makes that completed boundary observable without changing the response schema. Session failures retain the existing single-turn degradation behavior.
+
+Using a small internal workflow avoids forcing Redis persistence and HTTP response construction into Eino's model/tool graph. Eino remains responsible for PromptTemplate rendering, ChatModel invocation, ReAct iteration, and Tool Calling.
+
+### 3.2 Tool, Skill, and Policy Boundaries
+
+| Concept | Responsibility | Explicit non-responsibility |
+| --- | --- | --- |
+| Tool | Atomic read-only capability backed by Prometheus, Elasticsearch, Jaeger, or knowledge retrieval | Multi-step incident diagnosis |
+| Skill | Named business diagnostic routine describing when existing tools are useful | Registration, discovery, planning, or execution |
+| Policy helper | Optional static ordering hints and explanation strings | ReAct decisions, learning, optimization, timeout, or fallback |
+| Tool Runtime | Schema-safe execution, timeout, fallback, errors, normalization, and tracing | Agent intent selection |
+
+The checkout diagnosis Skill documents the readable sequence metrics → logs → traces → knowledge. It does not force that sequence or change ReAct behavior. The policy package has no hard dependency from Eino execution and never authorizes mock fallback; Tool Runtime remains the only execution-control boundary.
+
 ## 4. Chat Data Flow
 
 ```mermaid
@@ -91,15 +121,15 @@ sequenceDiagram
 
     C->>H: POST /api/v1/chat
     H->>A: Validated command
-    A->>R: Load summary and recent messages
-    A->>G: Message and context budget
+    A->>R: graph.load_context
+    A->>G: graph.build_agent_input / graph.run_react_agent
     loop Bounded decision loop
         G->>T: Execute typed tool request
         T-->>G: Evidence or structured error
     end
-    G-->>A: Structured answer and citations
-    A->>R: Append recent messages / refresh summary
-    A-->>H: Result
+    G-->>A: graph.collect_evidence
+    A->>R: graph.persist_memory
+    A-->>H: graph.build_response
     H-->>C: Answer, request_id, and trace_id
 ```
 
@@ -160,7 +190,7 @@ Trace spans include `knowledge.embedding`, `knowledge.search.bm25`, `knowledge.s
 
 ## 7. Tool Harness
 
-Eino owns tool schema exposure, registration, and invocation. The WatchOps-Lite harness is a policy wrapper, not a second tool runtime or custom Tool Registry.
+Eino owns tool schema exposure, registration, and invocation. WatchOps-Lite adds one unified Tool Runtime for bounded execution and domain contracts, not a custom Tool Registry. The advisory policy helper is separate from this runtime.
 
 Tool execution lifecycle:
 
@@ -248,6 +278,8 @@ Run summaries are stored in `eval_runs`; per-case pass/fail reasons, request IDs
 
 Tracing uses `eval.run`, `eval.case.execute`, and `eval.case.check`.
 
+Bad-case review metadata may use the stable reasons `no_evidence`, `wrong_tool`, `irrelevant_answer`, `wrong_root_cause`, `poor_format`, and `missing_uncertainty`. These constants do not add a required database or API field.
+
 ## 9. OpenTelemetry and Jaeger
 
 The application installs the official OpenTelemetry SDK and exports spans with OTLP over gRPC. Jaeger all-in-one accepts OTLP locally and provides the trace UI. Tracing is configurable and disabled by default.
@@ -257,22 +289,20 @@ Implemented trace hierarchy:
 ```text
 http POST /api/v1/chat
 └── chat.execute
-    ├── session.load_context
-    ├── agent.run
-    │   ├── tool.query_metrics
-    │   │   └── metrics.query
-    │   │       └── prometheus.query
-    │   ├── tool.query_logs
-    │   │   └── logs.search
-    │   │       └── elasticsearch.logs.search
-    │   ├── tool.query_traces
-    │   │   └── traces.query
-    │   │       └── jaeger.query
-    │   └── tool.search_knowledge
-    │       └── knowledge.search
-    │           └── elasticsearch.search
-    └── session.persist_context
-        └── session.update_summary
+    └── workflow.chat
+        ├── graph.load_context
+        │   └── session.load_context
+        ├── graph.build_agent_input
+        ├── graph.run_react_agent
+        │   └── agent.run / agent.eino.run
+        │       └── tool.runtime.execute
+        │           ├── tool.runtime.fallback
+        │           └── tool.runtime.timeout
+        ├── graph.collect_evidence
+        ├── graph.persist_memory
+        │   └── session.persist_context
+        │       └── session.update_summary
+        └── graph.build_response
 ```
 
 When Eino ReAct mode is enabled, `agent.eino.run` contains `agent.prompt.render`, `agent.llm.call`, `agent.tool_call`, and `agent.output.parse` spans. Request-time model failure also creates `agent.fallback`. Knowledge ingestion, feedback, and eval endpoints create their own application and adapter spans. HTTP middleware extracts W3C trace context and returns `X-Trace-ID`; Chat also returns the same ID in its response contract.

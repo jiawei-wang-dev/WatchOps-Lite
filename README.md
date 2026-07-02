@@ -9,9 +9,10 @@ WatchOps-Lite turns an incident question into a bounded investigation: it builds
 ```mermaid
 flowchart LR
     C["SRE / API client"] --> G["Gin HTTP API"]
-    G --> A["Chat application service"]
+    G --> A["Explicit Chat workflow"]
     A --> M["Redis context"]
     A --> E["Eino ReAct Agent<br/>or deterministic fallback"]
+    S["Business skills<br/>(descriptive only)"] -. explains .-> E
     E --> T["Eino tool calling"]
     T --> L["query_logs"]
     T --> P["query_metrics"]
@@ -34,6 +35,8 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 
 - Gin HTTP API with thin handlers, structured errors, request IDs, and graceful shutdown
 - Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
+- Explicit Chat workflow nodes for context, Agent execution, evidence collection, memory, and response construction
+- Lightweight on-call Skills that describe existing tool combinations without adding another execution engine
 - Deterministic Agent fallback that requires no API key
 - `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
 - Shared `ToolResult`, evidence, warning, and structured `ToolError` contracts
@@ -48,6 +51,21 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - MySQL upvote/downvote feedback, good/bad eval cases, and synchronous rule-based eval runs
 - OpenTelemetry spans, W3C trace propagation, response `trace_id`, and Jaeger visualization
 - Reproducible Docker Compose and scripted demo flow
+
+## Orchestration, Tools, and Skills
+
+The Chat application path is an explicit, traced workflow:
+
+```text
+load context -> build Agent input -> run Eino ReAct
+             -> collect evidence -> persist memory -> build response
+```
+
+Eino ReAct and Eino Tool Calling remain responsible for deciding and invoking tools. The workflow wrapper exposes application boundaries in code and Jaeger without replacing the existing ReAct graph.
+
+A **Tool** is an atomic external capability such as Prometheus metrics, Elasticsearch logs, Jaeger traces, or knowledge search. A **Skill** is a named on-call diagnostic routine that documents when one or more existing tools are useful. Skills do not register tools, discover plugins, or alter ReAct behavior.
+
+`internal/tool/policy` provides optional, static ordering hints only. It is not a planner, does not learn, never authorizes fallback, and is not required by the Agent execution path. Timeout and fallback behavior remain centralized in Tool Runtime.
 
 ## Quick Start
 
