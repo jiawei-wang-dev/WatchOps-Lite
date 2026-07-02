@@ -173,7 +173,15 @@ session:{id}:lock     STRING      Short-lived summary update lock
 
 Each message contains role, content, timestamp, sequence, and request ID. Summary updates use compare-and-set semantics. A version conflict causes one reload and merge attempt, never unbounded retries.
 
-### 5.2 Context Budget
+### 5.2 Session History API
+
+`GET /api/v1/chat/history` reads the bounded recent-message window and rolling summary through the Chat application service. `DELETE /api/v1/chat/history` deletes only `session:{id}:recent` and `session:{id}:summary`. Both operations use the existing Redis Store; no second conversation database is introduced.
+
+The API never exposes prompts or private reasoning. It returns only persisted session messages, their bounded operational metadata, and the structured summary. Clearing a session cannot reach the MySQL long-term-memory Store, Elasticsearch knowledge, feedback, or eval data. The embedded console uses these endpoints to load, render, and clear history and refreshes the panel after normal or streaming Chat completes.
+
+Tracing uses `session.history.get` and `session.history.clear` with session ID, limit, and message count only.
+
+### 5.3 Context Budget
 
 The context implementation bounds recent messages and moves older messages into a rolling structured summary. `summary.mode=llm` uses the configured OpenAI-compatible model with a versioned JSON-only prompt; deterministic mode remains the default. Model errors, summary timeouts, or invalid JSON create `summary.fallback` and use the deterministic summarizer without failing Chat.
 
@@ -189,7 +197,7 @@ Context budgeting follows this order:
 
 Summary tracing uses `summary.llm`, `summary.parse`, and `summary.fallback`. Attributes record only mode, prompt version, message count, parse status, and fallback status—not message or model-output content.
 
-### 5.3 Memory and Knowledge Separation
+### 5.4 Memory and Knowledge Separation
 
 | Capability | Backend | Scope | Trust boundary |
 | --- | --- | --- | --- |

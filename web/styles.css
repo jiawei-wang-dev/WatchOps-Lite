@@ -493,6 +493,17 @@ select:focus {
   background: var(--panel-soft);
 }
 
+.button.danger-outline {
+  border-color: #fecaca;
+  background: white;
+  color: #b91c1c;
+}
+
+.button.danger-outline:hover:not(:disabled) {
+  border-color: #fca5a5;
+  background: var(--danger-soft);
+}
+
 .button:disabled,
 .button.disabled {
   cursor: not-allowed;
@@ -891,6 +902,83 @@ tr:last-child td {
   color: #334155;
   font-size: 0.81rem;
   overflow-wrap: anywhere;
+}
+
+.history-card {
+  margin-top: 18px;
+}
+
+.history-summary {
+  margin-bottom: 14px;
+}
+
+.session-summary-card {
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.session-summary-card > div,
+.history-message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.session-summary-card span,
+.history-message-head time {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.session-summary-card p {
+  margin: 8px 0 0;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
+.history-messages {
+  display: grid;
+  gap: 10px;
+}
+
+.history-message {
+  max-width: 88%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--panel-soft);
+}
+
+.history-message.user {
+  margin-left: auto;
+  border-color: #bfdbfe;
+  background: var(--accent-soft);
+}
+
+.history-message.assistant {
+  margin-right: auto;
+  background: white;
+}
+
+.history-message-head strong {
+  font-size: 0.73rem;
+  text-transform: capitalize;
+}
+
+.history-message > p {
+  margin: 7px 0 0;
+  color: #334155;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.history-boundary {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 .evidence-meta,

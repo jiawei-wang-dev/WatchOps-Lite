@@ -41,6 +41,8 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	chatHandler := handler.NewChat(dependencies.Chat)
 	api.POST("/chat", chatHandler.Handle)
 	api.POST("/chat/stream", chatHandler.Stream)
+	api.GET("/chat/history", chatHandler.GetHistory)
+	api.DELETE("/chat/history", chatHandler.ClearHistory)
 
 	knowledgeHandler := handler.NewKnowledge(dependencies.Knowledge)
 	knowledgeAPI := api.Group("/knowledge")

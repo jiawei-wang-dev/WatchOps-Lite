@@ -246,6 +246,58 @@ If Redis is unavailable, Chat still returns a normal answer for the current turn
 
 Raw Redis errors are not returned.
 
+## Chat History
+
+Chat history is session-scoped Redis context. It contains only the bounded recent-message window and rolling summary already used by Chat.
+
+```http
+GET /api/v1/chat/history?session_id=ses_01&limit=20
+```
+
+`session_id` is required. `limit` defaults to 20 and is capped at 100. Messages are returned in chronological order.
+
+```json
+{
+  "session_id": "ses_01",
+  "summary": {
+    "content": "Earlier checkout investigation",
+    "version": 2,
+    "updated_at": "2026-07-03T01:00:00Z",
+    "goal": "identify the checkout failure cause",
+    "confirmed_facts": ["checkout errors increased"],
+    "open_questions": [],
+    "attempted_actions": [],
+    "important_entities": ["checkout"]
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "Why are checkout requests failing?",
+      "created_at": "2026-07-03T01:01:00Z",
+      "request_id": "req_01",
+      "metadata": {}
+    }
+  ],
+  "limit": 20,
+  "count": 1
+}
+```
+
+Clear the same Redis session context:
+
+```http
+DELETE /api/v1/chat/history?session_id=ses_01
+```
+
+```json
+{
+  "session_id": "ses_01",
+  "cleared": true
+}
+```
+
+Deletion removes only the Redis recent-message and summary keys for the selected session. It does not remove confirmed MySQL long-term memory, Elasticsearch knowledge, feedback, eval cases, or audit data. If Redis is unavailable, both endpoints return `503 SESSION_MEMORY_UNAVAILABLE` without exposing backend errors.
+
 ### Tool Failures
 
 Tool failures do not disappear from the answer. A failed tool has `success: false` and an `error_code` in `tool_runs`, plus a corresponding entry in `answer.limitations`. No evidence is created for a failed call.

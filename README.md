@@ -49,6 +49,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Tool schema validation, timeout boundaries, safe error normalization, and tracing
 - Evidence-aware output parsing that rejects invented evidence IDs
 - Redis recent-message sliding window with optional LLM rolling summary and deterministic fallback
+- Session-scoped Chat history read/clear APIs backed by Redis
 - MySQL cross-session incident memory created only from evidence-backed positive feedback or explicit trusted sources
 - Elasticsearch BM25, optional vector retrieval, RRF hybrid fusion, and deterministic reranking with an optional external provider
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
@@ -135,7 +136,7 @@ Open the local Agent demo console:
 http://localhost:8080/
 ```
 
-The build-free HTML/CSS/JavaScript console provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, and existing feedback/eval actions. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
+The build-free HTML/CSS/JavaScript console provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, Redis session-history load/clear controls, and existing feedback/eval actions. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
 
 Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 
@@ -240,6 +241,24 @@ curl -N --fail-with-body http://localhost:8080/api/v1/chat/stream \
 ```
 
 `POST /api/v1/chat/stream` uses Server-Sent Events to expose bounded workflow progress such as graph node lifecycle, tool-call status, evidence count, and the final structured answer. The `final_answer` event uses the same JSON shape as `POST /api/v1/chat`, followed by `workflow_completed`. Streaming never exposes chain-of-thought, raw prompts, raw tool arguments, or unredacted tool output.
+
+### Chat History
+
+Load up to 100 recent Redis session messages and the rolling summary:
+
+```bash
+curl --fail-with-body \
+  'http://localhost:8080/api/v1/chat/history?session_id=demo-checkout-session&limit=20'
+```
+
+Clear only that session's Redis recent messages and summary:
+
+```bash
+curl --fail-with-body -X DELETE \
+  'http://localhost:8080/api/v1/chat/history?session_id=demo-checkout-session'
+```
+
+History deletion does not remove confirmed MySQL long-term memory, Elasticsearch knowledge, feedback, or eval data.
 
 ### Ingest Knowledge
 

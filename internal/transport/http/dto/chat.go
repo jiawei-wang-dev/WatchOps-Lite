@@ -70,6 +70,38 @@ type ToolRunDTO struct {
 	WarningCount  int    `json:"warning_count"`
 }
 
+type ChatHistoryResponse struct {
+	SessionID string               `json:"session_id"`
+	Summary   ChatHistorySummary   `json:"summary"`
+	Messages  []ChatHistoryMessage `json:"messages"`
+	Limit     int                  `json:"limit"`
+	Count     int                  `json:"count"`
+}
+
+type ChatHistorySummary struct {
+	Content           string   `json:"content"`
+	Version           int64    `json:"version"`
+	UpdatedAt         string   `json:"updated_at,omitempty"`
+	Goal              string   `json:"goal"`
+	ConfirmedFacts    []string `json:"confirmed_facts"`
+	OpenQuestions     []string `json:"open_questions"`
+	AttemptedActions  []string `json:"attempted_actions"`
+	ImportantEntities []string `json:"important_entities"`
+}
+
+type ChatHistoryMessage struct {
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	RequestID string         `json:"request_id,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
+type ClearChatHistoryResponse struct {
+	SessionID string `json:"session_id"`
+	Cleared   bool   `json:"cleared"`
+}
+
 type ErrorResponse struct {
 	Error APIError `json:"error"`
 }

@@ -5,6 +5,7 @@ const state = {
   latestRequestId: "",
   latestTraceId: "",
   latestSessionId: "",
+  latestHistorySessionId: "",
   latestSSEEvents: [],
   lastLatencyMS: null,
   selectedRating: "",
@@ -70,6 +71,8 @@ function bindActions() {
   });
   byId("start-stream").addEventListener("click", sendStreamChat);
   byId("search-knowledge").addEventListener("click", searchKnowledge);
+  byId("load-history").addEventListener("click", () => loadHistory());
+  byId("clear-history").addEventListener("click", clearHistory);
   byId("knowledge-query").addEventListener("keydown", (event) => {
     if (event.key === "Enter") searchKnowledge();
   });
@@ -302,6 +305,9 @@ function acceptChatResponse(response) {
   renderMemoryContext(response);
   updateRuntimeContext();
   updateFeedbackAvailability();
+  if (state.latestSessionId) {
+    void loadHistory(state.latestSessionId, { quiet: true });
+  }
 }
 
 function renderChatResponse(response) {
@@ -517,6 +523,117 @@ function renderMemoryContext(response) {
       ? memoryEvidence.map((item) => `<div class="evidence-row"><p>${escapeHtml(item?.content || "Memory content unavailable.")}</p><div class="evidence-meta"><span>${escapeHtml(item?.id || "memory")}</span></div></div>`).join("")
       : `<div class="inline-note">No memory evidence is exposed in the latest Chat response. No additional memory API is queried by this console.</div>`}
     <details><summary>Visible Chat metadata</summary><pre>${escapeHtml(safeJson(metadata))}</pre></details>`;
+}
+
+async function loadHistory(sessionID = "", options = {}) {
+  const button = byId("load-history");
+  const selectedSessionID = safeText(sessionID) || byId("session-id").value.trim();
+  if (!selectedSessionID) {
+    if (!options.quiet) renderToast("Session ID is required to load history.", "error");
+    return;
+  }
+  try {
+    if (!options.quiet) setLoading(button, true, "Loading...");
+    const response = await apiFetch(
+      `/api/v1/chat/history?session_id=${encodeURIComponent(selectedSessionID)}&limit=20`,
+    );
+    renderHistory(response);
+    if (!options.quiet) renderToast("Session history loaded.", "success");
+  } catch (error) {
+    renderHistoryError(error.message);
+    if (!options.quiet) renderToast(error.message, "error");
+  } finally {
+    if (!options.quiet) setLoading(button, false, "Load history");
+  }
+}
+
+async function clearHistory() {
+  const button = byId("clear-history");
+  const sessionID = state.latestHistorySessionId || byId("session-id").value.trim();
+  if (!sessionID) {
+    renderToast("Session ID is required to clear history.", "error");
+    return;
+  }
+  if (!window.confirm(
+    `Clear Redis chat history for "${sessionID}"? Confirmed MySQL long-term memory will be retained.`,
+  )) {
+    return;
+  }
+  try {
+    setLoading(button, true, "Clearing...");
+    await apiFetch(
+      `/api/v1/chat/history?session_id=${encodeURIComponent(sessionID)}`,
+      { method: "DELETE" },
+    );
+    renderHistory({
+      session_id: sessionID,
+      summary: {},
+      messages: [],
+      count: 0,
+      limit: 20,
+    });
+    renderToast("Redis session history cleared.", "success");
+  } catch (error) {
+    renderHistoryError(error.message);
+    renderToast(error.message, "error");
+  } finally {
+    setLoading(button, false, "Clear history");
+  }
+}
+
+function renderHistory(response) {
+  state.latestHistorySessionId = safeText(response?.session_id);
+  const summary = response?.summary || {};
+  const messages = safeArray(response?.messages);
+  const summarySignals = [
+    ["Goal", summary.goal],
+    ["Confirmed facts", safeArray(summary.confirmed_facts).join(" · ")],
+    ["Open questions", safeArray(summary.open_questions).join(" · ")],
+  ].filter(([, value]) => safeText(value));
+  byId("history-summary").innerHTML = safeText(summary.content) || summarySignals.length
+    ? `<div class="session-summary-card">
+        <div><span>Rolling summary</span><strong>v${escapeHtml(String(summary.version ?? 0))}</strong></div>
+        ${summary.content ? `<p>${escapeHtml(summary.content)}</p>` : ""}
+        ${summarySignals.map(([label, value]) => `
+          <p><b>${escapeHtml(label)}:</b> ${escapeHtml(value)}</p>`).join("")}
+      </div>`
+    : `<div class="empty-state compact"><p>No rolling summary exists for this session.</p></div>`;
+
+  if (!messages.length) {
+    byId("history-messages").innerHTML =
+      `<div class="empty-state compact"><p>No recent messages exist for this session.</p></div>`;
+    return;
+  }
+  byId("history-messages").innerHTML = messages.map((message) => {
+    const role = safeText(message?.role).toLowerCase() || "unknown";
+    const roleClass = role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
+    return `<article class="history-message ${roleClass}">
+      <div class="history-message-head">
+        <strong>${escapeHtml(role)}</strong>
+        <time>${escapeHtml(formatHistoryTime(message?.created_at))}</time>
+      </div>
+      <p>${escapeHtml(message?.content || "Message content unavailable.")}</p>
+      ${message?.metadata ? `
+        <details>
+          <summary>Message metadata</summary>
+          <pre>${escapeHtml(safeJson(message.metadata))}</pre>
+        </details>` : ""}
+    </article>`;
+  }).join("");
+}
+
+function renderHistoryError(message) {
+  byId("history-summary").innerHTML =
+    `<div class="empty-state compact"><p>Session summary is unavailable.</p></div>`;
+  byId("history-messages").innerHTML =
+    polishedEmpty(`Chat history unavailable: ${message}`);
+}
+
+function formatHistoryTime(value) {
+  if (!value) return "time unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "time unavailable";
+  return date.toLocaleString();
 }
 
 function selectRating(rating) {

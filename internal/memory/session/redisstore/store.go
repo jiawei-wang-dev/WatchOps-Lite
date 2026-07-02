@@ -187,6 +187,20 @@ func (s *Store) LoadContext(ctx context.Context, sessionID string) (session.Cont
 	}, nil
 }
 
+func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	if err := s.client.Del(
+		ctx,
+		recentKey(sessionID),
+		summaryKey(sessionID),
+	).Err(); err != nil {
+		return fmt.Errorf("clear session history: %w", err)
+	}
+	return nil
+}
+
 func readVersion(ctx context.Context, tx *redis.Tx, key string) (int64, error) {
 	value, err := tx.HGet(ctx, key, summaryVersionField).Result()
 	if errors.Is(err, redis.Nil) {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,12 +28,22 @@ type ChatStreamer interface {
 	) (applicationchat.Result, error)
 }
 
+type ChatHistoryExecutor interface {
+	GetHistory(
+		context.Context,
+		applicationchat.HistoryQuery,
+	) (applicationchat.HistoryResult, error)
+	ClearHistory(context.Context, string) error
+}
+
 type Chat struct {
 	executor ChatExecutor
+	history  ChatHistoryExecutor
 }
 
 func NewChat(executor ChatExecutor) *Chat {
-	return &Chat{executor: executor}
+	history, _ := executor.(ChatHistoryExecutor)
+	return &Chat{executor: executor, history: history}
 }
 
 func (h *Chat) Handle(c *gin.Context) {
@@ -64,6 +76,70 @@ func (h *Chat) Handle(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, mapChatResponse(result))
+}
+
+func (h *Chat) GetHistory(c *gin.Context) {
+	requestID := c.GetString("request_id")
+	if h.history == nil {
+		writeError(
+			c,
+			http.StatusServiceUnavailable,
+			"SESSION_MEMORY_UNAVAILABLE",
+			"session history is unavailable",
+			requestID,
+		)
+		return
+	}
+	limit := 0
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			writeError(
+				c,
+				http.StatusBadRequest,
+				"INVALID_ARGUMENT",
+				"limit must be an integer",
+				requestID,
+			)
+			return
+		}
+		limit = parsed
+	}
+	result, err := h.history.GetHistory(
+		c.Request.Context(),
+		applicationchat.HistoryQuery{
+			SessionID: c.Query("session_id"),
+			Limit:     limit,
+		},
+	)
+	if err != nil {
+		writeChatHistoryError(c, err, requestID)
+		return
+	}
+	c.JSON(http.StatusOK, mapChatHistoryResponse(result))
+}
+
+func (h *Chat) ClearHistory(c *gin.Context) {
+	requestID := c.GetString("request_id")
+	if h.history == nil {
+		writeError(
+			c,
+			http.StatusServiceUnavailable,
+			"SESSION_MEMORY_UNAVAILABLE",
+			"session history is unavailable",
+			requestID,
+		)
+		return
+	}
+	sessionID := strings.TrimSpace(c.Query("session_id"))
+	if err := h.history.ClearHistory(c.Request.Context(), sessionID); err != nil {
+		writeChatHistoryError(c, err, requestID)
+		return
+	}
+	c.JSON(http.StatusOK, dto.ClearChatHistoryResponse{
+		SessionID: sessionID,
+		Cleared:   true,
+	})
 }
 
 func (h *Chat) Stream(c *gin.Context) {
@@ -139,6 +215,37 @@ func (h *Chat) Stream(c *gin.Context) {
 	})
 }
 
+func writeChatHistoryError(c *gin.Context, err error, requestID string) {
+	var validationErr *applicationchat.ValidationError
+	if errors.As(err, &validationErr) {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_ARGUMENT",
+			validationErr.Message,
+			requestID,
+		)
+		return
+	}
+	if errors.Is(err, applicationchat.ErrSessionMemoryUnavailable) {
+		writeError(
+			c,
+			http.StatusServiceUnavailable,
+			"SESSION_MEMORY_UNAVAILABLE",
+			"session history is unavailable",
+			requestID,
+		)
+		return
+	}
+	writeError(
+		c,
+		http.StatusInternalServerError,
+		"INTERNAL",
+		"chat history request could not be completed",
+		requestID,
+	)
+}
+
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) error {
 	encoded, err := json.Marshal(data)
 	if err != nil {
@@ -149,6 +256,50 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, dat
 	}
 	flusher.Flush()
 	return nil
+}
+
+func mapChatHistoryResponse(
+	result applicationchat.HistoryResult,
+) dto.ChatHistoryResponse {
+	summary := dto.ChatHistorySummary{
+		Content:           result.Summary.Content,
+		Version:           result.Summary.Version,
+		Goal:              result.Summary.Goal,
+		ConfirmedFacts:    nonNilStrings(result.Summary.ConfirmedFacts),
+		OpenQuestions:     nonNilStrings(result.Summary.OpenQuestions),
+		AttemptedActions:  nonNilStrings(result.Summary.AttemptedActions),
+		ImportantEntities: nonNilStrings(result.Summary.ImportantEntities),
+	}
+	if !result.Summary.UpdatedAt.IsZero() {
+		summary.UpdatedAt = result.Summary.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	messages := make([]dto.ChatHistoryMessage, 0, len(result.Messages))
+	for _, message := range result.Messages {
+		item := dto.ChatHistoryMessage{
+			Role:      string(message.Role),
+			Content:   message.Content,
+			RequestID: message.RequestID,
+			Metadata:  message.Metadata,
+		}
+		if !message.CreatedAt.IsZero() {
+			item.CreatedAt = message.CreatedAt.UTC().Format(time.RFC3339Nano)
+		}
+		messages = append(messages, item)
+	}
+	return dto.ChatHistoryResponse{
+		SessionID: result.SessionID,
+		Summary:   summary,
+		Messages:  messages,
+		Limit:     result.Limit,
+		Count:     len(messages),
+	}
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func mapChatResponse(result applicationchat.Result) dto.ChatResponse {

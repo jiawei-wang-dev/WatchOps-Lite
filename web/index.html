@@ -234,6 +234,33 @@
               </div>
             </div>
           </div>
+          <div class="card history-card">
+            <div class="card-heading">
+              <div>
+                <h3>Session chat history</h3>
+                <p>Redis recent messages and rolling summary for the current Session ID.</p>
+              </div>
+              <div class="button-row">
+                <button id="load-history" class="button secondary" type="button">
+                  <span class="button-label">Load history</span>
+                </button>
+                <button id="clear-history" class="button danger-outline" type="button">
+                  <span class="button-label">Clear history</span>
+                </button>
+              </div>
+            </div>
+            <div id="history-summary" class="history-summary">
+              <div class="empty-state compact"><p>No session summary loaded.</p></div>
+            </div>
+            <div id="history-messages" class="history-messages">
+              <div class="empty-state compact">
+                <p>Load history or complete a Chat request to show recent messages.</p>
+              </div>
+            </div>
+            <p class="history-boundary">
+              Clearing this panel removes only Redis session context. Confirmed MySQL long-term memory is retained.
+            </p>
+          </div>
         </section>
 
         <section id="tab-eval" class="tab-panel" aria-labelledby="Eval and Feedback">

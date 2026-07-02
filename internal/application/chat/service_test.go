@@ -38,6 +38,8 @@ type fakeSessionStore struct {
 	loadErr         error
 	appendErr       error
 	updateErr       error
+	clearErr        error
+	cleared         bool
 	appended        []session.Message
 	updatedSummary  session.Summary
 	expectedVersion int64
@@ -89,6 +91,15 @@ func (f *fakeSessionStore) LoadContext(
 		return session.ContextSnapshot{}, f.loadErr
 	}
 	return f.snapshot, nil
+}
+
+func (f *fakeSessionStore) ClearHistory(context.Context, string) error {
+	if f.clearErr != nil {
+		return f.clearErr
+	}
+	f.cleared = true
+	f.snapshot = emptySessionSnapshot()
+	return nil
 }
 
 func TestServicePreservesIDsAndAppendsMessages(t *testing.T) {

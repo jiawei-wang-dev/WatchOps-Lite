@@ -91,6 +91,40 @@ func TestStoreUpdatesSummaryWithVersionAndTTL(t *testing.T) {
 	}
 }
 
+func TestStoreClearsRecentMessagesAndSummary(t *testing.T) {
+	store, client := newIntegrationStore(t, 3, time.Hour)
+	ctx := context.Background()
+	if err := store.AppendMessage(ctx, "ses-clear", session.Message{
+		Role:    session.RoleUser,
+		Content: "checkout is failing",
+	}); err != nil {
+		t.Fatalf("AppendMessage() error = %v", err)
+	}
+	if err := store.UpdateSummary(
+		ctx,
+		"ses-clear",
+		session.Summary{Content: "checkout investigation"},
+		0,
+	); err != nil {
+		t.Fatalf("UpdateSummary() error = %v", err)
+	}
+
+	if err := store.ClearHistory(ctx, "ses-clear"); err != nil {
+		t.Fatalf("ClearHistory() error = %v", err)
+	}
+	exists, err := client.Exists(
+		ctx,
+		recentKey("ses-clear"),
+		summaryKey("ses-clear"),
+	).Result()
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if exists != 0 {
+		t.Fatalf("session keys remaining = %d, want 0", exists)
+	}
+}
+
 func newIntegrationStore(
 	t *testing.T,
 	window int,

@@ -60,6 +60,7 @@ type Store interface {
 	GetSummary(ctx context.Context, sessionID string) (Summary, error)
 	UpdateSummary(ctx context.Context, sessionID string, summary Summary, expectedVersion int64) error
 	LoadContext(ctx context.Context, sessionID string) (ContextSnapshot, error)
+	ClearHistory(ctx context.Context, sessionID string) error
 }
 
 type Summarizer interface {

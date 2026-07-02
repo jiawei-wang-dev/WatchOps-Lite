@@ -568,6 +568,21 @@ The implementation uses Eino's DAG scheduling directly. It does not add a custom
 
 Exit status: complete.
 
+## Enhancement: Chat History API and Console Integration — Completed
+
+Delivered:
+
+- `GET /api/v1/chat/history` with a default limit of 20 and maximum of 100
+- `DELETE /api/v1/chat/history` for session-scoped Redis recent messages and rolling summary
+- Structured summary, message timestamps, roles, request IDs, and bounded metadata
+- Explicit separation from confirmed MySQL long-term memory, knowledge, feedback, and eval data
+- Embedded console history load, confirm-before-clear, conversation rendering, and automatic refresh after Chat/SSE completion
+- Session-history tracing and Redis/application/HTTP regression coverage
+
+The feature reuses the existing Redis session Store and static no-build frontend. It does not add a conversation table, frontend framework, package manager, or change existing Chat and streaming response contracts.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
@@ -70,6 +71,11 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 	if !strings.Contains(indexRecorder.Body.String(), "WatchOps-Lite Agent Console") {
 		t.Fatalf("index does not contain console title")
 	}
+	for _, expected := range []string{"load-history", "clear-history", "history-messages"} {
+		if !strings.Contains(indexRecorder.Body.String(), expected) {
+			t.Fatalf("index does not contain history control %q", expected)
+		}
+	}
 
 	assetRecorder := httptest.NewRecorder()
 	router.ServeHTTP(assetRecorder, httptest.NewRequest(http.MethodGet, "/web/app.js", nil))
@@ -78,6 +84,15 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 	}
 	if !strings.Contains(assetRecorder.Body.String(), "sendStreamChat") {
 		t.Fatalf("JavaScript asset does not contain streaming client")
+	}
+	for _, expected := range []string{
+		"/api/v1/chat/history",
+		"loadHistory",
+		"clearHistory",
+	} {
+		if !strings.Contains(assetRecorder.Body.String(), expected) {
+			t.Fatalf("JavaScript asset does not contain history integration %q", expected)
+		}
 	}
 }
 
@@ -264,6 +279,143 @@ func TestRouterStreamsChatEvents(t *testing.T) {
 		if strings.Contains(strings.ToLower(body), forbidden) {
 			t.Fatalf("stream body contains forbidden reasoning or prompt field %q:\n%s", forbidden, body)
 		}
+	}
+}
+
+func TestRouterGetsBoundedChatHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &routerSessionStore{
+		messages: []session.Message{
+			{
+				Role:      session.RoleUser,
+				Content:   "first",
+				CreatedAt: time.Date(2026, 7, 3, 1, 0, 0, 0, time.UTC),
+				RequestID: "req-1",
+			},
+			{
+				Role:      session.RoleAssistant,
+				Content:   "second",
+				CreatedAt: time.Date(2026, 7, 3, 1, 1, 0, 0, time.UTC),
+				RequestID: "req-1",
+				Metadata:  map[string]any{"evidence_ids": []string{"ev-1"}},
+			},
+		},
+		summary: session.Summary{
+			Content:        "checkout investigation",
+			Version:        2,
+			ConfirmedFacts: []string{"checkout errors increased"},
+		},
+	}
+	router := newTestRouterWithStore(t, store)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		recorder,
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/chat/history?session_id=ses-history&limit=1",
+			nil,
+		),
+	)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response dto.ChatHistoryResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.SessionID != "ses-history" ||
+		response.Limit != 1 ||
+		response.Count != 1 ||
+		response.Messages[0].Content != "second" ||
+		response.Summary.Version != 2 {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestRouterValidatesChatHistoryQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+	tests := []string{
+		"/api/v1/chat/history",
+		"/api/v1/chat/history?session_id=ses&limit=invalid",
+		"/api/v1/chat/history?session_id=ses&limit=-1",
+	}
+	for _, target := range tests {
+		t.Run(target, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(
+				recorder,
+				httptest.NewRequest(http.MethodGet, target, nil),
+			)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf(
+					"status = %d, want %d; body=%s",
+					recorder.Code,
+					http.StatusBadRequest,
+					recorder.Body.String(),
+				)
+			}
+		})
+	}
+}
+
+func TestRouterCapsChatHistoryLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		recorder,
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/chat/history?session_id=ses&limit=1000",
+			nil,
+		),
+	)
+
+	var response dto.ChatHistoryResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusOK || response.Limit != 100 {
+		t.Fatalf("status=%d response=%#v", recorder.Code, response)
+	}
+}
+
+func TestRouterDeletesChatHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &routerSessionStore{
+		messages: []session.Message{{Role: session.RoleUser, Content: "message"}},
+		summary:  session.Summary{Content: "summary", Version: 1},
+	}
+	router := newTestRouterWithStore(t, store)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(
+		recorder,
+		httptest.NewRequest(
+			http.MethodDelete,
+			"/api/v1/chat/history?session_id=ses-history",
+			nil,
+		),
+	)
+
+	if recorder.Code != http.StatusOK || !store.cleared {
+		t.Fatalf(
+			"status=%d cleared=%v body=%s",
+			recorder.Code,
+			store.cleared,
+			recorder.Body.String(),
+		)
+	}
+	var response dto.ClearChatHistoryResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.SessionID != "ses-history" || !response.Cleared {
+		t.Fatalf("response = %#v", response)
+	}
+	if len(store.messages) != 0 || store.summary.Version != 0 {
+		t.Fatalf("store retained session history: %#v", store)
 	}
 }
 
@@ -489,6 +641,7 @@ type routerSessionStore struct {
 	messages []session.Message
 	summary  session.Summary
 	loadErr  error
+	cleared  bool
 }
 
 func (s *routerSessionStore) AppendMessage(
@@ -544,6 +697,13 @@ func (s *routerSessionStore) LoadContext(
 		Summary:        summary,
 		RecentMessages: append([]session.Message{}, s.messages...),
 	}, nil
+}
+
+func (s *routerSessionStore) ClearHistory(context.Context, string) error {
+	s.messages = []session.Message{}
+	s.summary = session.EmptySummary()
+	s.cleared = true
+	return nil
 }
 
 func assertToolRuns(t *testing.T, runs []dto.ToolRunDTO, expectedNames ...string) {
