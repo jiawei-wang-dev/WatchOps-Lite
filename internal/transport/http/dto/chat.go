@@ -1,10 +1,11 @@
 package dto
 
 type ChatRequest struct {
-	SessionID   string      `json:"session_id" binding:"required"`
-	UserID      string      `json:"user_id,omitempty"`
-	Message     string      `json:"message" binding:"required"`
-	TimeContext TimeContext `json:"time_context" binding:"required"`
+	SessionID   string         `json:"session_id" binding:"required"`
+	UserID      string         `json:"user_id,omitempty"`
+	Message     string         `json:"message" binding:"required"`
+	TimeContext TimeContext    `json:"time_context" binding:"required"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type TimeContext struct {
@@ -69,6 +70,33 @@ type ToolRunDTO struct {
 	ErrorCode     string `json:"error_code,omitempty"`
 	EvidenceCount int    `json:"evidence_count"`
 	WarningCount  int    `json:"warning_count"`
+}
+
+type MultiAgentResponse struct {
+	RequestID  string            `json:"request_id"`
+	SessionID  string            `json:"session_id"`
+	Mode       string            `json:"mode"`
+	Answer     Answer            `json:"answer"`
+	AgentSteps []AgentStepDTO    `json:"agent_steps"`
+	Evidence   []EvidenceItemDTO `json:"evidence"`
+	ToolRuns   []ToolRunDTO      `json:"tool_runs"`
+	TraceID    string            `json:"trace_id"`
+	Metadata   map[string]any    `json:"metadata"`
+}
+
+type AgentStepDTO struct {
+	Role        string           `json:"role"`
+	Name        string           `json:"name"`
+	Status      string           `json:"status"`
+	Input       string           `json:"input,omitempty"`
+	Output      string           `json:"output,omitempty"`
+	EvidenceIDs []string         `json:"evidence_ids"`
+	ToolRuns    []ToolRunDTO     `json:"tool_runs"`
+	Limitations []LimitationItem `json:"limitations"`
+	StartedAt   string           `json:"started_at,omitempty"`
+	CompletedAt string           `json:"completed_at,omitempty"`
+	DurationMS  int64            `json:"duration_ms"`
+	Metadata    map[string]any   `json:"metadata,omitempty"`
 }
 
 type ChatHistoryResponse struct {

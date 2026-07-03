@@ -15,6 +15,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/multiagent"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	elasticsearchplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/elasticsearch"
 	mysqlplatform "github.com/jiawei-wang-dev/WatchOps-Lite/internal/platform/mysql"
@@ -355,6 +356,29 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			ProfileLoader:      profileLoader,
 		},
 	)
+	evidenceAgent, err := multiagent.NewEvidenceAgent(
+		context.Background(),
+		tools,
+	)
+	if err != nil {
+		return nil, err
+	}
+	knowledgeAgent, err := multiagent.NewKnowledgeAgent(
+		context.Background(),
+		tools,
+		longTermMemoryService,
+		cfg.LongTermMemory.TopK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	multiAgentService := multiagent.NewService(multiagent.NewOrchestrator(
+		context.Background(),
+		multiagent.NewDeterministicTriageAgent("checkout"),
+		evidenceAgent,
+		knowledgeAgent,
+		multiagent.NewSynthesisAgent(nil),
+	))
 	evalService, err := eval.NewServiceWithRunner(
 		evalStore,
 		feedbackService,
@@ -367,11 +391,12 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		logger,
 		cfg.Telemetry.ServiceName,
 		httptransport.RouterDependencies{
-			Chat:      chatService,
-			Knowledge: knowledgeService,
-			Feedback:  feedbackService,
-			Eval:      evalService,
-			Metrics:   metricsHandler,
+			Chat:       chatService,
+			MultiAgent: multiAgentService,
+			Knowledge:  knowledgeService,
+			Feedback:   feedbackService,
+			Eval:       evalService,
+			Metrics:    metricsHandler,
 		},
 	)
 

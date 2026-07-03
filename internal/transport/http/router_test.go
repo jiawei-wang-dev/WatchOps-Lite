@@ -18,6 +18,7 @@ import (
 	applicationchat "github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/chat"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/multiagent"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/transport/http/dto"
 	"go.opentelemetry.io/otel"
@@ -282,6 +283,54 @@ func TestRouterServesChatForErrorRateQuestion(t *testing.T) {
 	}
 
 	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
+}
+
+func TestRouterServesOptionalMultiAgentMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+	requestBody := []byte(`{
+		"session_id": "multi_01",
+		"message": "Why did checkout error rate increase? Include metrics, logs, alerts, and runbook evidence.",
+		"time_context": {
+			"from": "2026-06-30T00:00:00Z",
+			"to": "2026-06-30T00:20:00Z"
+		}
+	}`)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/chat/multi-agent",
+		bytes.NewReader(requestBody),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", "req-multi-test")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"status code = %d, want %d; body=%s",
+			recorder.Code,
+			http.StatusOK,
+			recorder.Body.String(),
+		)
+	}
+	var response dto.MultiAgentResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.RequestID != "req-multi-test" ||
+		response.SessionID != "multi_01" ||
+		response.Mode != "multi_agent" {
+		t.Fatalf("response IDs/mode = %#v", response)
+	}
+	if response.Metadata["agent_mode"] != "multi_agent" ||
+		response.Metadata["orchestrator"] != "eino_graph" ||
+		len(response.AgentSteps) != 4 ||
+		len(response.Answer.Conclusion) == 0 ||
+		len(response.Evidence) == 0 {
+		t.Fatalf("multi-agent response = %#v", response)
+	}
 }
 
 func TestRouterServesChineseChatWithoutChangingSchemaOrToolNames(t *testing.T) {
@@ -736,11 +785,34 @@ func newTestRouterWithStore(t *testing.T, store session.Store) *gin.Engine {
 		},
 	)
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	evidenceAgent, err := multiagent.NewEvidenceAgent(context.Background(), tools)
+	if err != nil {
+		t.Fatalf("NewEvidenceAgent() error = %v", err)
+	}
+	knowledgeAgent, err := multiagent.NewKnowledgeAgent(
+		context.Background(),
+		tools,
+		nil,
+		3,
+	)
+	if err != nil {
+		t.Fatalf("NewKnowledgeAgent() error = %v", err)
+	}
+	multiAgentService := multiagent.NewService(multiagent.NewOrchestrator(
+		context.Background(),
+		multiagent.NewDeterministicTriageAgent("checkout"),
+		evidenceAgent,
+		knowledgeAgent,
+		multiagent.NewSynthesisAgent(nil),
+	))
 
 	return NewRouter(
 		logger,
 		"watchops-lite",
-		RouterDependencies{Chat: chatService},
+		RouterDependencies{
+			Chat:       chatService,
+			MultiAgent: multiAgentService,
+		},
 	)
 }
 

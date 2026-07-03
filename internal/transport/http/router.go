@@ -14,11 +14,12 @@ import (
 )
 
 type RouterDependencies struct {
-	Chat      handler.ChatExecutor
-	Knowledge handler.KnowledgeExecutor
-	Feedback  handler.FeedbackExecutor
-	Eval      handler.EvalExecutor
-	Metrics   http.Handler
+	Chat       handler.ChatExecutor
+	MultiAgent handler.MultiAgentExecutor
+	Knowledge  handler.KnowledgeExecutor
+	Feedback   handler.FeedbackExecutor
+	Eval       handler.EvalExecutor
+	Metrics    http.Handler
 }
 
 func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDependencies) *gin.Engine {
@@ -41,6 +42,8 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	chatHandler := handler.NewChat(dependencies.Chat)
 	api.POST("/chat", chatHandler.Handle)
 	api.POST("/chat/stream", chatHandler.Stream)
+	multiAgentHandler := handler.NewMultiAgent(dependencies.MultiAgent)
+	api.POST("/chat/multi-agent", multiAgentHandler.Handle)
 	api.GET("/chat/history", chatHandler.GetHistory)
 	api.DELETE("/chat/history", chatHandler.ClearHistory)
 
