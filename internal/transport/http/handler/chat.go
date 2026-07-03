@@ -2,13 +2,10 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -183,18 +180,12 @@ func (h *Chat) Stream(c *gin.Context) {
 			To:   request.TimeContext.To,
 		},
 	}
-	var writeMutex sync.Mutex
-	writeFailed := false
-	writeEvent := func(eventType string, data any) {
-		writeMutex.Lock()
-		defer writeMutex.Unlock()
-		if writeFailed || c.Request.Context().Err() != nil {
-			return
-		}
-		if err := writeSSE(c.Writer, flusher, eventType, data); err != nil {
-			writeFailed = true
-		}
-	}
+	streamWriter := newSerialSSEWriter(
+		c.Request.Context(),
+		c.Writer,
+		flusher,
+	)
+	writeEvent := streamWriter.Write
 	emit := func(event applicationchat.StreamEvent) {
 		if c.Request.Context().Err() != nil {
 			return
@@ -258,18 +249,6 @@ func writeChatHistoryError(c *gin.Context, err error, requestID string) {
 		"chat history request could not be completed",
 		requestID,
 	)
-}
-
-func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) error {
-	encoded, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, encoded); err != nil {
-		return err
-	}
-	flusher.Flush()
-	return nil
 }
 
 func mapChatHistoryResponse(

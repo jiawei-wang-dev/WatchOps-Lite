@@ -17,6 +17,14 @@ type MultiAgentExecutor interface {
 	Execute(context.Context, multiagent.Command) (multiagent.Result, error)
 }
 
+type MultiAgentStreamer interface {
+	Stream(
+		context.Context,
+		multiagent.Command,
+		multiagent.StreamEmitter,
+	) (multiagent.Result, error)
+}
+
 type MultiAgent struct {
 	executor MultiAgentExecutor
 }
@@ -81,6 +89,97 @@ func (h *MultiAgent) Handle(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, mapMultiAgentResponse(result))
+}
+
+func (h *MultiAgent) Stream(c *gin.Context) {
+	requestID := c.GetString("request_id")
+	streamer, ok := h.executor.(MultiAgentStreamer)
+	if !ok {
+		writeError(
+			c,
+			http.StatusServiceUnavailable,
+			"MULTI_AGENT_STREAM_UNAVAILABLE",
+			"multi-agent streaming is unavailable",
+			requestID,
+		)
+		return
+	}
+	var request dto.ChatRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_ARGUMENT",
+			"request body is invalid",
+			requestID,
+		)
+		return
+	}
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"INTERNAL",
+			"streaming is not supported",
+			requestID,
+		)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Writer.Header().Del("Content-Length")
+	c.Status(http.StatusOK)
+
+	started := time.Now()
+	command := multiagent.Command{
+		RequestID: requestID,
+		SessionID: request.SessionID,
+		UserID:    request.UserID,
+		Message:   request.Message,
+		TimeContext: common.TimeRange{
+			From: request.TimeContext.From,
+			To:   request.TimeContext.To,
+		},
+		Metadata: request.Metadata,
+	}
+	streamWriter := newSerialSSEWriter(
+		c.Request.Context(),
+		c.Writer,
+		flusher,
+	)
+	result, err := streamer.Stream(
+		c.Request.Context(),
+		command,
+		func(event multiagent.StreamEvent) {
+			streamWriter.Write(event.Type, event.Data)
+		},
+	)
+	if err != nil {
+		code := "INTERNAL"
+		message := "multi-agent request could not be completed"
+		var validationErr *multiagent.ValidationError
+		if errors.As(err, &validationErr) {
+			code = "INVALID_ARGUMENT"
+			message = validationErr.Message
+		}
+		streamWriter.Write("multi_agent_failed", map[string]any{
+			"request_id": requestID,
+			"error_code": code,
+			"message":    message,
+			"latency_ms": time.Since(started).Milliseconds(),
+		})
+		return
+	}
+	response := mapMultiAgentResponse(result)
+	streamWriter.Write("final_answer", response)
+	streamWriter.Write("multi_agent_completed", map[string]any{
+		"request_id": requestID,
+		"trace_id":   result.TraceID,
+		"latency_ms": time.Since(started).Milliseconds(),
+	})
 }
 
 func mapMultiAgentResponse(result multiagent.Result) dto.MultiAgentResponse {

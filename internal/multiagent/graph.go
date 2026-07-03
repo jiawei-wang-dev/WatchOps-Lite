@@ -270,6 +270,7 @@ func (o *Orchestrator) runTriage(
 	started := o.now()
 	ctx, span := observability.StartSpan(ctx, "multiagent.triage")
 	defer span.End()
+	emitAgentStepEvent(ctx, "agent_step_started", AgentRoleTriage, "", 0, 0)
 	plan, err := o.triage.Plan(ctx, input.Input)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
@@ -280,6 +281,14 @@ func (o *Orchestrator) runTriage(
 	if output == "" {
 		output = plan.Query
 	}
+	emitAgentStepEvent(
+		ctx,
+		"agent_step_completed",
+		AgentRoleTriage,
+		string(AgentStepCompleted),
+		completed.Sub(started).Milliseconds(),
+		0,
+	)
 	return triageOutput{
 		Input: input.Input,
 		Plan:  plan,
@@ -340,6 +349,7 @@ func (o *Orchestrator) runFinding(
 		attribute.String("agent.role", string(role)),
 	)
 	defer span.End()
+	emitAgentStepEvent(ctx, "agent_step_started", role, "", 0, 0)
 	finding, err := analyzer.Analyze(ctx, input.Plan)
 	if err != nil {
 		observability.MarkError(span, name+" failed")
@@ -361,6 +371,14 @@ func (o *Orchestrator) runFinding(
 			Limitations: []agenteino.Limitation{limitation},
 			Metadata:    map[string]any{"agent_failed": true},
 		}
+		emitAgentStepEvent(
+			ctx,
+			"agent_step_completed",
+			role,
+			string(AgentStepFailed),
+			completed.Sub(started).Milliseconds(),
+			0,
+		)
 		return findingOutput{
 			Triage:  input,
 			Finding: finding,
@@ -377,6 +395,14 @@ func (o *Orchestrator) runFinding(
 	}
 	finding.Role = role
 	completed := o.now()
+	emitAgentStepEvent(
+		ctx,
+		"agent_step_completed",
+		role,
+		string(AgentStepCompleted),
+		completed.Sub(started).Milliseconds(),
+		len(finding.Evidence),
+	)
 	return findingOutput{
 		Triage:  input,
 		Finding: finding,
@@ -400,6 +426,7 @@ func (o *Orchestrator) mergeFindings(
 ) (mergedOutput, error) {
 	ctx, span := observability.StartSpan(ctx, "multiagent.merge_findings")
 	defer span.End()
+	emitAgentStepEvent(ctx, "agent_step_started", "merge", "", 0, 0)
 	evidence, evidenceOK := input[nodeEvidence].(findingOutput)
 	knowledge, knowledgeOK := input[nodeKnowledge].(findingOutput)
 	if !evidenceOK || !knowledgeOK {
@@ -410,6 +437,14 @@ func (o *Orchestrator) mergeFindings(
 		evidence.Triage.Plan,
 		evidence.Finding,
 		knowledge.Finding,
+	)
+	emitAgentStepEvent(
+		ctx,
+		"agent_step_completed",
+		"merge",
+		string(AgentStepCompleted),
+		0,
+		len(merged.Evidence),
 	)
 	return mergedOutput{
 		Triage: evidence.Triage,
@@ -429,6 +464,10 @@ func (o *Orchestrator) runSynthesis(
 	started := o.now()
 	ctx, span := observability.StartSpan(ctx, "multiagent.synthesis")
 	defer span.End()
+	agenteino.EmitStreamEvent(ctx, "synthesis_started", map[string]any{
+		"agent_role": string(AgentRoleSynthesis),
+	})
+	emitAgentStepEvent(ctx, "agent_step_started", AgentRoleSynthesis, "", 0, 0)
 	answer, err := o.synthesis.Synthesize(ctx, SynthesisInput{
 		Plan:             input.Merged.Plan,
 		EvidenceFinding:  input.Merged.EvidenceFinding,
@@ -446,6 +485,14 @@ func (o *Orchestrator) runSynthesis(
 	for _, item := range answer.Evidence {
 		evidenceIDs = append(evidenceIDs, item.ID)
 	}
+	emitAgentStepEvent(
+		ctx,
+		"agent_step_completed",
+		AgentRoleSynthesis,
+		string(AgentStepCompleted),
+		completed.Sub(started).Milliseconds(),
+		len(answer.Evidence),
+	)
 	return synthesisOutput{
 		Merged: input,
 		Answer: answer,
@@ -544,4 +591,27 @@ func firstConclusion(output agenteino.AgentOutput) string {
 		return ""
 	}
 	return output.Conclusions[0].Text
+}
+
+func emitAgentStepEvent(
+	ctx context.Context,
+	eventType string,
+	role AgentRole,
+	status string,
+	durationMS int64,
+	evidenceCount int,
+) {
+	data := map[string]any{
+		"agent_role": string(role),
+	}
+	if status != "" {
+		data["status"] = status
+	}
+	if durationMS > 0 {
+		data["duration_ms"] = durationMS
+	}
+	if evidenceCount > 0 {
+		data["evidence_count"] = evidenceCount
+	}
+	agenteino.EmitStreamEvent(ctx, eventType, data)
 }

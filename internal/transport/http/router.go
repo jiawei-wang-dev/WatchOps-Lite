@@ -44,6 +44,7 @@ func NewRouter(logger *slog.Logger, serviceName string, dependencies RouterDepen
 	api.POST("/chat/stream", chatHandler.Stream)
 	multiAgentHandler := handler.NewMultiAgent(dependencies.MultiAgent)
 	api.POST("/chat/multi-agent", multiAgentHandler.Handle)
+	api.POST("/chat/multi-agent/stream", multiAgentHandler.Stream)
 	api.GET("/chat/history", chatHandler.GetHistory)
 	api.DELETE("/chat/history", chatHandler.ClearHistory)
 
