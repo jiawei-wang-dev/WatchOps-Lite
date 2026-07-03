@@ -60,16 +60,18 @@
 
       <main class="main-workspace">
         <header class="page-header">
-          <div>
-            <p class="eyebrow" data-i18n="header.eyebrow">服务可靠性智能工作台</p>
-            <h1 data-i18n="header.title">WatchOps-Lite 智能排障控制台</h1>
-            <p data-i18n="header.subtitle">Eino Graph · ReAct 工具 · 证据 · 可观测性</p>
-          </div>
-          <div class="header-controls">
+          <div class="hero-top-row">
+            <div class="hero-copy">
+              <h1 data-i18n="header.title">WatchOps-Lite</h1>
+              <p class="hero-console-title" data-i18n="header.eyebrow">智能排障控制台</p>
+              <p class="hero-description" data-i18n="header.subtitle">OnCall Agent · 证据驱动 · 可观测</p>
+            </div>
             <div class="language-switch" role="group" aria-label="Interface language">
               <button class="language-button active" type="button" data-lang="zh" aria-pressed="true">中文</button>
               <button class="language-button" type="button" data-lang="en" aria-pressed="false">English</button>
             </div>
+          </div>
+          <div class="runtime-status-area">
             <div id="runtime-status-cluster" class="status-cluster" aria-label="Runtime capabilities">
               <span id="status-eino" class="status-pill unknown"><i></i><span><b>Eino Graph</b><small data-i18n="status.unknown">状态未知</small></span></span>
               <span id="status-tools" class="status-pill unknown"><i></i><span><b>Tool Runtime</b><small data-i18n="status.unknown">状态未知</small></span></span>

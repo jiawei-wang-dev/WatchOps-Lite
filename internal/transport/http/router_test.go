@@ -93,6 +93,9 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`id="status-sse"`,
 		`id="status-llm"`,
 		`class="status-help"`,
+		`class="hero-top-row"`,
+		`class="hero-console-title"`,
+		`class="runtime-status-area"`,
 	} {
 		if !strings.Contains(indexRecorder.Body.String(), expected) {
 			t.Fatalf("index does not contain console control %q", expected)
