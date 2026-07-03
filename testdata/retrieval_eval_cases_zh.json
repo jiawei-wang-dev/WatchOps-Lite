@@ -1,0 +1,26 @@
+[
+  {
+    "id": "zh-checkout-error-rate-runbook",
+    "query": "checkout 错误率升高 runbook",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "错误率", "runbook"],
+    "expected_source_type": "knowledge",
+    "notes": "核心中文案例：应命中双语 checkout 高错误率 runbook。"
+  },
+  {
+    "id": "zh-payment-timeout-investigation",
+    "query": "payment 支付超时怎么排查",
+    "service": "checkout",
+    "expected_keywords": ["payment", "支付", "超时"],
+    "expected_source_type": "knowledge",
+    "notes": "核心中文案例：应返回 payment 支付依赖超时排查步骤。"
+  },
+  {
+    "id": "zh-checkout-retry-amplification",
+    "query": "checkout 重试放大怎么处理",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "重试放大", "retry amplification"],
+    "expected_source_type": "knowledge",
+    "notes": "核心中文案例：应返回降低不安全重试的缓解建议。"
+  }
+]

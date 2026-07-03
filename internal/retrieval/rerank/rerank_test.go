@@ -56,6 +56,24 @@ func TestRuleBasedRerankerSignals(t *testing.T) {
 			wantFirst:  "matched",
 			wantReason: "identifier_exact_match",
 		},
+		{
+			name:  "Chinese metadata keyword overlap",
+			query: "payment 支付超时怎么排查",
+			candidates: []Candidate{
+				{ID: "generic", Title: "General notes", Content: "payment", Score: 1},
+				{
+					ID:      "zh-runbook",
+					Title:   "Checkout 服务排障 Runbook",
+					Content: "payment 支付依赖超时",
+					Score:   1,
+					Metadata: map[string]any{
+						"keywords": []any{"payment", "支付", "超时"},
+					},
+				},
+			},
+			wantFirst:  "zh-runbook",
+			wantReason: "metadata_keyword_match",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

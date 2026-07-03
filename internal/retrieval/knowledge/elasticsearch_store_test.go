@@ -94,6 +94,43 @@ func TestElasticsearchStoreMapsSearchHits(t *testing.T) {
 	}
 }
 
+func TestElasticsearchStorePreservesChineseSearchAndContent(t *testing.T) {
+	executor := &executorStub{responses: []*http.Response{
+		response(http.StatusOK, `{
+			"hits":{"hits":[{
+				"_id":"checkout_runbook_zh_chunk_0000",
+				"_score":3.5,
+				"_source":{
+					"chunk_id":"checkout_runbook_zh_chunk_0000",
+					"document_id":"checkout_runbook_zh",
+					"title":"Checkout 服务高错误率排障 Runbook",
+					"content":"检查 payment 支付依赖超时和重试放大。",
+					"source":"watchops-lite-demo",
+					"metadata":{"service":"checkout","language":"zh"}
+				}
+			}]}
+		}`),
+	}}
+	store, _ := NewElasticsearchStore(executor, "watchops_knowledge")
+
+	results, err := store.Search(context.Background(), SearchQuery{
+		Query: "checkout 支付超时怎么排查",
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) != 1 ||
+		!strings.Contains(results[0].Title, "错误率") ||
+		!strings.Contains(results[0].Content, "支付依赖超时") {
+		t.Fatalf("Chinese results = %#v", results)
+	}
+	searchBody, _ := io.ReadAll(executor.requests[0].Body)
+	if !strings.Contains(string(searchBody), "支付超时怎么排查") {
+		t.Fatalf("Chinese query was not preserved: %s", searchBody)
+	}
+}
+
 func TestElasticsearchStoreBuildsVectorSearch(t *testing.T) {
 	executor := &executorStub{responses: []*http.Response{
 		response(http.StatusOK, `{

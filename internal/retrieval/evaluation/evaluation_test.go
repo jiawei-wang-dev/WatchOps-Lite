@@ -2,6 +2,7 @@ package evaluation
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -47,6 +48,40 @@ func TestMatchKeywords(t *testing.T) {
 	)
 	if strings.Join(matched, ",") != "checkout,payment,timeout" {
 		t.Fatalf("matched = %#v", matched)
+	}
+}
+
+func TestChineseRetrievalEvalCasesAreValidAndMatchBilingualRunbook(t *testing.T) {
+	file, err := os.Open("../../../testdata/retrieval_eval_cases_zh.json")
+	if err != nil {
+		t.Fatalf("open Chinese retrieval cases: %v", err)
+	}
+	defer file.Close()
+	cases, err := LoadCases(file)
+	if err != nil {
+		t.Fatalf("LoadCases() error = %v", err)
+	}
+	if len(cases) != 3 {
+		t.Fatalf("Chinese case count = %d, want 3", len(cases))
+	}
+	runbook := SearchResult{
+		Title: "Checkout 服务高错误率排障 Runbook",
+		Content: "checkout payment timeout error rate retry amplification " +
+			"支付依赖 超时 错误率 重试放大",
+	}
+	for _, current := range cases {
+		matched := MatchKeywords(
+			current.ExpectedKeywords,
+			[]SearchResult{runbook},
+		)
+		if len(matched) != len(current.ExpectedKeywords) {
+			t.Fatalf(
+				"case %s matched %v, want %v",
+				current.ID,
+				matched,
+				current.ExpectedKeywords,
+			)
+		}
 	}
 }
 

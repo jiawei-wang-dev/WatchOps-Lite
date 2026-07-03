@@ -105,6 +105,16 @@ func (r *RuleBasedReranker) score(
 		reasons = append(reasons, "content_overlap="+formatScore(contentOverlap))
 	}
 
+	metadataMatches := metadataKeywordMatches(query, candidate.Metadata)
+	if metadataMatches > 0 {
+		boost := float64(metadataMatches) * 0.75
+		score += boost
+		reasons = append(
+			reasons,
+			"metadata_keyword_match="+strconv.Itoa(metadataMatches),
+		)
+	}
+
 	identifierMatches := exactIdentifierMatches(queryTokens, candidate)
 	if identifierMatches > 0 {
 		boost := float64(identifierMatches) * 2.5
@@ -112,7 +122,7 @@ func (r *RuleBasedReranker) score(
 		reasons = append(reasons, "identifier_exact_match="+strconv.Itoa(identifierMatches))
 	}
 
-	if prefersRunbook(queryTokenSet) && isRunbookCandidate(candidate) {
+	if prefersRunbookQuery(query, queryTokenSet) && isRunbookCandidate(candidate) {
 		score += 1.5
 		reasons = append(reasons, "runbook_preference")
 	}
@@ -253,6 +263,45 @@ func prefersRunbook(queryTokens map[string]struct{}) bool {
 		}
 	}
 	return false
+}
+
+func prefersRunbookQuery(
+	query string,
+	queryTokens map[string]struct{},
+) bool {
+	return prefersRunbook(queryTokens) ||
+		strings.Contains(query, "排查") ||
+		strings.Contains(query, "怎么处理") ||
+		strings.Contains(query, "如何处理")
+}
+
+func metadataKeywordMatches(query string, metadata map[string]any) int {
+	query = strings.ToLower(query)
+	values := make([]string, 0)
+	switch keywords := metadata["keywords"].(type) {
+	case []string:
+		values = append(values, keywords...)
+	case []any:
+		for _, value := range keywords {
+			if text, ok := value.(string); ok {
+				values = append(values, text)
+			}
+		}
+	}
+	matches := 0
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || !strings.Contains(query, value) {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		matches++
+	}
+	return matches
 }
 
 func isRunbookCandidate(candidate Candidate) bool {
