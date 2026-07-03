@@ -615,6 +615,12 @@ Delivered `make check-deps` for Go, Docker/Compose, curl, Python, local configur
 
 Exit status: complete.
 
+## Enhancement: End-to-End Demo Check — Completed
+
+Delivered `make e2e-demo`, a thin orchestrator over existing dependency, seed, Chat, SSE, retrieval-eval, Agent-eval, and benchmark paths. It supports bounded skip flags, optional generated logs, clear PASS/WARN/FAIL output, report locations, and local UI URLs. It checks an already-running stack and never starts or stops Compose.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

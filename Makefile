@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify eval-retrieval benchmark-agent check-deps
+.PHONY: run test lint fmt verify eval-retrieval benchmark-agent check-deps e2e-demo
 
 CONFIG ?= configs/config.json
 
@@ -25,3 +25,6 @@ benchmark-agent:
 
 check-deps:
 	./scripts/check_dependencies.sh
+
+e2e-demo:
+	./scripts/e2e_demo_check.sh

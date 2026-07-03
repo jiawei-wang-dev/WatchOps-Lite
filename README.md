@@ -140,6 +140,14 @@ make check-deps
 
 Missing Go, Docker/Compose, `curl`, Python, or required demo assets is a hard failure. Services that have not been started and an absent ignored `configs/config.local.json` are warnings with setup guidance; the check does not require internet access or API keys.
 
+After starting the Compose stack and WatchOps-Lite, run the complete local demo gate:
+
+```bash
+make e2e-demo
+```
+
+It checks dependencies and health, seeds knowledge and logs, verifies Prometheus metrics, runs normal and SSE Chat, executes retrieval and Agent eval, runs the Agent benchmark, and prints report paths plus local UI URLs. Use `./scripts/e2e_demo_check.sh --help` for `--skip-seed`, `--skip-eval`, `--skip-benchmark`, and optional generated-log controls. It intentionally does not start or stop Compose and does not validate production scaling, paging, authentication, or remediation.
+
 Open the local Agent demo console:
 
 ```text
