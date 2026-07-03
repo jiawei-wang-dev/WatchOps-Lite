@@ -97,6 +97,10 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`class="hero-top-row"`,
 		`class="hero-console-title"`,
 		`class="runtime-status-area"`,
+		`data-agent-mode="single"`,
+		`data-agent-mode="multi"`,
+		`id="multi-agent-panel"`,
+		`id="multi-agent-steps"`,
 	} {
 		if !strings.Contains(indexRecorder.Body.String(), expected) {
 			t.Fatalf("index does not contain console control %q", expected)
@@ -125,6 +129,9 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		"findDuplicateKnowledgeResults",
 		"renderRuntimeStatuses",
 		"setRuntimeStatus",
+		"/api/v1/chat/multi-agent",
+		"/api/v1/chat/multi-agent/stream",
+		"renderMultiAgentSteps",
 	} {
 		if !strings.Contains(assetRecorder.Body.String(), expected) {
 			t.Fatalf("JavaScript asset does not contain history integration %q", expected)
@@ -151,6 +158,9 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`"status.redis_active"`,
 		`"status.llm_fallback"`,
 		`"status.why_not_active"`,
+		`"multi.role_triage"`,
+		`"multi.role_synthesis"`,
+		`"event.multi_agent_completed"`,
 		"localStorage.setItem",
 	} {
 		if !strings.Contains(i18nRecorder.Body.String(), expected) {

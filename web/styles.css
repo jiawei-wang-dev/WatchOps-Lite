@@ -346,6 +346,182 @@ h4 {
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
+.mode-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mode-selector small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.mode-buttons {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--panel-soft);
+}
+
+.mode-button {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.mode-button.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.2);
+}
+
+.multi-agent-panel[hidden] {
+  display: none;
+}
+
+.multi-agent-panel {
+  border-color: #ddd6fe;
+  background: linear-gradient(145deg, #fff 0%, #faf8ff 100%);
+}
+
+.multi-agent-runtime {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e9d5ff;
+  border-radius: 11px;
+  background: #f5f3ff;
+}
+
+.multi-agent-runtime span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.multi-agent-runtime b {
+  color: #5b21b6;
+  font-size: 0.76rem;
+}
+
+.multi-agent-runtime small {
+  color: #7c3aed;
+  font-size: 0.68rem;
+}
+
+.agent-role-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-role-card {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid #e8e5f4;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.agent-role-card.completed {
+  border-color: #bbf7d0;
+}
+
+.agent-role-card.running {
+  border-color: #bae6fd;
+  background: var(--info-soft);
+}
+
+.agent-role-card.failed {
+  border-color: #fecaca;
+  background: var(--danger-soft);
+}
+
+.agent-role-heading,
+.agent-role-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.agent-role-heading {
+  justify-content: space-between;
+}
+
+.agent-role-heading h4 {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.agent-role-index {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 7px;
+  background: #ede9fe;
+  color: #6d28d9;
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.agent-role-card > p {
+  min-height: 46px;
+  margin: 9px 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.agent-role-card dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.agent-role-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.66rem;
+}
+
+.agent-role-card dt {
+  color: var(--muted);
+}
+
+.agent-role-card dd {
+  overflow: hidden;
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-role-card details {
+  margin-top: 9px;
+  font-size: 0.68rem;
+}
+
+.agent-role-card details p {
+  margin: 7px 0 0;
+  color: #475569;
+}
+
 .status-pill,
 .badge,
 .source-badge,
@@ -1919,6 +2095,10 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .agent-role-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .insight-panel {
     border-top: 1px solid var(--border);
   }
@@ -1951,6 +2131,20 @@ code {
 
   .knowledge-metadata-grid {
     grid-template-columns: 1fr;
+  }
+
+  .mode-selector,
+  .multi-agent-runtime span {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mode-buttons {
+    width: 100%;
+  }
+
+  .mode-button {
+    flex: 1;
   }
 
   .card {
@@ -1997,6 +2191,10 @@ code {
 
   .inline-form,
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-role-grid {
     grid-template-columns: 1fr;
   }
 

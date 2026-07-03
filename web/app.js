@@ -12,6 +12,8 @@ const state = {
   latestHistoryResponse: null,
   latestKnowledgeResults: null,
   latestStreamResponse: null,
+  latestMultiAgentResponse: null,
+  chatMode: "single",
   streamStatus: "not_started",
   streamStartedAt: "",
   streamEndedAt: "",
@@ -108,6 +110,17 @@ const streamStepDefinitions = [
   },
 ];
 
+const multiAgentStepDefinitions = [
+  { id: "triage", label: "multi.role_triage", description: "multi.role_triage_desc", role: "triage" },
+  { id: "evidence", label: "multi.role_evidence", description: "multi.role_evidence_desc", role: "evidence" },
+  { id: "knowledge", label: "multi.role_knowledge", description: "multi.role_knowledge_desc", role: "knowledge" },
+  { id: "merge", label: "multi.role_merge", description: "multi.role_merge_desc", role: "merge" },
+  { id: "synthesis", label: "multi.role_synthesis", description: "multi.role_synthesis_desc", role: "synthesis" },
+  { id: "answer", label: "step.answer", description: "step.answer_desc", events: ["final_answer", "multi_agent_completed", "multi_agent_failed"] },
+];
+
+const multiAgentRoles = ["triage", "evidence", "knowledge", "synthesis"];
+
 const evidenceSourceOrder = [
   "metrics",
   "logs",
@@ -158,6 +171,9 @@ function activateTab(name) {
 }
 
 function bindActions() {
+  document.querySelectorAll("[data-agent-mode]").forEach((button) => {
+    button.addEventListener("click", () => setChatMode(button.dataset.agentMode));
+  });
   document.querySelectorAll(".query-chip").forEach((button) => {
     button.addEventListener("click", () => {
       const languagePresets = presets[currentLanguage()] || presets.zh;
@@ -189,6 +205,17 @@ function bindActions() {
   });
 }
 
+function setChatMode(mode) {
+  state.chatMode = mode === "multi" ? "multi" : "single";
+  document.querySelectorAll("[data-agent-mode]").forEach((button) => {
+    const selected = button.dataset.agentMode === state.chatMode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  byId("multi-agent-panel").hidden = state.chatMode !== "multi";
+  renderMultiAgentSteps(state.latestMultiAgentResponse);
+}
+
 function rerenderLocalizedState() {
   const question = byId("message").value.trim();
   const knownDefaultQuestions = Object.values(presets).map((values) => values.error_rate);
@@ -207,6 +234,7 @@ function rerenderLocalizedState() {
     renderMemoryContext(state.latestChatResponse);
     setResponseStatus(t("common.completed"), "success");
   }
+  renderMultiAgentSteps(state.latestMultiAgentResponse);
   if (state.latestKnowledgeResults !== null) {
     renderKnowledgeResults(state.latestKnowledgeResults);
   }
@@ -278,12 +306,16 @@ async function sendChat() {
     setLoading(button, true, t("common.sending"));
     setResponseStatus(t("common.running"), "info");
     const started = performance.now();
-    const response = await apiFetch("/api/v1/chat", {
+    const endpoint = state.chatMode === "multi" ?
+      "/api/v1/chat/multi-agent" : "/api/v1/chat";
+    const response = await apiFetch(endpoint, {
       method: "POST",
       body: JSON.stringify(payload),
     });
     state.lastLatencyMS = performance.now() - started;
+    state.latestMultiAgentResponse = state.chatMode === "multi" ? response : null;
     acceptChatResponse(response);
+    renderMultiAgentSteps(state.latestMultiAgentResponse);
     setResponseStatus(t("common.completed"), "success");
     renderToast(t("dynamic.chat_completed"), "success");
   } catch (error) {
@@ -304,7 +336,9 @@ async function sendStreamChat() {
     resetStreamView();
     setResponseStatus(t("common.streaming"), "info");
     const started = performance.now();
-    const response = await fetch("/api/v1/chat/stream", {
+    const endpoint = state.chatMode === "multi" ?
+      "/api/v1/chat/multi-agent/stream" : "/api/v1/chat/stream";
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Accept: "text/event-stream",
@@ -402,7 +436,9 @@ function processSSEBlock(block) {
   renderSSEEvent(eventType, withEventTimestamp(event));
   if (eventType === "final_answer" && data && typeof data === "object") {
     state.latestStreamResponse = data;
+    state.latestMultiAgentResponse = data?.mode === "multi_agent" ? data : null;
     acceptChatResponse(data);
+    renderMultiAgentSteps(state.latestMultiAgentResponse);
   }
   renderStreamDashboard();
   return eventType;
@@ -411,6 +447,7 @@ function processSSEBlock(block) {
 function resetStreamView() {
   state.latestSSEEvents = [];
   state.latestStreamResponse = null;
+  if (state.chatMode === "multi") state.latestMultiAgentResponse = null;
   state.streamStatus = "running";
   state.streamStartedAt = new Date().toISOString();
   state.streamEndedAt = "";
@@ -422,15 +459,19 @@ function resetStreamView() {
 
 function updateStreamStatusFromEvent(event) {
   const timestamp = eventTimestamp(event);
-  if (!state.streamStartedAt || event.type === "workflow_started") {
+  if (!state.streamStartedAt ||
+      event.type === "workflow_started" ||
+      event.type === "multi_agent_started") {
     state.streamStartedAt = timestamp;
   }
   switch (event.type) {
   case "workflow_failed":
+  case "multi_agent_failed":
     state.streamStatus = "failed";
     state.streamEndedAt = timestamp;
     break;
   case "workflow_completed":
+  case "multi_agent_completed":
     state.streamStatus = "completed";
     state.streamEndedAt = timestamp;
     break;
@@ -456,6 +497,7 @@ function renderStreamDashboard() {
   renderStreamSummary();
   renderStreamSteps();
   renderStreamToolTimeline();
+  renderMultiAgentSteps(state.latestMultiAgentResponse);
   renderKeyEvidenceGroups(
     state.latestStreamResponse?.answer?.evidence,
     "stream-key-evidence",
@@ -538,7 +580,9 @@ function renderStreamSummary() {
 
 function renderStreamSteps() {
   const container = byId("stream-key-steps");
-  container.innerHTML = streamStepDefinitions.map((definition, index) => {
+  const definitions = state.chatMode === "multi" ?
+    multiAgentStepDefinitions : streamStepDefinitions;
+  container.innerHTML = definitions.map((definition, index) => {
     const aggregate = aggregateStreamStep(definition);
     return `
       <article class="step-card ${escapeHtml(aggregate.status)}">
@@ -562,7 +606,9 @@ function renderStreamSteps() {
 function aggregateStreamStep(definition) {
   const matches = state.latestSSEEvents.filter((event) => {
     const node = safeText(event?.data?.node || event?.data?.node_name);
+    const role = safeText(event?.data?.role);
     return safeArray(definition.nodes).includes(node) ||
+      (definition.role && definition.role === role) ||
       safeArray(definition.events).includes(event.type);
   });
   if (!matches.length) {
@@ -574,7 +620,9 @@ function aggregateStreamStep(definition) {
     };
   }
   const failure = matches.find((event) =>
-    event.type === "workflow_failed" || event.type === "tool_call_failed");
+    event.type === "workflow_failed" ||
+    event.type === "multi_agent_failed" ||
+    event.type === "tool_call_failed");
   const started = matches.filter((event) =>
     event.type.endsWith("_started") || event.type === "workflow_started");
   const completed = matches.filter((event) =>
@@ -809,6 +857,8 @@ function streamStatusLabel(status) {
     failed: "common.failed",
     untriggered: "stream.untriggered",
     no_data: "stream.no_data",
+    pending: "stream.pending",
+    skipped: "stream.skipped",
   };
   return t(labels[status] || "common.unknown");
 }
@@ -866,6 +916,7 @@ function describeSSEEvent(type, data) {
   const messageText = data.message ? t("event.message_suffix", {
     message: safeText(data.message),
   }) : "";
+  const role = safeText(data.role) || t("common.unknown");
   const messages = {
     workflow_started: t("event.workflow_started", {
       session: safeText(data.session_id) || t("context.session"),
@@ -891,6 +942,15 @@ function describeSSEEvent(type, data) {
       code: codeText,
       message: messageText,
     }),
+    multi_agent_started: t("event.multi_agent_started"),
+    agent_step_started: t("event.agent_step_started", { role }),
+    agent_step_completed: t("event.agent_step_completed", { role }),
+    synthesis_started: t("event.synthesis_started"),
+    multi_agent_completed: t("event.multi_agent_completed"),
+    multi_agent_failed: t("event.multi_agent_failed", {
+      code: codeText,
+      message: messageText,
+    }),
   };
   return messages[type] || t("event.operational", { type });
 }
@@ -900,6 +960,59 @@ function eventTone(type) {
   if (type.includes("failure_controller")) return "warning";
   if (type.includes("completed") || type === "final_answer") return "success";
   return "info";
+}
+
+function renderMultiAgentSteps(response) {
+  const panel = byId("multi-agent-panel");
+  const container = byId("multi-agent-steps");
+  if (!panel || !container) return;
+  panel.hidden = state.chatMode !== "multi";
+  if (panel.hidden) return;
+
+  const steps = safeArray(response?.agent_steps);
+  const status = byId("multi-agent-status");
+  const workflowStatus = steps.length ? "completed" :
+    state.streamStatus === "running" && state.latestSSEEvents.some((event) =>
+      event.type === "multi_agent_started") ? "running" : "pending";
+  status.textContent = streamStatusLabel(workflowStatus);
+  status.className = `badge ${statusTone(workflowStatus)}`;
+  container.innerHTML = multiAgentRoles.map((role) => {
+    const step = steps.find((item) => safeText(item?.role) === role);
+    const startedEvent = state.latestSSEEvents.find((event) =>
+      event.type === "agent_step_started" &&
+      safeText(event?.data?.role) === role);
+    const completedEvent = [...state.latestSSEEvents].reverse().find((event) =>
+      event.type === "agent_step_completed" &&
+      safeText(event?.data?.role) === role);
+    const stepStatus = safeText(step?.status) ||
+      (completedEvent ? "completed" : startedEvent ? "running" : "pending");
+    const toolNames = safeArray(step?.tool_runs)
+      .map((run) => safeText(run?.tool))
+      .filter(Boolean);
+    const liveEvidenceCount = safeNumber(completedEvent?.data?.evidence_count);
+    const evidenceCount = step ?
+      safeArray(step.evidence_ids).length : liveEvidenceCount ?? 0;
+    const duration = step ?
+      safeNumber(step.duration_ms) : safeNumber(completedEvent?.data?.latency_ms);
+    return `
+      <article class="agent-role-card ${escapeHtml(stepStatus)}">
+        <div class="agent-role-heading">
+          <div>
+            <span class="agent-role-index">${multiAgentRoles.indexOf(role) + 1}</span>
+            <h4>${escapeHtml(t(`multi.role_${role}`))}</h4>
+          </div>
+          <span class="badge ${statusTone(stepStatus)}">${escapeHtml(streamStatusLabel(stepStatus))}</span>
+        </div>
+        <p>${escapeHtml(t(`multi.role_${role}_desc`))}</p>
+        <dl>
+          <div><dt>${escapeHtml(t("stream.duration"))}</dt><dd>${duration === null ? "—" : escapeHtml(formatLatency(duration))}</dd></div>
+          <div><dt>${escapeHtml(t("common.tool_runs"))}</dt><dd>${escapeHtml(toolNames.join(", ") || "—")}</dd></div>
+          <div><dt>${escapeHtml(t("common.evidence"))}</dt><dd>${evidenceCount}</dd></div>
+          <div><dt>${escapeHtml(t("common.limitations"))}</dt><dd>${safeArray(step?.limitations).length}</dd></div>
+        </dl>
+        ${step?.output ? `<details><summary>${escapeHtml(t("multi.step_output"))}</summary><p>${escapeHtml(truncateText(step.output, 420))}</p></details>` : ""}
+      </article>`;
+  }).join("");
 }
 
 function acceptChatResponse(response) {

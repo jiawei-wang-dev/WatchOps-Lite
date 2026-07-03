@@ -102,6 +102,16 @@
           </div>
 
           <div class="card input-card">
+            <div class="mode-selector" role="group" aria-label="Agent execution mode">
+              <div>
+                <span class="field-label" data-i18n="multi.mode_label">执行模式</span>
+                <small data-i18n="multi.mode_hint">Single-Agent 默认；Multi-Agent 用于展示有边界的角色协作。</small>
+              </div>
+              <div class="mode-buttons">
+                <button class="mode-button active" type="button" data-agent-mode="single" aria-pressed="true" data-i18n="multi.single_mode">Single-Agent</button>
+                <button class="mode-button" type="button" data-agent-mode="multi" aria-pressed="false" data-i18n="multi.multi_mode">Multi-Agent</button>
+              </div>
+            </div>
             <div class="form-row">
               <label for="session-id" data-i18n="chat.session_id">Session ID</label>
               <input id="session-id" type="text" value="demo-console-session" autocomplete="off">
@@ -129,6 +139,21 @@
                 <span class="button-label" data-i18n="chat.stream">流式排查</span>
               </button>
             </div>
+          </div>
+
+          <div id="multi-agent-panel" class="card multi-agent-panel" hidden>
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow" data-i18n="multi.eyebrow">Eino Graph 协作</p>
+                <h3 data-i18n="multi.title">Multi-Agent 协作</h3>
+                <p data-i18n="multi.description">Triage 分流后，Evidence 与 Knowledge 并行分析，最后由 Synthesis 汇总。</p>
+              </div>
+              <span id="multi-agent-status" class="badge neutral" data-i18n="chat.waiting">等待中</span>
+            </div>
+            <div class="multi-agent-runtime">
+              <span><b data-i18n="multi.orchestrator">Eino Graph Orchestrator</b><small data-i18n="multi.parallel_hint">Evidence 与 Knowledge 可并行执行</small></span>
+            </div>
+            <div id="multi-agent-steps" class="agent-role-grid"></div>
           </div>
 
           <div class="card response-card">
