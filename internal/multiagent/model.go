@@ -46,6 +46,7 @@ type TriagePlan struct {
 	IncidentType string                 `json:"incident_type"`
 	EvidencePlan []string               `json:"evidence_plan"`
 	Query        string                 `json:"query"`
+	Summary      string                 `json:"summary"`
 	TimeContext  common.TimeRange       `json:"time_context"`
 	Language     string                 `json:"language"`
 	Limitations  []agenteino.Limitation `json:"limitations,omitempty"`

@@ -280,6 +280,10 @@ func (o *Orchestrator) runTriage(
 		return triageOutput{}, err
 	}
 	completed := o.now()
+	output := plan.Summary
+	if output == "" {
+		output = plan.Query
+	}
 	return triageOutput{
 		Input: input.Input,
 		Plan:  plan,
@@ -287,7 +291,7 @@ func (o *Orchestrator) runTriage(
 			AgentRoleTriage,
 			"Triage Agent",
 			input.Input.Message,
-			plan.Query,
+			output,
 			nil,
 			nil,
 			plan.Limitations,
