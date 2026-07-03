@@ -152,7 +152,75 @@
               <span class="button-label" data-i18n="stream.start">开始流式排查</span>
             </button>
           </div>
+          <div class="card stream-summary-card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow" data-i18n="stream.summary_eyebrow">运行概览</p>
+                <h3 data-i18n="stream.execution_summary">执行摘要</h3>
+              </div>
+              <span id="stream-summary-status" class="badge neutral" data-i18n="stream.not_started">未开始</span>
+            </div>
+            <div id="stream-summary" class="metric-grid stream-metrics">
+              <article><span data-i18n="common.status">状态</span><strong data-i18n="stream.not_started">未开始</strong></article>
+              <article><span data-i18n="stream.agent_mode">Agent 模式</span><strong>—</strong></article>
+              <article><span data-i18n="stream.model">模型</span><strong>—</strong></article>
+              <article><span data-i18n="stream.total_latency">总耗时</span><strong>—</strong></article>
+              <article><span data-i18n="common.tool_runs">工具调用</span><strong>0</strong></article>
+              <article><span data-i18n="common.evidence">证据</span><strong>0</strong></article>
+              <article><span data-i18n="common.limitations">局限性</span><strong>0</strong></article>
+              <article><span>fallback_used</span><strong>false</strong></article>
+            </div>
+            <div id="stream-agent-notice" class="inline-note" data-i18n="stream.summary_empty">
+              启动流式排查后，这里将显示 Agent 模式、模型、耗时和结果摘要。
+            </div>
+            <div id="stream-identifiers" class="stream-identifiers">
+              <span>request_id: <code>—</code></span>
+              <span>trace_id: <code>—</code></span>
+            </div>
+          </div>
+
           <div class="card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow" data-i18n="stream.progress_eyebrow">聚合工作流</p>
+                <h3 data-i18n="stream.key_steps">关键步骤</h3>
+              </div>
+              <span class="subtle" data-i18n="stream.key_steps_hint">底层 graph 节点已按排障阶段聚合</span>
+            </div>
+            <div id="stream-key-steps" class="step-grid"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow" data-i18n="stream.tools_eyebrow">外部能力</p>
+                <h3 data-i18n="stream.tool_timeline">工具调用时间线</h3>
+              </div>
+              <span class="subtle" data-i18n="stream.tool_timeline_hint">按实际调用顺序展示</span>
+            </div>
+            <div id="stream-tool-timeline" class="tool-timeline">
+              <div class="empty-state compact"><p data-i18n="evidence.no_tools">暂无工具调用。</p></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow" data-i18n="stream.evidence_eyebrow">结果提炼</p>
+                <h3 data-i18n="stream.key_evidence">关键证据</h3>
+              </div>
+              <span class="subtle" data-i18n="stream.key_evidence_hint">每类最多展示 3 条</span>
+            </div>
+            <div id="stream-key-evidence" class="key-evidence-grid">
+              <div class="empty-state compact"><p data-i18n="stream.no_evidence">暂无证据。</p></div>
+            </div>
+          </div>
+
+          <details id="raw-sse-details" class="card raw-events-card">
+            <summary>
+              <span data-i18n="stream.raw_events">原始 SSE 事件（调试用）</span>
+              <span id="raw-event-count" class="source-badge">0</span>
+            </summary>
             <div class="timeline-legend">
               <span><i class="dot info"></i><b data-i18n="stream.workflow">工作流</b></span>
               <span><i class="dot success"></i><b data-i18n="stream.completed">已完成</b></span>
@@ -165,7 +233,7 @@
                 <p data-i18n="stream.empty_body">启动后可查看图节点、工具调用、证据收集与执行完成事件。</p>
               </div>
             </div>
-          </div>
+          </details>
         </section>
 
         <section id="tab-evidence" class="tab-panel" aria-labelledby="Evidence">
@@ -193,12 +261,24 @@
               <div class="empty-state compact"><p data-i18n="evidence.no_tools">暂无工具调用。</p></div>
             </div>
           </div>
-          <div id="evidence-groups" class="evidence-groups">
-            <div class="card empty-state">
-              <h4 data-i18n="evidence.empty_title">尚未收集证据</h4>
-              <p data-i18n="evidence.empty_body">运行普通或流式对话后，将按数据源展示证据。</p>
+          <div class="card">
+            <div class="card-heading">
+              <h3 data-i18n="stream.key_evidence">关键证据</h3>
+              <span class="subtle" data-i18n="stream.key_evidence_hint">每类最多展示 3 条</span>
+            </div>
+            <div id="key-evidence-groups" class="key-evidence-grid">
+              <div class="empty-state compact"><p data-i18n="stream.no_evidence">暂无证据。</p></div>
             </div>
           </div>
+          <details id="full-evidence-details" class="card full-evidence-card">
+            <summary data-i18n="evidence.view_full">查看完整证据</summary>
+            <div id="evidence-groups" class="evidence-groups">
+              <div class="card empty-state">
+                <h4 data-i18n="evidence.empty_title">尚未收集证据</h4>
+                <p data-i18n="evidence.empty_body">运行普通或流式对话后，将按数据源展示证据。</p>
+              </div>
+            </div>
+          </details>
         </section>
 
         <section id="tab-knowledge" class="tab-panel" aria-labelledby="Knowledge and Memory">
@@ -361,6 +441,24 @@
           <a href="http://localhost:16686" target="_blank" rel="noreferrer"><span>Jaeger</span><b>↗</b></a>
           <a href="http://localhost:3000" target="_blank" rel="noreferrer"><span>Grafana</span><b>↗</b></a>
           <a href="http://localhost:9090" target="_blank" rel="noreferrer"><span>Prometheus</span><b>↗</b></a>
+        </div>
+        <div class="trace-guide-card">
+          <p class="eyebrow" data-i18n="trace.guide_title">Trace 查看重点</p>
+          <ol>
+            <li><code>HTTP POST /api/v1/chat</code><span data-i18n="trace.overall_request">整体请求耗时</span></li>
+            <li><code>chat.execute</code><span data-i18n="trace.handler_to_app">Handler 到应用层</span></li>
+            <li><code>workflow.chat</code><span data-i18n="trace.full_workflow">完整 Agent 工作流</span></li>
+            <li><code>graph.*</code><span data-i18n="trace.graph_nodes">Eino Graph 节点耗时</span></li>
+            <li><code>graph.run_react_agent</code><span>ReAct Agent</span></li>
+            <li><code>agent.llm.call</code><span data-i18n="trace.llm_latency">LLM 调用耗时</span></li>
+            <li><code>agent.tool_call</code><span data-i18n="trace.tool_call">工具调用</span></li>
+            <li><code>tool.guard.validate</code><span data-i18n="trace.validation">参数校验</span></li>
+            <li><code>tool.runtime.execute</code><span data-i18n="trace.execution">工具实际执行</span></li>
+            <li><code>collect_tool_evidence</code><span data-i18n="trace.normalization">证据归一化</span></li>
+          </ol>
+          <p id="trace-guide-hint" class="inline-note" data-i18n="trace.open_hint">
+            打开 Jaeger 后优先查看 agent.llm.call、agent.tool_call 和 tool.runtime.execute。
+          </p>
         </div>
       </aside>
     </div>

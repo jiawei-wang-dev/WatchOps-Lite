@@ -78,6 +78,14 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`data-lang="zh"`,
 		`data-lang="en"`,
 		`src="/web/i18n.js"`,
+		`id="stream-summary"`,
+		`id="stream-key-steps"`,
+		`id="stream-tool-timeline"`,
+		`id="stream-key-evidence"`,
+		`id="raw-sse-details"`,
+		`id="key-evidence-groups"`,
+		`id="full-evidence-details"`,
+		`class="trace-guide-card"`,
 	} {
 		if !strings.Contains(indexRecorder.Body.String(), expected) {
 			t.Fatalf("index does not contain console control %q", expected)
@@ -97,6 +105,11 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		"loadHistory",
 		"clearHistory",
 		"WatchOpsI18n",
+		"renderStreamSummary",
+		"renderStreamSteps",
+		"renderStreamToolTimeline",
+		"renderKeyEvidenceGroups",
+		"latestStreamResponse",
 	} {
 		if !strings.Contains(assetRecorder.Body.String(), expected) {
 			t.Fatalf("JavaScript asset does not contain history integration %q", expected)
@@ -113,6 +126,11 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		"en:",
 		`"nav.chat"`,
 		`"chat.send"`,
+		`"stream.execution_summary"`,
+		`"stream.key_steps"`,
+		`"stream.tool_timeline"`,
+		`"stream.raw_events"`,
+		`"trace.guide_title"`,
 		"localStorage.setItem",
 	} {
 		if !strings.Contains(i18nRecorder.Body.String(), expected) {

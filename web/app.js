@@ -11,6 +11,10 @@ const state = {
   selectedRating: "",
   latestHistoryResponse: null,
   latestKnowledgeResults: null,
+  latestStreamResponse: null,
+  streamStatus: "not_started",
+  streamStartedAt: "",
+  streamEndedAt: "",
 };
 
 const sourceLabels = {
@@ -44,6 +48,86 @@ const presets = {
   },
 };
 
+const streamStepDefinitions = [
+  {
+    id: "input",
+    label: "step.input",
+    description: "step.input_desc",
+    nodes: ["normalize_chat_input"],
+  },
+  {
+    id: "context",
+    label: "step.context",
+    description: "step.context_desc",
+    nodes: [
+      "load_session_context",
+      "load_long_term_memory",
+      "load_user_profile",
+      "prepare_diagnostic_skills",
+    ],
+    events: ["memory_loaded"],
+  },
+  {
+    id: "prompt",
+    label: "step.prompt",
+    description: "step.prompt_desc",
+    nodes: ["merge_context", "render_prompt_template"],
+  },
+  {
+    id: "agent",
+    label: "step.agent",
+    description: "step.agent_desc",
+    nodes: ["run_react_agent"],
+  },
+  {
+    id: "tools",
+    label: "step.tools",
+    description: "step.tools_desc",
+    events: ["tool_call_started", "tool_call_completed", "tool_call_failed"],
+  },
+  {
+    id: "evidence",
+    label: "step.evidence",
+    description: "step.evidence_desc",
+    nodes: ["collect_tool_evidence"],
+    events: ["evidence_collected"],
+  },
+  {
+    id: "memory",
+    label: "step.memory",
+    description: "step.memory_desc",
+    nodes: ["persist_session_memory"],
+  },
+  {
+    id: "answer",
+    label: "step.answer",
+    description: "step.answer_desc",
+    nodes: ["build_chat_response"],
+    events: ["final_answer", "workflow_completed", "workflow_failed"],
+  },
+];
+
+const evidenceSourceOrder = [
+  "metrics",
+  "logs",
+  "alerts",
+  "knowledge",
+  "topology",
+  "traces",
+  "memory",
+  "long_term_memory",
+  "unknown",
+];
+
+const toolSourceTypes = {
+  query_metrics: ["metrics"],
+  query_logs: ["logs"],
+  query_alerts: ["alerts"],
+  query_traces: ["traces"],
+  search_knowledge: ["knowledge"],
+  get_service_topology: ["topology"],
+};
+
 const byId = (id) => document.getElementById(id);
 const t = (key, replacements = {}) => window.WatchOpsI18n?.t(key, replacements) || key;
 const currentLanguage = () => window.WatchOpsI18n?.getLanguage() || "zh";
@@ -52,6 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindNavigation();
   bindActions();
   updateRuntimeContext();
+  renderStreamDashboard();
   window.addEventListener("watchops:languagechange", rerenderLocalizedState);
 });
 
@@ -129,8 +214,12 @@ function rerenderLocalizedState() {
   }
   if (state.latestSSEEvents.length) {
     byId("stream-timeline").innerHTML = "";
-    state.latestSSEEvents.forEach((event) => renderSSEEvent(event.type, event.data));
+    state.latestSSEEvents.forEach((event) => renderSSEEvent(
+      event.type,
+      withEventTimestamp(event),
+    ));
   }
+  renderStreamDashboard();
   updateFeedbackAvailability();
   updateRuntimeContext();
 }
@@ -207,8 +296,7 @@ async function sendStreamChat() {
   try {
     const payload = buildChatPayload("-stream");
     buttons.forEach((button) => setLoading(button, true, t("common.streaming")));
-    state.latestSSEEvents = [];
-    byId("stream-timeline").innerHTML = "";
+    resetStreamView();
     setResponseStatus(t("common.streaming"), "info");
     const started = performance.now();
     const response = await fetch("/api/v1/chat/stream", {
@@ -235,14 +323,25 @@ async function sendStreamChat() {
       throw new Error(t("dynamic.stream_no_answer"));
     }
     setResponseStatus(t("common.completed"), "success");
+    if (state.streamStatus !== "failed") state.streamStatus = "completed";
+    if (!state.streamEndedAt) state.streamEndedAt = new Date().toISOString();
+    renderStreamDashboard();
     updateRuntimeContext();
     renderToast(t("dynamic.stream_completed"), "success");
   } catch (error) {
     setResponseStatus(t("common.failed"), "danger");
-    renderSSEEvent("workflow_failed", {
-      timestamp: new Date().toISOString(),
-      message: error.message,
-    });
+    const failedAt = new Date().toISOString();
+    const failureEvent = {
+      type: "workflow_failed",
+      data: { timestamp: failedAt, message: error.message },
+      receivedAt: failedAt,
+    };
+    state.latestSSEEvents.push(failureEvent);
+    updateStreamStatusFromEvent(failureEvent);
+    renderSSEEvent(failureEvent.type, withEventTimestamp(failureEvent));
+    state.streamStatus = "failed";
+    state.streamEndedAt = failedAt;
+    renderStreamDashboard();
     renderToast(error.message, "error");
   } finally {
     setLoading(byId("send-stream"), false, t("chat.stream"));
@@ -286,12 +385,439 @@ function processSSEBlock(block) {
   } catch {
     data = { message: t("dynamic.event_decode_failed") };
   }
-  state.latestSSEEvents.push({ type: eventType, data });
-  renderSSEEvent(eventType, data);
+  const event = {
+    type: eventType,
+    data,
+    receivedAt: new Date().toISOString(),
+  };
+  state.latestSSEEvents.push(event);
+  updateStreamStatusFromEvent(event);
+  renderSSEEvent(eventType, withEventTimestamp(event));
   if (eventType === "final_answer" && data && typeof data === "object") {
+    state.latestStreamResponse = data;
     acceptChatResponse(data);
   }
+  renderStreamDashboard();
   return eventType;
+}
+
+function resetStreamView() {
+  state.latestSSEEvents = [];
+  state.latestStreamResponse = null;
+  state.streamStatus = "running";
+  state.streamStartedAt = new Date().toISOString();
+  state.streamEndedAt = "";
+  byId("stream-timeline").innerHTML = "";
+  byId("raw-sse-details").open = false;
+  renderStreamDashboard();
+}
+
+function updateStreamStatusFromEvent(event) {
+  const timestamp = eventTimestamp(event);
+  if (!state.streamStartedAt || event.type === "workflow_started") {
+    state.streamStartedAt = timestamp;
+  }
+  switch (event.type) {
+  case "workflow_failed":
+    state.streamStatus = "failed";
+    state.streamEndedAt = timestamp;
+    break;
+  case "workflow_completed":
+    state.streamStatus = "completed";
+    state.streamEndedAt = timestamp;
+    break;
+  default:
+    if (state.streamStatus === "not_started") state.streamStatus = "running";
+  }
+}
+
+function withEventTimestamp(event) {
+  return {
+    ...(event?.data || {}),
+    timestamp: safeText(event?.data?.timestamp) || safeText(event?.receivedAt),
+  };
+}
+
+function eventTimestamp(event) {
+  return safeText(event?.data?.timestamp) ||
+    safeText(event?.receivedAt) ||
+    new Date().toISOString();
+}
+
+function renderStreamDashboard() {
+  renderStreamSummary();
+  renderStreamSteps();
+  renderStreamToolTimeline();
+  renderKeyEvidenceGroups(
+    state.latestStreamResponse?.answer?.evidence,
+    "stream-key-evidence",
+  );
+  setText("raw-event-count", String(state.latestSSEEvents.length));
+  updateTraceGuide();
+}
+
+function renderStreamSummary() {
+  const response = state.latestStreamResponse || {};
+  const metadata = response?.metadata || {};
+  const toolRuns = safeArray(response?.tool_runs);
+  const evidence = safeArray(response?.answer?.evidence);
+  const limitations = safeArray(response?.answer?.limitations);
+  const completion = findLastStreamEvent("workflow_completed");
+  const failure = findLastStreamEvent("workflow_failed");
+  const status = failure ? "failed" : state.streamStatus;
+  const fallbackUsed = metadata.fallback_used === true;
+  const agentMode = safeText(metadata.agent_mode);
+  const model = safeText(metadata.model);
+  const latency = safeNumber(completion?.data?.latency_ms) ??
+    safeNumber(failure?.data?.latency_ms) ??
+    elapsedStreamMilliseconds();
+  const requestID = safeText(response.request_id) ||
+    latestStreamDataValue("request_id");
+  const traceID = safeText(response.trace_id) ||
+    latestStreamDataValue("trace_id");
+
+  byId("stream-summary").innerHTML = metricCards([
+    [t("common.status"), streamStatusLabel(status)],
+    [
+      t("stream.agent_mode"),
+      agentMode === "eino_react" && !fallbackUsed ?
+        t("stream.llm_mode") :
+        agentMode === "deterministic" || fallbackUsed ?
+          t("stream.deterministic_mode") : "—",
+    ],
+    [
+      t("stream.model"),
+      model || (fallbackUsed || agentMode === "deterministic" ?
+        t("stream.fallback_model") : "—"),
+    ],
+    [t("stream.total_latency"), latency === null ? "—" : formatLatency(latency)],
+    [t("common.tool_runs"), toolRuns.length || countCompletedToolEvents()],
+    [t("common.evidence"), evidence.length || latestEvidenceCount()],
+    [t("common.limitations"), limitations.length],
+    ["fallback_used", String(fallbackUsed)],
+  ]);
+
+  const statusBadge = byId("stream-summary-status");
+  statusBadge.textContent = streamStatusLabel(status);
+  statusBadge.className = `badge ${statusTone(status)}`;
+
+  const notice = byId("stream-agent-notice");
+  let noticeKey = "stream.summary_empty";
+  let noticeTone = "";
+  if (status === "running") {
+    noticeKey = "stream.running_notice";
+    noticeTone = "info-note";
+  } else if (status === "failed") {
+    noticeKey = "stream.failed_notice";
+    noticeTone = "danger-note";
+  } else if (fallbackUsed) {
+    noticeKey = "stream.fallback_notice";
+    noticeTone = "warning-note";
+  } else if (agentMode === "deterministic") {
+    noticeKey = "stream.deterministic_notice";
+    noticeTone = "warning-note";
+  } else if (status === "completed" && agentMode === "eino_react") {
+    noticeKey = "stream.llm_completed_notice";
+    noticeTone = "success-note";
+  }
+  notice.textContent = t(noticeKey);
+  notice.className = `inline-note ${noticeTone}`.trim();
+
+  byId("stream-identifiers").innerHTML = `
+    <span>request_id: <code>${escapeHtml(requestID || "—")}</code></span>
+    <span>trace_id: <code>${escapeHtml(traceID || "—")}</code></span>`;
+}
+
+function renderStreamSteps() {
+  const container = byId("stream-key-steps");
+  container.innerHTML = streamStepDefinitions.map((definition, index) => {
+    const aggregate = aggregateStreamStep(definition);
+    return `
+      <article class="step-card ${escapeHtml(aggregate.status)}">
+        <div class="step-index">${index + 1}</div>
+        <div class="step-content">
+          <div class="step-heading">
+            <h4>${escapeHtml(t(definition.label))}</h4>
+            <span class="badge ${statusTone(aggregate.status)}">${escapeHtml(streamStatusLabel(aggregate.status))}</span>
+          </div>
+          <p>${escapeHtml(t(definition.description))}</p>
+          <div class="step-meta">
+            <span>${escapeHtml(t("stream.start_time"))}: ${escapeHtml(formatTimestampOrDash(aggregate.startedAt))}</span>
+            <span>${escapeHtml(t("stream.end_time"))}: ${escapeHtml(formatTimestampOrDash(aggregate.endedAt))}</span>
+            <span>${escapeHtml(t("stream.duration"))}: ${aggregate.durationMS === null ? "—" : escapeHtml(formatLatency(aggregate.durationMS))}</span>
+          </div>
+        </div>
+      </article>`;
+  }).join("");
+}
+
+function aggregateStreamStep(definition) {
+  const matches = state.latestSSEEvents.filter((event) => {
+    const node = safeText(event?.data?.node || event?.data?.node_name);
+    return safeArray(definition.nodes).includes(node) ||
+      safeArray(definition.events).includes(event.type);
+  });
+  if (!matches.length) {
+    return {
+      status: state.streamStatus === "running" ? "waiting" : "untriggered",
+      startedAt: "",
+      endedAt: "",
+      durationMS: null,
+    };
+  }
+  const failure = matches.find((event) =>
+    event.type === "workflow_failed" || event.type === "tool_call_failed");
+  const started = matches.filter((event) =>
+    event.type.endsWith("_started") || event.type === "workflow_started");
+  const completed = matches.filter((event) =>
+    event.type.endsWith("_completed") ||
+    event.type === "final_answer" ||
+    event.type === "memory_loaded" ||
+    event.type === "evidence_collected");
+  const startedAt = eventTimestamp(started[0] || matches[0]);
+  const lifecycleIncomplete = started.length > completed.filter((event) =>
+    event.type.endsWith("_completed")).length;
+  const endedEvent = lifecycleIncomplete ? null :
+    completed[completed.length - 1] ||
+    (failure ? matches[matches.length - 1] : null);
+  const endedAt = endedEvent ? eventTimestamp(endedEvent) : "";
+  const status = failure ? "failed" :
+    endedEvent ? "completed" : "running";
+  return {
+    status,
+    startedAt,
+    endedAt,
+    durationMS: durationBetween(startedAt, endedAt),
+  };
+}
+
+function renderStreamToolTimeline() {
+  const container = byId("stream-tool-timeline");
+  const calls = buildStreamToolCalls();
+  if (!calls.length) {
+    container.innerHTML = polishedEmpty(t("evidence.no_tools"));
+    return;
+  }
+  container.innerHTML = calls.map((call, index) => {
+    const evidence = evidenceForTool(call.tool).slice(0, 3);
+    const evidenceCount = safeNumber(call.evidenceCount) ?? evidence.length;
+    const warningCount = safeNumber(call.warningCount) ?? 0;
+    const failed = call.success === false || Boolean(call.errorCode);
+    const noData = !failed && call.completed && evidenceCount === 0;
+    const status = failed ? "failed" :
+      noData ? "no_data" :
+        call.completed ? "completed" : "running";
+    const summaries = evidence.length
+      ? `<ul>${evidence.map((item) =>
+        `<li>${escapeHtml(truncateText(item?.content || t("dynamic.evidence_unavailable"), 180))}</li>`
+      ).join("")}</ul>`
+      : `<p class="subtle">${escapeHtml(t("stream.no_evidence"))}</p>`;
+    const detail = {
+      sequence: index + 1,
+      tool: call.tool,
+      status,
+      latency_ms: call.latencyMS,
+      evidence_count: evidenceCount,
+      warning_count: warningCount,
+      error_code: call.errorCode || "",
+    };
+    return `
+      <article class="tool-call-card ${failed ? "failed" : ""}">
+        <div class="tool-call-heading">
+          <span class="tool-sequence">${index + 1}</span>
+          <div>
+            <h4><code>${escapeHtml(call.tool || t("common.unknown"))}</code></h4>
+            <span class="badge ${statusTone(status)}">${escapeHtml(streamStatusLabel(status))}</span>
+          </div>
+          <strong>${call.latencyMS === null ? "—" : escapeHtml(formatLatency(call.latencyMS))}</strong>
+        </div>
+        <div class="tool-call-stats">
+          <span>${escapeHtml(t("tool.evidence_count", { count: evidenceCount }))}</span>
+          <span>${escapeHtml(t("tool.warning_count", { count: warningCount }))}</span>
+          ${call.errorCode ? `<span class="danger-text">${escapeHtml(t("tool.error", { error: call.errorCode }))}</span>` : ""}
+        </div>
+        <div class="tool-evidence-summary">
+          <b>${escapeHtml(t("tool.summary"))}</b>
+          ${summaries}
+        </div>
+        <details>
+          <summary>${escapeHtml(t("tool.metadata"))}</summary>
+          <pre>${escapeHtml(safeJson(detail))}</pre>
+        </details>
+      </article>`;
+  }).join("");
+}
+
+function buildStreamToolCalls() {
+  const calls = [];
+  state.latestSSEEvents.forEach((event) => {
+    if (!event.type.startsWith("tool_call_")) return;
+    const tool = safeText(event?.data?.tool || event?.data?.tool_name) ||
+      t("common.unknown");
+    if (event.type === "tool_call_started") {
+      calls.push({
+        tool,
+        startedAt: eventTimestamp(event),
+        endedAt: "",
+        completed: false,
+        success: null,
+        latencyMS: null,
+        evidenceCount: null,
+        warningCount: null,
+        errorCode: "",
+      });
+      return;
+    }
+    let current = [...calls].reverse().find((call) =>
+      call.tool === tool && !call.completed);
+    if (!current) {
+      current = {
+        tool,
+        startedAt: eventTimestamp(event),
+        completed: false,
+      };
+      calls.push(current);
+    }
+    current.completed = true;
+    current.success = event.type !== "tool_call_failed";
+    current.endedAt = eventTimestamp(event);
+    current.latencyMS = safeNumber(event?.data?.latency_ms) ??
+      durationBetween(current.startedAt, current.endedAt);
+    current.evidenceCount = safeNumber(event?.data?.evidence_count);
+    current.warningCount = safeNumber(event?.data?.warning_count);
+    current.errorCode = safeText(
+      event?.data?.error_code || event?.data?.error_type,
+    );
+  });
+
+  safeArray(state.latestStreamResponse?.tool_runs).forEach((run, index) => {
+    const current = calls[index] || {
+      tool: safeText(run?.tool),
+      startedAt: "",
+      endedAt: "",
+    };
+    if (!calls[index]) calls.push(current);
+    current.tool = safeText(run?.tool) || current.tool;
+    current.completed = true;
+    current.success = run?.success !== false;
+    current.latencyMS = safeNumber(run?.duration_ms) ?? current.latencyMS ?? null;
+    current.evidenceCount = safeNumber(run?.evidence_count) ??
+      current.evidenceCount ?? null;
+    current.warningCount = safeNumber(run?.warning_count) ??
+      current.warningCount ?? 0;
+    current.errorCode = safeText(run?.error_code) || current.errorCode || "";
+  });
+  return calls;
+}
+
+function evidenceForTool(toolName) {
+  const sourceTypes = toolSourceTypes[toolName] || [];
+  return safeArray(state.latestStreamResponse?.answer?.evidence).filter((item) =>
+    sourceTypes.includes(safeText(item?.source_type).toLowerCase()));
+}
+
+function renderKeyEvidenceGroups(evidence, containerID) {
+  const container = byId(containerID);
+  if (!container) return;
+  const items = safeArray(evidence);
+  if (!items.length) {
+    container.innerHTML = polishedEmpty(t("stream.no_evidence"));
+    return;
+  }
+  const groups = groupBySourceType(items);
+  const orderedSources = evidenceSourceOrder.filter((source) => groups[source]);
+  Object.keys(groups).forEach((source) => {
+    if (!orderedSources.includes(source)) orderedSources.push(source);
+  });
+  container.innerHTML = orderedSources.map((source) => {
+    const values = groups[source].slice(0, 3);
+    return `
+      <article class="key-evidence-card">
+        <div class="card-heading">
+          <h4>${escapeHtml(sourceLabel(source))}</h4>
+          <span class="source-badge">${escapeHtml(t("dynamic.item_count", { count: values.length }))}</span>
+        </div>
+        ${values.map((item) => `
+          <div class="key-evidence-item">
+            <code>${escapeHtml(item?.id || t("dynamic.no_evidence_id"))}</code>
+            <p>${escapeHtml(truncateText(item?.content || t("dynamic.evidence_unavailable"), 220))}</p>
+            <div class="evidence-meta">
+              <span>source_type: ${escapeHtml(item?.source_type || source)}</span>
+              ${item?.resource_id ? `<span>${escapeHtml(t("evidence.resource"))}: ${escapeHtml(item.resource_id)}</span>` : ""}
+              ${item?.score !== undefined ? `<span>${escapeHtml(t("evidence.score"))}: ${escapeHtml(String(item.score))}</span>` : ""}
+            </div>
+            ${item?.metadata ? `<details><summary>${escapeHtml(t("dynamic.evidence_metadata"))}</summary><pre>${escapeHtml(safeJson(item.metadata))}</pre></details>` : ""}
+          </div>`).join("")}
+      </article>`;
+  }).join("");
+}
+
+function findLastStreamEvent(type) {
+  return [...state.latestSSEEvents].reverse().find((event) =>
+    event.type === type);
+}
+
+function latestStreamDataValue(key) {
+  for (let index = state.latestSSEEvents.length - 1; index >= 0; index--) {
+    const value = safeText(state.latestSSEEvents[index]?.data?.[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function latestEvidenceCount() {
+  const event = findLastStreamEvent("evidence_collected");
+  return safeNumber(event?.data?.evidence_count) ?? 0;
+}
+
+function countCompletedToolEvents() {
+  return state.latestSSEEvents.filter((event) =>
+    event.type === "tool_call_completed" ||
+    event.type === "tool_call_failed").length;
+}
+
+function elapsedStreamMilliseconds() {
+  if (!state.streamStartedAt) return null;
+  const end = state.streamEndedAt || new Date().toISOString();
+  return durationBetween(state.streamStartedAt, end);
+}
+
+function durationBetween(start, end) {
+  if (!start || !end) return null;
+  const duration = new Date(end).getTime() - new Date(start).getTime();
+  return Number.isFinite(duration) && duration >= 0 ? duration : null;
+}
+
+function formatTimestampOrDash(value) {
+  return value ? formatTimestamp(value) : "—";
+}
+
+function streamStatusLabel(status) {
+  const labels = {
+    not_started: "stream.not_started",
+    waiting: "stream.waiting",
+    running: "common.running",
+    completed: "common.completed",
+    failed: "common.failed",
+    untriggered: "stream.untriggered",
+    no_data: "stream.no_data",
+  };
+  return t(labels[status] || "common.unknown");
+}
+
+function statusTone(status) {
+  if (status === "completed") return "success";
+  if (status === "failed") return "danger";
+  if (status === "no_data" || status === "untriggered") return "warning";
+  if (status === "running") return "info";
+  return "neutral";
+}
+
+function updateTraceGuide() {
+  const hint = byId("trace-guide-hint");
+  if (!hint) return;
+  hint.textContent = t("trace.open_hint");
+  hint.classList.toggle("highlight", Boolean(state.latestTraceId));
 }
 
 function renderSSEEvent(type, data = {}) {
@@ -310,7 +836,9 @@ function renderSSEEvent(type, data = {}) {
       <p class="event-message">${escapeHtml(safeMessage)}</p>
     </div>`;
   timeline.appendChild(event);
-  event.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (byId("raw-sse-details").open) {
+    event.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
 }
 
 function describeSSEEvent(type, data) {
@@ -483,6 +1011,7 @@ function renderToolRuns(toolRuns) {
 
 function renderEvidenceGroups(evidence) {
   const items = safeArray(evidence);
+  renderKeyEvidenceGroups(items, "key-evidence-groups");
   const groups = groupBySourceType(items);
   const container = byId("evidence-groups");
   if (!items.length) {
@@ -804,6 +1333,7 @@ function updateRuntimeContext() {
   byId("runtime-context").classList.toggle("hidden", !hasResponse);
   setCopyValue("sidebar-request-id", state.latestRequestId);
   setCopyValue("sidebar-trace-id", state.latestTraceId);
+  updateTraceGuide();
   if (!hasResponse) return;
 
   const evidence = safeArray(response?.answer?.evidence);
@@ -918,6 +1448,7 @@ function safeText(value) {
 }
 
 function safeNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
