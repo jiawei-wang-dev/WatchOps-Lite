@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -167,6 +168,8 @@ func (h *Chat) Stream(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream; charset=utf-8")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Writer.Header().Del("Content-Length")
 	c.Status(http.StatusOK)
 
 	started := time.Now()
@@ -180,8 +183,17 @@ func (h *Chat) Stream(c *gin.Context) {
 			To:   request.TimeContext.To,
 		},
 	}
+	var writeMutex sync.Mutex
+	writeFailed := false
 	writeEvent := func(eventType string, data any) {
-		_ = writeSSE(c.Writer, flusher, eventType, data)
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+		if writeFailed || c.Request.Context().Err() != nil {
+			return
+		}
+		if err := writeSSE(c.Writer, flusher, eventType, data); err != nil {
+			writeFailed = true
+		}
 	}
 	emit := func(event applicationchat.StreamEvent) {
 		if c.Request.Context().Err() != nil {

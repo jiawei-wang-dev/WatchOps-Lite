@@ -11,6 +11,28 @@ GENERATE_LOGS=false
 PASS_COUNT=0
 WARN_COUNT=0
 
+check_sse_file() {
+  local stream_path="$1"
+  local final_line completed_line
+  [[ -f "${stream_path}" ]] || return 1
+  final_line="$(
+    grep -n -m 1 '^event: final_answer$' "${stream_path}" |
+      cut -d: -f1
+  )" || return 1
+  completed_line="$(
+    grep -n -m 1 '^event: workflow_completed$' "${stream_path}" |
+      cut -d: -f1
+  )" || return 1
+  [[ -n "${final_line}" && -n "${completed_line}" ]] ||
+    return 1
+  ((final_line < completed_line))
+}
+
+if [[ -n "${WATCHOPS_E2E_CHECK_SSE_FILE:-}" ]]; then
+  check_sse_file "${WATCHOPS_E2E_CHECK_SSE_FILE}"
+  exit $?
+fi
+
 usage() {
   cat <<'EOF'
 Usage: ./scripts/e2e_demo_check.sh [options]
@@ -107,13 +129,12 @@ print(json.dumps({
 '
   )" || return 1
 
-  curl --no-buffer --fail-with-body --silent --show-error \
+  curl --no-buffer --fail-with-body --silent --show-error --http1.1 \
     "${API_BASE_URL}/api/v1/chat/stream" \
     -H "Accept: text/event-stream" \
     -H "Content-Type: application/json" \
     -d "${payload}" >"${stream_path}" || return 1
-  grep -q '^event: final_answer' "${stream_path}" &&
-    grep -q '^event: workflow_completed' "${stream_path}"
+  check_sse_file "${stream_path}"
 }
 
 run_step "Dependency check" "${ROOT_DIR}/scripts/check_dependencies.sh"
