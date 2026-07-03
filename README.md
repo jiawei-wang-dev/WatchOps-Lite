@@ -132,6 +132,14 @@ Check readiness from another terminal:
 curl --fail-with-body http://localhost:8080/healthz
 ```
 
+Check local tooling, repository assets, ports, and optional service readiness:
+
+```bash
+make check-deps
+```
+
+Missing Go, Docker/Compose, `curl`, Python, or required demo assets is a hard failure. Services that have not been started and an absent ignored `configs/config.local.json` are warnings with setup guidance; the check does not require internet access or API keys.
+
 Open the local Agent demo console:
 
 ```text

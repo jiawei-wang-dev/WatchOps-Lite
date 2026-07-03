@@ -609,6 +609,12 @@ Delivered a dependency-light Go JSONL generator with checkout timeout, payment e
 
 Exit status: complete.
 
+## Enhancement: Local Dependency Check — Completed
+
+Delivered `make check-deps` for Go, Docker/Compose, curl, Python, local configuration, embedded web assets, demo fixtures, Prometheus/Grafana configuration, expected ports, and optional service reachability. Tooling and required repository files are hard failures; services not yet running are warnings. The check requires neither internet access nor external API keys.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+for script in scripts/*.sh; do
+  bash -n "${script}"
+done
+
 unformatted="$(gofmt -l cmd internal)"
 if [[ -n "${unformatted}" ]]; then
   echo "Go files require formatting:" >&2
