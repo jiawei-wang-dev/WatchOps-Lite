@@ -5,6 +5,7 @@ set -euo pipefail
 API_BASE_URL="${WATCHOPS_API_BASE_URL:-http://localhost:8080}"
 STATE_DIR="${WATCHOPS_DEMO_STATE_DIR:-/tmp/watchops-lite-demo}"
 FEEDBACK_RESPONSE="${STATE_DIR}/feedback-response.json"
+CASE_RESPONSE="${STATE_DIR}/eval-case-response.json"
 
 if [[ ! -f "${FEEDBACK_RESPONSE}" ]]; then
   echo "Missing ${FEEDBACK_RESPONSE}; run scripts/demo_feedback.sh first." >&2
@@ -39,7 +40,7 @@ curl --fail-with-body --silent --show-error \
     \"gold_answer\": \"\",
     \"forbidden_patterns\": [\"The payment service is definitely the root cause.\"],
     \"metadata\": {\"source\": \"mvp_demo\"}
-  }"
+  }" | tee "${CASE_RESPONSE}"
 printf "\n"
 
 curl --fail-with-body --silent --show-error \
