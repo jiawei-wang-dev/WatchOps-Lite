@@ -115,8 +115,12 @@ func (r *FallbackRunner) runFallback(
 	output.Metadata["fallback_used"] = true
 	output.Metadata["fallback_reason"] = reason
 	output.Limitations = append(output.Limitations, Limitation{
-		Code:    "AGENT_LLM_FALLBACK",
-		Message: "The LLM Agent crossed a failure boundary; the deterministic runner handled this request.",
+		Code: "AGENT_LLM_FALLBACK",
+		Message: localizedText(
+			prefersChinese(input.CurrentMessage),
+			"The LLM Agent crossed a failure boundary; the deterministic runner handled this request.",
+			"LLM Agent 触发失败边界，本次请求已由确定性降级路径处理。",
+		),
 	})
 	return output, nil
 }

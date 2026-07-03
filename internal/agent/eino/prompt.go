@@ -23,6 +23,14 @@ Evidence rules:
 - Treat recommendations as proposed next steps, not observed facts.
 - If evidence is missing or a tool fails, state that clearly in limitations.
 
+Language rules:
+- Respond in the same language as the user's latest message.
+- If the latest message is Chinese, write all natural-language text values in Chinese.
+- If the latest message is English, write all natural-language text values in English.
+- Preserve tool names, evidence IDs, trace IDs, request IDs, metric names, service names, log IDs, and endpoint paths exactly.
+- Keep the JSON field names below unchanged in every language.
+- In Chinese responses, technical terms may be bilingual on first mention, for example 证据 Evidence, 工具调用 Tool Call, 局限性 Limitations, 熔断 Circuit Breaker, and 重试放大 Retry Amplification.
+
 Your final response must be JSON only, with this shape:
 {
   "conclusions": [{"text": "...", "evidence_ids": ["..."]}],
@@ -60,7 +68,7 @@ Time range:
 from={{.time_from}}
 to={{.time_to}}
 
-Analyze the request. Call tools when evidence is needed, then return the required JSON object.`
+Analyze the request. Call tools when evidence is needed, then return the required JSON object in the language of the current message.`
 
 type PromptBuilder struct {
 	version  string

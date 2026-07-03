@@ -180,14 +180,15 @@ func (r *ReActRunner) runPrepared(
 		toolRuns,
 		toolLimitations,
 		map[string]any{
-			"agent_mode":      "eino_react",
-			"fallback_used":   false,
-			"prompt_version":  r.config.PromptVersion,
-			"model":           r.config.ModelName,
-			"max_iterations":  r.config.MaxIterations,
-			"tool_count":      len(toolRuns),
-			"tool_names":      executedToolNames,
-			"evidence_groups": evidenceGroups,
+			"agent_mode":        "eino_react",
+			"fallback_used":     false,
+			"response_language": responseLanguage(input.CurrentMessage),
+			"prompt_version":    r.config.PromptVersion,
+			"model":             r.config.ModelName,
+			"max_iterations":    r.config.MaxIterations,
+			"tool_count":        len(toolRuns),
+			"tool_names":        executedToolNames,
+			"evidence_groups":   evidenceGroups,
 			"session_context_loaded": len(input.RecentMessages) > 0 ||
 				input.SessionSummary.Version > 0 ||
 				input.SessionSummary.Content != "",
@@ -211,7 +212,11 @@ func (r *ReActRunner) runPrepared(
 		r.config.MaxIterations,
 	)
 	evaluation := r.control.Evaluate(ctx, state)
-	appendControlLimitations(&output, evaluation.Limitations)
+	appendControlLimitations(
+		&output,
+		evaluation.Limitations,
+		prefersChinese(input.CurrentMessage),
+	)
 	if evaluation.FailureReason != "" {
 		output.Metadata["failure_reason"] = evaluation.FailureReason
 		output.Metadata["failure_controller_triggered"] = evaluation.Controlled
@@ -239,16 +244,50 @@ func controlToolRuns(toolRuns []ToolRun) []control.ToolRun {
 	return result
 }
 
-func appendControlLimitations(output *AgentOutput, limitations []control.Limitation) {
+func appendControlLimitations(
+	output *AgentOutput,
+	limitations []control.Limitation,
+	chinese bool,
+) {
 	for _, limitation := range limitations {
 		if hasLimitationCode(output.Limitations, limitation.Code) {
 			continue
 		}
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    limitation.Code,
-			Message: limitation.Message,
-			Tool:    limitation.Tool,
+			Code: limitation.Code,
+			Message: localizedControlMessage(
+				limitation.Code,
+				limitation.Message,
+				chinese,
+			),
+			Tool: limitation.Tool,
 		})
+	}
+}
+
+func localizedControlMessage(code, fallback string, chinese bool) string {
+	if !chinese {
+		return fallback
+	}
+	switch code {
+	case "AGENT_OUTPUT_PARSE_FAILED":
+		return "模型回答无法解析为要求的 JSON 结构。"
+	case "AGENT_OUTPUT_MISSING_REQUIRED_SECTIONS":
+		return "模型回答缺少一个或多个必需部分。"
+	case "AGENT_MAX_TOOL_CALLS_EXCEEDED":
+		return "Agent 超过了配置的最大工具调用次数。"
+	case "AGENT_CONSECUTIVE_TOOL_FAILURES":
+		return "多个工具连续失败，Agent 已停止继续执行高风险调用。"
+	case "AGENT_REPEATED_TOOL_CALL":
+		return "Agent 重复了相同工具调用，重复执行被视为低价值。"
+	case "AGENT_MAX_ITERATIONS_REACHED":
+		return "Agent 在获得更强证据前达到了最大迭代边界。"
+	case "AGENT_TOTAL_EXECUTION_TIMEOUT":
+		return "Agent 超过了配置的总执行超时。"
+	case "INSUFFICIENT_EVIDENCE":
+		return "没有工具证据支持已观察到的根因结论。"
+	default:
+		return fallback
 	}
 }
 

@@ -109,6 +109,9 @@ func TestReActRunnerCallsEinoToolAndMapsEvidence(t *testing.T) {
 		len(output.Conclusions) != 1 {
 		t.Fatalf("output = %#v", output)
 	}
+	if output.Conclusions[0].Text != "Checkout error rate is elevated." {
+		t.Fatalf("English conclusion = %q", output.Conclusions[0].Text)
+	}
 	if output.Metadata["agent_mode"] != "eino_react" ||
 		output.Metadata["output_parse_success"] != true {
 		t.Fatalf("metadata = %#v", output.Metadata)
@@ -304,6 +307,8 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 	combined := messages[0].Content + messages[1].Content
 	for _, expected := range []string{
 		"service reliability analysis assistant",
+		"Respond in the same language as the user's latest message.",
+		"Preserve tool names, evidence IDs, trace IDs",
 		"Earlier checkout investigation",
 		"The previous alert mentioned timeouts.",
 		"Checkout is owned by the payments team.",
@@ -321,6 +326,111 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		if !strings.Contains(combined, expected) {
 			t.Fatalf("prompt is missing %q: %s", expected, combined)
 		}
+	}
+}
+
+func TestReActRunnerPreservesChineseTextAndEvidenceIDs(t *testing.T) {
+	tools, err := BuildMockTools()
+	if err != nil {
+		t.Fatalf("BuildMockTools() error = %v", err)
+	}
+	chatModel := &scriptedToolCallingModel{responses: []*schema.Message{
+		schema.AssistantMessage("", []schema.ToolCall{{
+			ID:   "call_metrics_zh",
+			Type: "function",
+			Function: schema.FunctionCall{
+				Name: "query_metrics",
+				Arguments: `{
+					"service":"checkout",
+					"metric_name":"http_server_error_rate",
+					"time_range":{
+						"from":"2026-06-30T00:00:00Z",
+						"to":"2026-06-30T00:20:00Z"
+					}
+				}`,
+			},
+		}}),
+		schema.AssistantMessage(`{
+			"conclusions":[{
+				"text":"checkout 错误率在目标时间范围内升高。",
+				"evidence_ids":["metric-evidence-001"]
+			}],
+			"inferences":[],
+			"recommendations":[{
+				"text":"继续检查 payment 支付依赖指标。",
+				"evidence_ids":["metric-evidence-001"]
+			}],
+			"limitations":[]
+		}`, nil),
+	}}
+	runner, err := NewReActRunner(
+		context.Background(),
+		chatModel,
+		tools,
+		ReActRunnerConfig{
+			MaxIterations: 3,
+			Timeout:       time.Second,
+			PromptVersion: PromptVersionV1,
+			ModelName:     "test-model",
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewReActRunner() error = %v", err)
+	}
+	input := validAgentInput()
+	input.CurrentMessage = "checkout 服务错误率为什么升高？"
+
+	output, err := runner.Run(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(output.Conclusions) != 1 ||
+		!prefersChinese(output.Conclusions[0].Text) ||
+		len(output.Conclusions[0].EvidenceIDs) != 1 ||
+		output.Conclusions[0].EvidenceIDs[0] != "metric-evidence-001" ||
+		output.Evidence[0].ID != "metric-evidence-001" {
+		t.Fatalf("Chinese output = %#v", output)
+	}
+	if output.Metadata["response_language"] != "zh" {
+		t.Fatalf("metadata = %#v", output.Metadata)
+	}
+}
+
+func TestReActRunnerRepairsChineseJSONWithoutCorruption(t *testing.T) {
+	tools, _ := BuildMockTools()
+	chatModel := &scriptedToolCallingModel{
+		responses: []*schema.Message{schema.AssistantMessage(`前缀 {
+			"conclusions":[],
+			"inferences":[],
+			"recommendations":[{"text":"继续收集中文证据。","evidence_ids":[]}],
+			"limitations":[],
+		} 后缀`, nil)},
+	}
+	runner, err := NewReActRunner(
+		context.Background(),
+		chatModel,
+		tools,
+		ReActRunnerConfig{
+			MaxIterations: 2,
+			Timeout:       time.Second,
+			PromptVersion: PromptVersionV1,
+			ModelName:     "test-model",
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewReActRunner() error = %v", err)
+	}
+	input := validAgentInput()
+	input.CurrentMessage = "请分析 checkout 服务。"
+
+	output, err := runner.Run(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if output.Metadata["json_repair_success"] != true ||
+		len(output.Recommendations) != 1 ||
+		output.Recommendations[0].Text != "继续收集中文证据。" {
+		t.Fatalf("repaired Chinese output = %#v", output)
 	}
 }
 

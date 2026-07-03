@@ -247,6 +247,51 @@ func TestRouterServesChatForErrorRateQuestion(t *testing.T) {
 	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
 }
 
+func TestRouterServesChineseChatWithoutChangingSchemaOrToolNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(t)
+	requestBody := []byte(`{
+		"session_id": "ses_zh_01",
+		"message": "checkout 服务错误率为什么升高？请结合指标和日志分析。",
+		"time_context": {
+			"from": "2026-06-30T00:00:00Z",
+			"to": "2026-06-30T00:20:00Z"
+		}
+	}`)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/chat",
+		bytes.NewReader(requestBody),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Request-ID", "req-chat-zh-test")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want UTF-8 JSON", contentType)
+	}
+	var response dto.ChatResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode Chinese response: %v", err)
+	}
+	if response.RequestID != "req-chat-zh-test" ||
+		len(response.Answer.Conclusion) == 0 ||
+		!strings.Contains(response.Answer.Conclusion[0].Text, "证据") {
+		t.Fatalf("Chinese response = %#v", response)
+	}
+	assertToolRuns(t, response.ToolRuns, "query_metrics", "query_logs")
+	for _, item := range response.Answer.Evidence {
+		if strings.ContainsAny(item.ID, "支付错误率日志指标") {
+			t.Fatalf("evidence ID was translated: %q", item.ID)
+		}
+	}
+}
+
 func TestRouterStreamsChatEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newTestRouter(t)

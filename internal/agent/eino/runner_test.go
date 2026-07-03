@@ -74,6 +74,45 @@ func TestDeterministicRunnerReturnsLimitationWhenNoRouteMatches(t *testing.T) {
 	}
 }
 
+func TestDeterministicRunnerSupportsChineseQueryAndText(t *testing.T) {
+	tools, err := BuildMockTools()
+	if err != nil {
+		t.Fatalf("BuildMockTools() error = %v", err)
+	}
+
+	output, err := NewDeterministicRunner(tools).Run(
+		context.Background(),
+		AgentInput{
+			CurrentMessage: "checkout 服务错误率为什么升高？请结合指标和日志分析。",
+			TimeContext: common.TimeRange{
+				From: "2026-06-30T00:00:00Z",
+				To:   "2026-06-30T00:20:00Z",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(output.ToolRuns) != 2 ||
+		output.ToolRuns[0].Tool != "query_metrics" ||
+		output.ToolRuns[1].Tool != "query_logs" {
+		t.Fatalf("tool runs = %#v", output.ToolRuns)
+	}
+	if output.Metadata["response_language"] != "zh" {
+		t.Fatalf("metadata = %#v", output.Metadata)
+	}
+	for _, conclusion := range output.Conclusions {
+		if !prefersChinese(conclusion.Text) || len(conclusion.EvidenceIDs) == 0 {
+			t.Fatalf("Chinese conclusion = %#v", conclusion)
+		}
+		for _, evidenceID := range conclusion.EvidenceIDs {
+			if prefersChinese(evidenceID) {
+				t.Fatalf("evidence ID was translated: %q", evidenceID)
+			}
+		}
+	}
+}
+
 func TestDeterministicRunnerReportsLoadedSessionContext(t *testing.T) {
 	tools, err := BuildMockTools()
 	if err != nil {

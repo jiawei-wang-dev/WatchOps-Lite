@@ -40,6 +40,7 @@ func parseAgentOutput(
 	toolLimitations []Limitation,
 	metadata map[string]any,
 ) AgentOutput {
+	chinese := metadata["response_language"] == "zh"
 	output := AgentOutput{
 		Conclusions:     []Conclusion{},
 		Evidence:        evidence,
@@ -54,8 +55,12 @@ func parseAgentOutput(
 	if err := json.Unmarshal([]byte(stripJSONFence(content)), &draft); err != nil {
 		output.Metadata["output_parse_success"] = false
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "AGENT_OUTPUT_PARSE_FAILED",
-			Message: "The model response could not be parsed into the required answer structure.",
+			Code: "AGENT_OUTPUT_PARSE_FAILED",
+			Message: localizedText(
+				chinese,
+				"The model response could not be parsed into the required answer structure.",
+				"模型回答无法解析为要求的 JSON 回答结构。",
+			),
 		})
 		return output
 	}
@@ -65,8 +70,12 @@ func parseAgentOutput(
 		output.Metadata["missing_required_sections"] = true
 		output.Metadata["missing_sections"] = missingSections
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "AGENT_OUTPUT_MISSING_REQUIRED_SECTIONS",
-			Message: "The model response omitted one or more required answer sections.",
+			Code: "AGENT_OUTPUT_MISSING_REQUIRED_SECTIONS",
+			Message: localizedText(
+				chinese,
+				"The model response omitted one or more required answer sections.",
+				"模型回答缺少一个或多个必需部分。",
+			),
 		})
 	} else {
 		output.Metadata["missing_required_sections"] = false
@@ -131,14 +140,22 @@ func parseAgentOutput(
 	}
 	if invalidReferences {
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "EVIDENCE_REFERENCE_INVALID",
-			Message: "One or more model statements were removed because they did not reference returned evidence.",
+			Code: "EVIDENCE_REFERENCE_INVALID",
+			Message: localizedText(
+				chinese,
+				"One or more model statements were removed because they did not reference returned evidence.",
+				"一个或多个模型陈述未引用已返回证据，因此已被移除。",
+			),
 		})
 	}
 	if len(output.Conclusions) == 0 && len(output.Evidence) == 0 {
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "INSUFFICIENT_EVIDENCE",
-			Message: "No tool evidence was returned to support a conclusion.",
+			Code: "INSUFFICIENT_EVIDENCE",
+			Message: localizedText(
+				chinese,
+				"No tool evidence was returned to support a conclusion.",
+				"没有返回可用于支持结论的工具证据。",
+			),
 		})
 	}
 	return output

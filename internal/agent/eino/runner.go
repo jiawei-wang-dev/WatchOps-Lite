@@ -125,8 +125,9 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		Limitations:     []Limitation{},
 		ToolRuns:        []ToolRun{},
 		Metadata: map[string]any{
-			"agent_mode":    "deterministic",
-			"fallback_used": false,
+			"agent_mode":        "deterministic",
+			"fallback_used":     false,
+			"response_language": responseLanguage(input.CurrentMessage),
 			"session_context_loaded": len(input.RecentMessages) > 0 ||
 				input.SessionSummary.Version > 0 ||
 				input.SessionSummary.Content != "",
@@ -144,6 +145,7 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 	}()
 
 	calls := planToolCalls(input)
+	chinese := prefersChinese(input.CurrentMessage)
 	selectedTools := make([]string, 0, len(calls))
 	for _, call := range calls {
 		selectedTools = append(selectedTools, call.name)
@@ -151,8 +153,12 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 	span.SetAttributes(attribute.StringSlice("selected_tools", selectedTools))
 	if len(calls) == 0 {
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "MORE_CONTEXT_REQUIRED",
-			Message: "No deterministic tool route matched the request; provide an error-rate, latency, trace, runbook, alert, or topology question.",
+			Code: "MORE_CONTEXT_REQUIRED",
+			Message: localizedText(
+				chinese,
+				"No deterministic tool route matched the request; provide an error-rate, latency, trace, runbook, alert, or topology question.",
+				"确定性降级路径未匹配到工具；请提供错误率、延迟、Trace、runbook、告警或拓扑相关问题。",
+			),
 		})
 		return output, nil
 	}
@@ -188,8 +194,14 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 			continue
 		}
 		successfulTools[call.name] = evidenceIDs
-		output.Conclusions = append(output.Conclusions, conclusionFor(call.name, evidenceIDs))
-		output.Recommendations = append(output.Recommendations, recommendationFor(call.name, evidenceIDs))
+		output.Conclusions = append(
+			output.Conclusions,
+			conclusionFor(call.name, evidenceIDs, chinese),
+		)
+		output.Recommendations = append(
+			output.Recommendations,
+			recommendationFor(call.name, evidenceIDs, chinese),
+		)
 	}
 	output.Evidence, output.Metadata["evidence_groups"] = aggregateAgentEvidence(
 		evidenceCandidates,
@@ -199,7 +211,11 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 		if logEvidence, logsOK := successfulTools[logs.Name]; logsOK {
 			evidenceIDs := append(append([]string{}, metricEvidence...), logEvidence...)
 			output.Inferences = append(output.Inferences, Inference{
-				Text:        "The correlated metric and log evidence suggests upstream timeouts are a plausible contributor to the elevated error rate.",
+				Text: localizedText(
+					chinese,
+					"The correlated metric and log evidence suggests upstream timeouts are a plausible contributor to the elevated error rate.",
+					"关联的指标与日志证据表明，上游超时可能是错误率升高的影响因素。",
+				),
 				EvidenceIDs: evidenceIDs,
 			})
 		}
@@ -207,8 +223,12 @@ func (r *DeterministicRunner) Run(ctx context.Context, input AgentInput) (AgentO
 
 	if mockEvidenceUsed {
 		output.Limitations = append(output.Limitations, Limitation{
-			Code:    "MOCK_DATA",
-			Message: "This response includes deterministic mock evidence for one or more tools and is not a production-only investigation.",
+			Code: "MOCK_DATA",
+			Message: localizedText(
+				chinese,
+				"This response includes deterministic mock evidence for one or more tools and is not a production-only investigation.",
+				"本回答包含一个或多个工具的确定性 mock 证据，不能视为纯生产环境调查结果。",
+			),
 		})
 	}
 
@@ -315,8 +335,14 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 	message := strings.ToLower(strings.TrimSpace(input.CurrentMessage))
 	service := inferService(message)
 	calls := make([]plannedToolCall, 0, 4)
+	logKeywords := []string{"error", "timeout"}
+	if prefersChinese(input.CurrentMessage) {
+		logKeywords = append(logKeywords, "错误", "超时")
+	}
 
-	if strings.Contains(message, "alert") || strings.Contains(message, "firing") {
+	if strings.Contains(message, "alert") ||
+		strings.Contains(message, "firing") ||
+		strings.Contains(message, "告警") {
 		calls = append(calls, plannedToolCall{
 			name: alerts.Name,
 			arguments: alerts.Input{
@@ -328,7 +354,9 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 
 	if strings.Contains(message, "topology") ||
 		strings.Contains(message, "dependency") ||
-		strings.Contains(message, "dependencies") {
+		strings.Contains(message, "dependencies") ||
+		strings.Contains(message, "拓扑") ||
+		strings.Contains(message, "依赖") {
 		calls = append(calls, plannedToolCall{
 			name: topology.Name,
 			arguments: topology.Input{
@@ -338,7 +366,8 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 		})
 	}
 
-	if strings.Contains(message, "error rate") {
+	if strings.Contains(message, "error rate") ||
+		strings.Contains(message, "错误率") {
 		calls = append(calls,
 			plannedToolCall{
 				name: metrics.Name,
@@ -353,14 +382,17 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 				arguments: logs.Input{
 					Service:   service,
 					TimeRange: input.TimeContext,
-					Keywords:  []string{"error", "timeout"},
+					Keywords:  logKeywords,
 					Level:     "error",
 				},
 			},
 		)
 	}
 
-	if strings.Contains(message, "trace") || strings.Contains(message, "slow") {
+	if strings.Contains(message, "trace") ||
+		strings.Contains(message, "slow") ||
+		strings.Contains(message, "链路") ||
+		strings.Contains(message, "慢调用") {
 		calls = append(calls, plannedToolCall{
 			name: traces.Name,
 			arguments: traces.Input{
@@ -408,6 +440,19 @@ func inferTraceID(message string) string {
 }
 
 func inferService(message string) string {
+	knownServices := []string{"checkout", "payment", "redis", "mysql"}
+	selected := ""
+	selectedIndex := len(message) + 1
+	for _, service := range knownServices {
+		if index := strings.Index(message, service); index >= 0 && index < selectedIndex {
+			selected = service
+			selectedIndex = index
+		}
+	}
+	if selected != "" {
+		return selected
+	}
+
 	words := strings.FieldsFunc(message, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsPunct(r)
 	})
@@ -444,7 +489,11 @@ func isKnowledgeQuestion(message string) bool {
 		strings.Contains(message, "playbook") ||
 		strings.Contains(message, "knowledge") ||
 		strings.Contains(message, "how should") ||
-		strings.Contains(message, "how do")
+		strings.Contains(message, "how do") ||
+		strings.Contains(message, "知识") ||
+		strings.Contains(message, "排查") ||
+		strings.Contains(message, "怎么处理") ||
+		strings.Contains(message, "如何处理")
 }
 
 func safeToolError(toolName string, err error) *common.ToolError {
@@ -473,40 +522,100 @@ func collectEvidenceIDs(evidence []common.EvidenceItem) []string {
 	return ids
 }
 
-func conclusionFor(toolName string, evidenceIDs []string) Conclusion {
+func conclusionFor(
+	toolName string,
+	evidenceIDs []string,
+	chinese bool,
+) Conclusion {
 	text := "The tool returned reliability evidence."
 	switch toolName {
 	case metrics.Name:
-		text = "Metric evidence reports the requested service reliability signal."
+		text = localizedText(
+			chinese,
+			"Metric evidence reports the requested service reliability signal.",
+			"指标证据展示了请求的服务可靠性信号。",
+		)
 	case logs.Name:
-		text = "Log evidence contains events matching the requested service and time range."
+		text = localizedText(
+			chinese,
+			"Log evidence contains events matching the requested service and time range.",
+			"日志证据包含与目标服务和时间范围匹配的事件。",
+		)
 	case traces.Name:
-		text = "Trace evidence identifies the slowest or error-marked spans."
+		text = localizedText(
+			chinese,
+			"Trace evidence identifies the slowest or error-marked spans.",
+			"Trace 证据标识了最慢或带错误标记的 span。",
+		)
 	case knowledge.Name:
-		text = "Knowledge evidence contains a relevant diagnostic procedure."
+		text = localizedText(
+			chinese,
+			"Knowledge evidence contains a relevant diagnostic procedure.",
+			"知识库证据包含相关排障流程。",
+		)
 	case alerts.Name:
-		text = "Alert evidence reports active or recent alert signals for the service."
+		text = localizedText(
+			chinese,
+			"Alert evidence reports active or recent alert signals for the service.",
+			"告警证据展示了该服务当前或近期的告警信号。",
+		)
 	case topology.Name:
-		text = "Topology evidence describes service dependencies relevant to the incident."
+		text = localizedText(
+			chinese,
+			"Topology evidence describes service dependencies relevant to the incident.",
+			"拓扑证据描述了与本次故障相关的服务依赖。",
+		)
+	default:
+		text = localizedText(chinese, text, "工具返回了可靠性证据。")
 	}
 	return Conclusion{Text: text, EvidenceIDs: evidenceIDs}
 }
 
-func recommendationFor(toolName string, evidenceIDs []string) Recommendation {
+func recommendationFor(
+	toolName string,
+	evidenceIDs []string,
+	chinese bool,
+) Recommendation {
 	text := "Review the cited evidence before taking action."
 	switch toolName {
 	case metrics.Name:
-		text = "Compare the affected interval with the service baseline and dependency metrics."
+		text = localizedText(
+			chinese,
+			"Compare the affected interval with the service baseline and dependency metrics.",
+			"将故障时间范围与服务基线及依赖指标进行对比。",
+		)
 	case logs.Name:
-		text = "Inspect upstream dependency saturation and timeout configuration."
+		text = localizedText(
+			chinese,
+			"Inspect upstream dependency saturation and timeout configuration.",
+			"检查上游依赖饱和度和超时配置。",
+		)
 	case traces.Name:
-		text = "Inspect the cited slow span and its downstream dependency."
+		text = localizedText(
+			chinese,
+			"Inspect the cited slow span and its downstream dependency.",
+			"检查引用的慢 span 及其下游依赖。",
+		)
 	case knowledge.Name:
-		text = "Follow the cited runbook steps and verify each action against live evidence."
+		text = localizedText(
+			chinese,
+			"Follow the cited runbook steps and verify each action against live evidence.",
+			"按照引用的 runbook 执行，并用实时证据验证每个操作。",
+		)
 	case alerts.Name:
-		text = "Compare the alert state with metrics, logs, and traces before escalating."
+		text = localizedText(
+			chinese,
+			"Compare the alert state with metrics, logs, and traces before escalating.",
+			"升级处理前，将告警状态与指标、日志和 Trace 进行对比。",
+		)
 	case topology.Name:
-		text = "Use the dependency context to decide which upstream or downstream evidence to inspect next."
+		text = localizedText(
+			chinese,
+			"Use the dependency context to decide which upstream or downstream evidence to inspect next.",
+			"根据依赖上下文决定下一步检查哪个上游或下游证据。",
+		)
+	default:
+		text = localizedText(chinese, text, "采取操作前请检查引用的证据。")
 	}
 	return Recommendation{Text: text, EvidenceIDs: evidenceIDs}
 }
