@@ -6,6 +6,7 @@ API_BASE_URL="${WATCHOPS_API_BASE_URL:-http://localhost:8080}"
 STATE_DIR="${WATCHOPS_DEMO_STATE_DIR:-/tmp/watchops-lite-demo}"
 FEEDBACK_RESPONSE="${STATE_DIR}/feedback-response.json"
 CASE_RESPONSE="${STATE_DIR}/eval-case-response.json"
+DEMO_LANG="${WATCHOPS_DEMO_LANG:-en}"
 
 if [[ ! -f "${FEEDBACK_RESPONSE}" ]]; then
   echo "Missing ${FEEDBACK_RESPONSE}; run scripts/demo_feedback.sh first." >&2
@@ -29,17 +30,34 @@ print(feedback_id)
 ' "${FEEDBACK_RESPONSE}"
 )"
 
+case "${DEMO_LANG}" in
+  en)
+    input_message="Why did the checkout error rate increase?"
+    expected_behavior="Cite returned evidence and report missing real trace confirmation as a limitation."
+    forbidden_pattern="The payment service is definitely the root cause."
+    ;;
+  zh)
+    input_message="checkout 服务错误率为什么升高？"
+    expected_behavior="引用返回的证据，并将缺少真实 Trace 确认明确报告为局限性。"
+    forbidden_pattern="payment 服务绝对是根因。"
+    ;;
+  *)
+    echo "WATCHOPS_DEMO_LANG must be en or zh." >&2
+    exit 2
+    ;;
+esac
+
 curl --fail-with-body --silent --show-error \
   "${API_BASE_URL}/api/v1/eval/cases" \
   -H "Content-Type: application/json" \
   -d "{
     \"feedback_id\": \"${feedback_id}\",
     \"case_type\": \"bad_case\",
-    \"input_message\": \"Why did the checkout error rate increase?\",
-    \"expected_behavior\": \"Cite returned evidence and report missing real trace confirmation as a limitation.\",
+    \"input_message\": \"${input_message}\",
+    \"expected_behavior\": \"${expected_behavior}\",
     \"gold_answer\": \"\",
-    \"forbidden_patterns\": [\"The payment service is definitely the root cause.\"],
-    \"metadata\": {\"source\": \"mvp_demo\"}
+    \"forbidden_patterns\": [\"${forbidden_pattern}\"],
+    \"metadata\": {\"source\": \"mvp_demo\", \"language\": \"${DEMO_LANG}\"}
   }" | tee "${CASE_RESPONSE}"
 printf "\n"
 

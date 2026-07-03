@@ -39,6 +39,26 @@ func TestRepositoryBenchmarkCasesLoad(t *testing.T) {
 	}
 }
 
+func TestChineseRepositoryBenchmarkCasesLoad(t *testing.T) {
+	file, err := os.Open("../../testdata/agent_benchmark_cases_zh.json")
+	if err != nil {
+		t.Fatalf("open Chinese repository cases: %v", err)
+	}
+	defer file.Close()
+	cases, err := LoadCases(file)
+	if err != nil {
+		t.Fatalf("LoadCases() error = %v", err)
+	}
+	if len(cases) != 3 {
+		t.Fatalf("Chinese case count = %d, want 3", len(cases))
+	}
+	for _, current := range cases {
+		if !strings.ContainsAny(current.Message, "服务错误率支付超时告警证据") {
+			t.Fatalf("case %s does not contain Chinese text", current.ID)
+		}
+	}
+}
+
 func TestPercentileNearestRank(t *testing.T) {
 	values := make([]float64, 100)
 	for index := range values {

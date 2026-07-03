@@ -131,6 +131,20 @@ func TestAgentEvalDemoReportsRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestE2EDemoScriptDocumentsChineseMode(t *testing.T) {
+	script := filepath.Join(
+		transportTestRepoRoot(t),
+		"scripts/e2e_demo_check.sh",
+	)
+	output, err := exec.Command("bash", script, "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("e2e help failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "--lang en|zh") {
+		t.Fatalf("e2e help does not document Chinese mode:\n%s", output)
+	}
+}
+
 func runDemoScript(
 	t *testing.T,
 	script string,
@@ -143,6 +157,7 @@ func runDemoScript(
 		os.Environ(),
 		"WATCHOPS_API_BASE_URL="+apiBaseURL,
 		"WATCHOPS_DEMO_STATE_DIR="+stateDir,
+		"WATCHOPS_DEMO_LANG=en",
 		"WATCHOPS_AGENT_EVAL_TIMEOUT_SECONDS=5",
 	)
 	output, err := command.CombinedOutput()

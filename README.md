@@ -146,7 +146,13 @@ After starting the Compose stack and WatchOps-Lite, run the complete local demo 
 make e2e-demo
 ```
 
-It checks dependencies and health, seeds knowledge and logs, verifies Prometheus metrics, runs normal and SSE Chat, executes retrieval and Agent eval, runs the Agent benchmark, and prints report paths plus local UI URLs. Use `./scripts/e2e_demo_check.sh --help` for `--skip-seed`, `--skip-eval`, `--skip-benchmark`, and optional generated-log controls. It intentionally does not start or stop Compose and does not validate production scaling, paging, authentication, or remediation.
+Run the equivalent Chinese interview/demo path with:
+
+```bash
+make e2e-demo-zh
+```
+
+It checks dependencies and health, seeds language-specific knowledge and logs, verifies Prometheus metrics, runs normal and SSE Chat, executes retrieval and Agent eval, runs the matching Agent benchmark, and prints report paths plus local UI URLs. The Chinese path additionally verifies Chinese natural-language output while keeping tool names and evidence IDs as stable ASCII identifiers. Use `./scripts/e2e_demo_check.sh --help` for `--lang en|zh`, `--skip-seed`, `--skip-eval`, `--skip-benchmark`, and optional generated-log controls. It intentionally does not start or stop Compose and does not validate production scaling, paging, authentication, or remediation.
 
 Open the local Agent demo console:
 
@@ -154,11 +160,11 @@ Open the local Agent demo console:
 http://localhost:8080/
 ```
 
-The build-free HTML/CSS/JavaScript console provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, Redis session-history load/clear controls, and existing feedback/eval actions. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
+The build-free HTML/CSS/JavaScript console defaults to Chinese and includes a persisted 中文 / English switch. It provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, Redis session-history load/clear controls, and existing feedback/eval actions. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
 
 Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 
-The local config enables Redis, Elasticsearch, MySQL, and OpenTelemetry, while keeping `llm.enabled=false` and `agent.mode=deterministic`. No LLM key is required.
+The local config enables Redis, Elasticsearch, MySQL, OpenTelemetry, and the Eino ReAct path. When the configured LLM key is unavailable, the existing deterministic fallback keeps the local demo runnable.
 
 To stop the dependencies:
 
@@ -181,6 +187,14 @@ With the application running, execute:
 ./scripts/demo_feedback.sh
 ./scripts/demo_eval_case.sh
 ./scripts/demo_eval_run.sh
+```
+
+Set `WATCHOPS_DEMO_LANG=zh` or pass `--lang zh` to the knowledge/log seed scripts to use the Chinese bilingual fixtures without removing the English fixtures:
+
+```bash
+./scripts/demo_seed_knowledge.sh --lang zh
+./scripts/demo_seed_logs.sh --lang zh
+WATCHOPS_DEMO_LANG=zh ./scripts/demo_chat.sh
 ```
 
 The flow demonstrates:

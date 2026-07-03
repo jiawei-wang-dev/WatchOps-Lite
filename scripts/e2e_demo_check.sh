@@ -3,7 +3,7 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_BASE_URL="${WATCHOPS_API_BASE_URL:-http://localhost:8080}"
-STATE_DIR="${WATCHOPS_DEMO_STATE_DIR:-/tmp/watchops-lite-demo}"
+DEMO_LANG="${WATCHOPS_DEMO_LANG:-en}"
 SKIP_BENCHMARK=false
 SKIP_EVAL=false
 SKIP_SEED=false
@@ -38,6 +38,7 @@ usage() {
 Usage: ./scripts/e2e_demo_check.sh [options]
 
 Options:
+  --lang en|zh      Demo language (default: en).
   --skip-benchmark  Skip the local Agent benchmark.
   --skip-eval       Skip retrieval and Agent eval.
   --skip-seed       Skip knowledge and log seeding.
@@ -63,6 +64,14 @@ while (($# > 0)); do
     --generate-logs)
       GENERATE_LOGS=true
       ;;
+    --lang)
+      [[ -n "${2:-}" ]] || {
+        printf 'FAIL  --lang requires en or zh\n' >&2
+        exit 2
+      }
+      DEMO_LANG="$2"
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -75,6 +84,27 @@ while (($# > 0)); do
   esac
   shift
 done
+
+if [[ "${DEMO_LANG}" != "en" && "${DEMO_LANG}" != "zh" ]]; then
+  printf 'FAIL  unsupported demo language: %s\n' "${DEMO_LANG}" >&2
+  exit 2
+fi
+if [[ -n "${WATCHOPS_DEMO_STATE_DIR:-}" ]]; then
+  STATE_DIR="${WATCHOPS_DEMO_STATE_DIR}"
+elif [[ "${DEMO_LANG}" == "zh" ]]; then
+  STATE_DIR="/tmp/watchops-lite-demo-zh"
+else
+  STATE_DIR="/tmp/watchops-lite-demo"
+fi
+export WATCHOPS_DEMO_LANG="${DEMO_LANG}"
+export WATCHOPS_DEMO_STATE_DIR="${STATE_DIR}"
+if [[ "${DEMO_LANG}" == "zh" ]]; then
+  RETRIEVAL_CASES="${ROOT_DIR}/testdata/retrieval_eval_cases_zh.json"
+  BENCHMARK_CASES="${ROOT_DIR}/testdata/agent_benchmark_cases_zh.json"
+else
+  RETRIEVAL_CASES="${ROOT_DIR}/testdata/retrieval_eval_cases.json"
+  BENCHMARK_CASES="${ROOT_DIR}/testdata/agent_benchmark_cases.json"
+fi
 
 mkdir -p "${STATE_DIR}"
 cd "${ROOT_DIR}"
@@ -113,20 +143,28 @@ stream_chat() {
   payload="$(
     python3 -c '
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 now = datetime.now(timezone.utc)
 start = now - timedelta(minutes=20)
 format_time = lambda value: value.isoformat(timespec="seconds").replace("+00:00", "Z")
+language = sys.argv[1]
+if language == "zh":
+    message = "流式排查 checkout 故障，请结合指标、日志、告警和 runbook。"
+    session_id = "demo-checkout-stream-session-zh"
+else:
+    message = "Stream a checkout investigation using metrics, logs, alerts, and the runbook."
+    session_id = "demo-checkout-stream-session"
 print(json.dumps({
-    "session_id": "demo-checkout-stream-session",
-    "message": "Stream a checkout investigation using metrics, logs, and the runbook.",
+    "session_id": session_id,
+    "message": message,
     "time_context": {
         "from": format_time(start),
         "to": format_time(now),
     },
 }))
-'
+' "${DEMO_LANG}"
   )" || return 1
 
   curl --no-buffer --fail-with-body --silent --show-error --http1.1 \
@@ -137,13 +175,41 @@ print(json.dumps({
   check_sse_file "${stream_path}"
 }
 
+check_chinese_chat() {
+  python3 -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    response = json.load(source)
+answer = response.get("answer", {})
+texts = []
+for section in ("conclusion", "inferences", "recommendations", "limitations"):
+    for item in answer.get(section, []):
+        texts.append(str(item.get("text") or item.get("message") or ""))
+if not any(any("\u4e00" <= char <= "\u9fff" for char in text) for text in texts):
+    raise SystemExit("Chinese demo response contains no Chinese natural-language text.")
+for run in response.get("tool_runs", []):
+    name = str(run.get("tool", ""))
+    if not name or not name.isascii():
+        raise SystemExit(f"Tool name is not a stable ASCII identifier: {name!r}")
+for item in answer.get("evidence", []):
+    evidence_id = str(item.get("id", ""))
+    if evidence_id and not evidence_id.isascii():
+        raise SystemExit(
+            f"Evidence ID is not a stable ASCII identifier: {evidence_id!r}"
+        )
+print("Verified Chinese Chat text with stable tool names and evidence IDs.")
+' "${STATE_DIR}/chat-response.json"
+}
+
 run_step "Dependency check" "${ROOT_DIR}/scripts/check_dependencies.sh"
 run_step "WatchOps-Lite health check" \
   curl --fail --silent --show-error --max-time 5 "${API_BASE_URL}/healthz"
 
 if [[ "${SKIP_SEED}" == "false" ]]; then
   run_step "Seed knowledge" "${ROOT_DIR}/scripts/demo_seed_knowledge.sh"
-  if [[ "${GENERATE_LOGS}" == "true" ]]; then
+  if [[ "${GENERATE_LOGS}" == "true" && "${DEMO_LANG}" == "en" ]]; then
     generated_logs="${STATE_DIR}/generated_checkout_logs.jsonl"
     run_step "Generate demo logs" \
       "${ROOT_DIR}/scripts/generate_demo_logs.sh" \
@@ -162,11 +228,15 @@ fi
 
 run_step "Verify Prometheus demo metrics" "${ROOT_DIR}/scripts/demo_metrics.sh"
 run_step "Run normal Chat demo" "${ROOT_DIR}/scripts/demo_chat.sh"
+if [[ "${DEMO_LANG}" == "zh" ]]; then
+  run_step "Verify Chinese Chat output" check_chinese_chat
+fi
 run_step "Run SSE Chat demo" stream_chat
 
 if [[ "${SKIP_EVAL}" == "false" ]]; then
   run_step "Run retrieval eval" \
-    env WATCHOPS_RETRIEVAL_EVAL_OUTPUT="${STATE_DIR}/retrieval-eval-report.json" \
+    env WATCHOPS_RETRIEVAL_EVAL_CASES="${RETRIEVAL_CASES}" \
+    WATCHOPS_RETRIEVAL_EVAL_OUTPUT="${STATE_DIR}/retrieval-eval-report.json" \
     "${ROOT_DIR}/scripts/eval_retrieval.sh"
   run_step "Create feedback seed" "${ROOT_DIR}/scripts/demo_feedback.sh"
   run_step "Create Agent eval case" "${ROOT_DIR}/scripts/demo_eval_case.sh"
@@ -177,7 +247,8 @@ fi
 
 if [[ "${SKIP_BENCHMARK}" == "false" ]]; then
   run_step "Run Agent benchmark" \
-    env WATCHOPS_AGENT_BENCHMARK_OUTPUT_DIR="${STATE_DIR}" \
+    env WATCHOPS_AGENT_BENCHMARK_CASES="${BENCHMARK_CASES}" \
+    WATCHOPS_AGENT_BENCHMARK_OUTPUT_DIR="${STATE_DIR}" \
     "${ROOT_DIR}/scripts/benchmark_agent.sh"
 else
   warn "Agent benchmark skipped"

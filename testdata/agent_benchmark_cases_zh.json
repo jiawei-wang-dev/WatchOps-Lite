@@ -1,0 +1,23 @@
+[
+  {
+    "id": "zh_checkout_error_rate",
+    "session_id": "benchmark-zh-checkout-error-rate",
+    "message": "checkout 服务错误率为什么升高？请结合指标和日志给出有证据的诊断。",
+    "expected_behavior": "检查 checkout 指标和日志，返回中文证据结论或明确局限性。",
+    "notes": "中文核心指标与日志排查路径。"
+  },
+  {
+    "id": "zh_payment_timeout_runbook",
+    "session_id": "benchmark-zh-payment-timeout-runbook",
+    "message": "payment 支付超时导致 checkout 失败时，应该如何按照 runbook 处理？",
+    "expected_behavior": "检索双语 runbook，引用证据并用中文给出有边界的缓解建议。",
+    "notes": "中文知识检索与缓解建议路径。"
+  },
+  {
+    "id": "zh_checkout_alerts",
+    "session_id": "benchmark-zh-checkout-alerts",
+    "message": "检查 checkout 当前告警，并说明还缺少哪些证据。",
+    "expected_behavior": "调用 query_alerts，保留工具名并用中文报告告警或局限性。",
+    "notes": "中文辅助告警工具路径。"
+  }
+]
