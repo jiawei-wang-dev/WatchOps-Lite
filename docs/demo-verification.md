@@ -509,6 +509,30 @@ Inspect Redis, MySQL, and Jaeger with the commands above, then stop the local st
 docker compose down
 ```
 
+## Optional Multi-Agent Demo Verification
+
+Verified locally on 2026-07-04 after the Single-Agent demo gate:
+
+```bash
+make e2e-demo
+make e2e-demo-zh
+make e2e-demo-multi
+make e2e-demo-multi-zh
+```
+
+Observed:
+
+- English Single-Agent E2E: `PASS=12 WARN=0`
+- Chinese Single-Agent E2E: `PASS=13 WARN=0`
+- Multi-Agent JSON returned Triage, Evidence, Knowledge, and Synthesis steps
+- Multi-Agent merged response contained normalized evidence and bounded answer sections
+- Multi-Agent SSE contained role lifecycle, tool/evidence, synthesis, final-answer, and completion events
+- `final_answer` preceded `multi_agent_completed`
+- Existing `/api/v1/chat` remained compatible
+- Both English and Chinese Multi-Agent checks passed
+
+The local environment did not contain a DeepSeek API key, so the verified run used the supported deterministic Agent/synthesis fallback. Model-backed execution remains optional and must not be inferred from this result.
+
 ## Final Conclusion
 
 **WatchOps-Lite enhanced demo is fully verified locally.**

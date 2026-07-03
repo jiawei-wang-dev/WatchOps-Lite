@@ -636,7 +636,7 @@ Delivered:
 
 Single-Agent remains the default and its API, prompt, ReAct graph, Redis memory, Tool Runtime, Evidence schema, and demo scripts remain unchanged. This capability is an interview/demo graph, not a planner, multi-agent platform, autonomous remediation system, or production-distributed orchestration claim.
 
-Exit status: implementation complete; final local enhanced-demo verification is tracked separately.
+Exit status: complete. English and Chinese Single-Agent and Multi-Agent demo gates are verified locally.
 
 ## Milestone Dependencies
 
