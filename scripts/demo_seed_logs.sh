@@ -5,7 +5,44 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ELASTICSEARCH_URL="${WATCHOPS_ELASTICSEARCH_URL:-http://localhost:9200}"
 LOGS_INDEX="${WATCHOPS_LOGS_INDEX:-watchops_logs}"
-LOGS_PATH="${1:-${ROOT_DIR}/demo/logs/checkout_logs.jsonl}"
+DEMO_LANG="${WATCHOPS_DEMO_LANG:-en}"
+LOGS_PATH=""
+
+while (($# > 0)); do
+  case "$1" in
+    --lang)
+      [[ -n "${2:-}" ]] || {
+        echo "--lang requires en or zh." >&2
+        exit 2
+      }
+      DEMO_LANG="$2"
+      shift 2
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      [[ -z "${LOGS_PATH}" ]] || {
+        echo "Only one custom JSONL path can be provided." >&2
+        exit 2
+      }
+      LOGS_PATH="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "${LOGS_PATH}" ]]; then
+  case "${DEMO_LANG}" in
+    en) LOGS_PATH="${ROOT_DIR}/demo/logs/checkout_logs.jsonl" ;;
+    zh) LOGS_PATH="${ROOT_DIR}/demo/logs/checkout_logs_zh.jsonl" ;;
+    *)
+      echo "Unsupported demo language: ${DEMO_LANG}; expected en or zh." >&2
+      exit 2
+      ;;
+  esac
+fi
 bulk_file="$(mktemp)"
 response_file="$(mktemp)"
 trap 'rm -f "${bulk_file}" "${response_file}"' EXIT

@@ -963,8 +963,9 @@ function shortID(value) {
 
 function truncateText(value, limit) {
   const text = safeText(value).trim();
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit).trimEnd()}…`;
+  const runes = Array.from(text);
+  if (runes.length <= limit) return text;
+  return `${runes.slice(0, limit).join("").trimEnd()}…`;
 }
 
 function setText(id, value) {

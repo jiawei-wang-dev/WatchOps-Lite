@@ -13,6 +13,26 @@ type searcherStub struct {
 	err     error
 }
 
+type queryCapturingSearcher struct {
+	query retrievalknowledge.SearchQuery
+}
+
+func (s *queryCapturingSearcher) Search(
+	_ context.Context,
+	query retrievalknowledge.SearchQuery,
+) ([]retrievalknowledge.SearchResult, error) {
+	s.query = query
+	return []retrievalknowledge.SearchResult{{
+		ChunkID:       "checkout_runbook_zh_chunk_0000",
+		DocumentID:    "checkout_runbook_zh",
+		Title:         "Checkout 服务高错误率排障 Runbook",
+		Content:       "检查 payment 支付依赖延迟、超时和重试放大。",
+		Source:        "watchops-lite-demo",
+		Score:         4.2,
+		RetrievalMode: "bm25",
+	}}, nil
+}
+
 func (s searcherStub) Search(context.Context, retrievalknowledge.SearchQuery) ([]retrievalknowledge.SearchResult, error) {
 	return s.results, s.err
 }
@@ -92,5 +112,26 @@ func TestSearchToolFallsBackToMockEvidence(t *testing.T) {
 	}
 	if result.Metadata["mode"] != "mock_fallback" || len(result.Warnings) != 1 {
 		t.Fatalf("result = %#v, want explicit fallback", result)
+	}
+}
+
+func TestSearchToolPreservesChineseQueryAndRunbookEvidence(t *testing.T) {
+	searcher := &queryCapturingSearcher{}
+	tool := NewSearchTool(searcher, 0)
+
+	result, err := tool.Execute(context.Background(), Input{
+		Query: "checkout 支付超时怎么排查",
+		TopK:  3,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if searcher.query.Query != "checkout 支付超时怎么排查" {
+		t.Fatalf("search query = %q", searcher.query.Query)
+	}
+	if len(result.Evidence) != 1 ||
+		result.Evidence[0].ID != "checkout_runbook_zh_chunk_0000" ||
+		result.Evidence[0].Content != "检查 payment 支付依赖延迟、超时和重试放大。" {
+		t.Fatalf("Chinese evidence = %#v", result.Evidence)
 	}
 }
