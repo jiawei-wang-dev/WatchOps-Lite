@@ -187,6 +187,33 @@ Allowed event types are `workflow_started`, `graph_node_started`, `graph_node_co
 
 Stream event payloads intentionally include only operational metadata such as request ID, trace ID, latency, node/tool name, source type, counts, and structured error code. They must not expose chain-of-thought, raw prompts, raw model output, raw tool arguments, raw sensitive logs, or unredacted tool output.
 
+## Optional Multi-Agent Chat
+
+The default Single-Agent endpoints above are unchanged. The optional demo mode accepts the same request body:
+
+```http
+POST /api/v1/chat/multi-agent
+Content-Type: application/json
+```
+
+Its response retains the structured `answer`, `tool_runs`, request/session IDs, and trace ID, and adds:
+
+- `mode: "multi_agent"`
+- `agent_steps`: bounded Triage, Evidence, Knowledge, and Synthesis role summaries
+- top-level `evidence`: the merged evidence set used for synthesis
+
+Each role step exposes operational fields such as status, duration, tool runs, evidence IDs, and limitations. It does not expose private reasoning, prompts, or raw model output.
+
+```http
+POST /api/v1/chat/multi-agent/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+The stream may emit `multi_agent_started`, `agent_step_started`, `agent_step_completed`, tool lifecycle events, `evidence_collected`, `synthesis_started`, `final_answer`, and `multi_agent_completed` or `multi_agent_failed`. The serialized `final_answer` event always precedes `multi_agent_completed`.
+
+The optional mode is a bounded Eino Graph demonstration. It does not replace the main Chat API or add autonomous planning/remediation semantics.
+
 ### Agent Modes
 
 `agent.mode=deterministic` remains the default and uses transparent rules:

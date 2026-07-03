@@ -125,6 +125,27 @@ The checkout diagnosis Skill documents the readable sequence metrics → logs �
 
 The four core evidence tools remain `query_metrics`, `query_logs`, `query_traces`, and `search_knowledge`. `query_alerts` and `get_service_topology` are auxiliary OnCall context tools. They use the same Eino tool registration path and Tool Runtime wrapper, but they are not a planner, policy layer, remediation engine, or correlation engine.
 
+### 3.3 Optional Multi-Agent Demo Graph
+
+Single-Agent remains the default execution model. The optional Multi-Agent API compiles a separate typed Eino graph with bounded diagnostic roles:
+
+```mermaid
+flowchart LR
+    I["Validated request"] --> T["Triage Agent"]
+    T --> E["Evidence Agent"]
+    T --> K["Knowledge Agent"]
+    E --> M["Stable merge"]
+    K --> M
+    M --> S["Synthesis Agent"]
+    S --> O["Structured answer"]
+```
+
+Evidence and Knowledge are native fan-out branches joined before synthesis. Evidence Agent may use only the existing observability Eino tools through Tool Guard and Tool Runtime. Knowledge Agent may use knowledge retrieval and bounded confirmed long-term memory. Merge deduplicates evidence IDs and limitations without adding claims. Synthesis receives only the plan and merged findings and may cite only the merged evidence allowlist.
+
+Agents are bounded diagnostic roles; tools remain atomic external capabilities. The graph has no planner, role discovery, agent registry, inter-agent free-form conversation, autonomous remediation, MCP, or production-distributed scheduling. It is an optional interview/demo path and does not alter `/api/v1/chat`, `/api/v1/chat/stream`, their memory behavior, or the Single-Agent Eino ReAct graph.
+
+Multi-Agent SSE uses one serialized writer even though Evidence and Knowledge may execute concurrently. Operational events expose role, status, counts, duration, request ID, and trace ID—not prompts, chain-of-thought, raw model output, or raw tool arguments.
+
 All current tools are read-only. Tool Guard rejects unsupported tool names, invalid service names, excessive time windows or limits, invalid trace IDs and severities, and excessive topology depth before external dependency calls. It redacts sensitive metadata keys such as password, token, secret, api_key, authorization, cookie, and credential from tool output where practical.
 
 ## 4. Chat Data Flow
@@ -435,3 +456,4 @@ CI uses redacted fixtures or containers and never depends on real production end
 - [ADR 0008: Eino ReAct Agent](adr/0008-eino-react-agent.md)
 - [ADR 0009: MVP Demo Packaging](adr/0009-mvp-demo-packaging.md)
 - [ADR 0010: Elasticsearch-backed Logs Tool](adr/0010-elasticsearch-logs-tool.md)
+- [ADR 0018: Optional Eino Graph Multi-Agent Demo](adr/0018-eino-multi-agent-demo.md)

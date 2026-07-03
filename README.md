@@ -40,6 +40,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - Eino ReAct Agent with versioned PromptTemplate and optional OpenAI-compatible model
 - Lightweight Agent Failure Controller for parse repair, empty-evidence limitations, repeated failure boundaries, and deterministic fallback
 - Compiled native Eino Graph for Chat context, prompt, Agent, evidence, memory, and response orchestration
+- Optional 3+1 Eino Graph Multi-Agent demo with Triage, parallel Evidence/Knowledge, and Synthesis roles
 - Lightweight on-call Skills rendered into the Agent prompt as bounded diagnostic guidance
 - Deterministic Agent fallback that requires no API key
 - Core evidence tools: `query_logs`, `query_metrics`, `query_traces`, and `search_knowledge`
@@ -81,6 +82,23 @@ A **Tool** is an atomic external capability such as Prometheus metrics, Elastics
 Eino ReAct performs tool selection and tool calling. Tool Guard validates the allowlist, read-only boundary, common parameters, and sensitive output redaction before evidence reaches the Agent. Tool Runtime owns timeout, fallback, structured errors, normalization, and tracing for both core and auxiliary tools. The four core evidence tools remain the main reliability-analysis story; `query_alerts` and `get_service_topology` provide optional OnCall context. WatchOps-Lite intentionally avoids a second policy/planner or correlation engine, as well as MCP, UEM, policy learning, and dynamic skill discovery.
 
 The Agent Failure Controller is a safety layer around the existing Agent execution. It tracks tool-call counts, consecutive failures, repeated tool patterns, evidence count, limitations, elapsed time, and JSON parse status. It can attempt one local JSON repair pass and can trigger the existing deterministic fallback when the LLM crosses a failure boundary. It does not plan, rank, select, or execute tools.
+
+### Optional Multi-Agent Demo
+
+Single-Agent remains the default path at `/api/v1/chat` and `/api/v1/chat/stream`. The optional Multi-Agent endpoints demonstrate a bounded 3+1 collaboration graph:
+
+```text
+Triage
+  -> [Evidence Agent | Knowledge Agent]
+  -> merge
+  -> Synthesis Agent
+```
+
+The Evidence and Knowledge branches use native Eino Graph fan-out/fan-in. Evidence Agent reuses existing read-only Eino tools through Tool Guard and Tool Runtime; Knowledge Agent is restricted to knowledge retrieval and confirmed long-term memory. Synthesis can reference only merged evidence IDs. Agents are diagnostic roles, while tools remain atomic external capabilities.
+
+This is deliberately a lightweight interview/demo mode—not a planner, multi-agent platform, autonomous remediation system, or claim of production-scale orchestration.
+
+Interview framing: **WatchOps-Lite defaults to a Single-Agent Eino ReAct workflow. Its optional Multi-Agent demo uses native Eino Graph fan-out/fan-in to make Triage, Evidence, Knowledge, and Synthesis responsibilities visible, while all external calls still pass through the same guarded Tool Runtime and all conclusions remain bound to normalized evidence.**
 
 See [the native Eino refactor plan](docs/eino-native-refactor-plan.md) for the pinned API audit and migration boundaries.
 
@@ -152,6 +170,13 @@ Run the equivalent Chinese interview/demo path with:
 make e2e-demo-zh
 ```
 
+Run the lightweight optional Multi-Agent checks without replacing the main demo gate:
+
+```bash
+make e2e-demo-multi
+make e2e-demo-multi-zh
+```
+
 It checks dependencies and health, seeds language-specific knowledge and logs, verifies Prometheus metrics, runs normal and SSE Chat, executes retrieval and Agent eval, runs the matching Agent benchmark, and prints report paths plus local UI URLs. The Chinese path additionally verifies Chinese natural-language output while keeping tool names and evidence IDs as stable ASCII identifiers. Use `./scripts/e2e_demo_check.sh --help` for `--lang en|zh`, `--skip-seed`, `--skip-eval`, `--skip-benchmark`, and optional generated-log controls. It intentionally does not start or stop Compose and does not validate production scaling, paging, authentication, or remediation.
 
 Open the local Agent demo console:
@@ -160,7 +185,7 @@ Open the local Agent demo console:
 http://localhost:8080/
 ```
 
-The build-free HTML/CSS/JavaScript console defaults to Chinese and includes a persisted 中文 / English switch. It provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, structured expandable knowledge cards, Redis session-history load/clear controls, and existing feedback/eval actions. Explicit runtime badges distinguish active, available, fallback, disabled, unknown, and error states using both color and text derived from the latest visible Chat/SSE metadata. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
+The build-free HTML/CSS/JavaScript console defaults to Chinese and includes a persisted 中文 / English switch. It provides normal Chat, an optional Single-Agent / Multi-Agent mode switch, a safe SSE execution timeline, four bounded role cards, grouped evidence and tool runs, structured expandable knowledge cards, Redis session-history load/clear controls, and existing feedback/eval actions. Explicit runtime badges distinguish active, available, fallback, disabled, unknown, and error states using both color and text derived from the latest visible Chat/SSE metadata. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
 
 Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 

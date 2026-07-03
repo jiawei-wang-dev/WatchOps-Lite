@@ -179,7 +179,7 @@ Exit criteria:
 - Missing configuration and runtime model failure do not break Chat.
 - The deterministic runner remains independently testable.
 
-Exit status: complete. Multi-agent workflows, planning agents, automatic remediation, and advanced token/cost budgets remain deferred.
+Exit status: complete. A later enhancement added an optional bounded Multi-Agent demo; production multi-agent orchestration, planning agents, automatic remediation, and advanced token/cost budgets remain deferred.
 
 ## Enhancement: Auxiliary OnCall Tools — Completed
 
@@ -621,6 +621,23 @@ Delivered `make e2e-demo`, a thin orchestrator over existing dependency, seed, C
 
 Exit status: complete.
 
+## Enhancement: Optional Eino Graph Multi-Agent Demo — Completed
+
+Delivered:
+
+- Optional `/api/v1/chat/multi-agent` and `/api/v1/chat/multi-agent/stream` endpoints
+- Bounded Triage, Evidence, Knowledge, and Synthesis diagnostic roles
+- Native Eino Graph fan-out for Evidence/Knowledge and fan-in before synthesis
+- Reuse of existing Eino tools, Tool Guard, Tool Runtime, Failure Controller, and unified Evidence
+- Stable evidence/limitation merge and evidence-ID allowlisting at synthesis
+- Serialized SSE events for concurrent branches
+- Build-free bilingual console mode and four role cards
+- Lightweight English and Chinese E2E targets
+
+Single-Agent remains the default and its API, prompt, ReAct graph, Redis memory, Tool Runtime, Evidence schema, and demo scripts remain unchanged. This capability is an interview/demo graph, not a planner, multi-agent platform, autonomous remediation system, or production-distributed orchestration claim.
+
+Exit status: implementation complete; final local enhanced-demo verification is tracked separately.
+
 ## Milestone Dependencies
 
 ```mermaid
@@ -644,6 +661,7 @@ flowchart LR
     S5 --> S6["Stage 6 Enhanced Demo Verification (complete)"]
     S6 --> C1["Backend convergence (complete)"]
     C1 --> M1["MySQL confirmed memory (complete)"]
+    M1 --> MA["Optional Eino Multi-Agent demo (complete)"]
 ```
 
 ## Deferred Work
@@ -651,7 +669,7 @@ flowchart LR
 - Advanced trace critical-path, dependency-graph, and anomaly analytics
 - MySQL audit records and document lifecycle metadata
 - Eval-case review/export, release comparison, and optional future LLM judge
-- Multi-agent orchestration
+- Production multi-agent orchestration beyond the bounded local demo
 - Automated production changes
 - Model fine-tuning
 - Cross-region high availability
