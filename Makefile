@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify eval-retrieval benchmark-agent check-deps e2e-demo e2e-demo-zh
+.PHONY: run test lint fmt verify eval-retrieval benchmark-agent check-deps e2e-demo e2e-demo-zh e2e-demo-multi e2e-demo-multi-zh
 
 CONFIG ?= configs/config.json
 
@@ -31,3 +31,9 @@ e2e-demo:
 
 e2e-demo-zh:
 	./scripts/e2e_demo_check.sh --lang zh
+
+e2e-demo-multi:
+	./scripts/e2e_multi_agent_check.sh --lang en
+
+e2e-demo-multi-zh:
+	./scripts/e2e_multi_agent_check.sh --lang zh
