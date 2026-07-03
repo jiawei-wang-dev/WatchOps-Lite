@@ -86,6 +86,13 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`id="key-evidence-groups"`,
 		`id="full-evidence-details"`,
 		`class="trace-guide-card"`,
+		`id="status-eino"`,
+		`id="status-tools"`,
+		`id="status-redis"`,
+		`id="status-mysql"`,
+		`id="status-sse"`,
+		`id="status-llm"`,
+		`class="status-help"`,
 	} {
 		if !strings.Contains(indexRecorder.Body.String(), expected) {
 			t.Fatalf("index does not contain console control %q", expected)
@@ -110,6 +117,10 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		"renderStreamToolTimeline",
 		"renderKeyEvidenceGroups",
 		"latestStreamResponse",
+		"renderKnowledgeCard",
+		"findDuplicateKnowledgeResults",
+		"renderRuntimeStatuses",
+		"setRuntimeStatus",
 	} {
 		if !strings.Contains(assetRecorder.Body.String(), expected) {
 			t.Fatalf("JavaScript asset does not contain history integration %q", expected)
@@ -131,6 +142,11 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`"stream.tool_timeline"`,
 		`"stream.raw_events"`,
 		`"trace.guide_title"`,
+		`"knowledge.duplicate_seed"`,
+		`"knowledge.raw_content"`,
+		`"status.redis_active"`,
+		`"status.llm_fallback"`,
+		`"status.why_not_active"`,
 		"localStorage.setItem",
 	} {
 		if !strings.Contains(i18nRecorder.Body.String(), expected) {

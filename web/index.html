@@ -70,13 +70,23 @@
               <button class="language-button active" type="button" data-lang="zh" aria-pressed="true">中文</button>
               <button class="language-button" type="button" data-lang="en" aria-pressed="false">English</button>
             </div>
-            <div class="status-cluster" aria-label="Runtime capabilities">
-              <span class="status-pill"><i></i>Eino Graph</span>
-              <span class="status-pill"><i></i>Tool Runtime</span>
-              <span class="status-pill neutral"><i></i>Redis Memory</span>
-              <span class="status-pill neutral"><i></i>MySQL Memory</span>
-              <span class="status-pill"><i></i>SSE Streaming</span>
+            <div id="runtime-status-cluster" class="status-cluster" aria-label="Runtime capabilities">
+              <span id="status-eino" class="status-pill unknown"><i></i><span><b>Eino Graph</b><small data-i18n="status.unknown">状态未知</small></span></span>
+              <span id="status-tools" class="status-pill unknown"><i></i><span><b>Tool Runtime</b><small data-i18n="status.unknown">状态未知</small></span></span>
+              <span id="status-redis" class="status-pill unknown"><i></i><span><b>Redis Memory</b><small data-i18n="status.unknown">状态未知</small></span></span>
+              <span id="status-mysql" class="status-pill unknown"><i></i><span><b>MySQL Memory</b><small data-i18n="status.unknown">状态未知</small></span></span>
+              <span id="status-sse" class="status-pill unknown"><i></i><span><b>SSE Streaming</b><small data-i18n="status.not_run">请先执行一次流式排查</small></span></span>
+              <span id="status-llm" class="status-pill unknown"><i></i><span><b>LLM Agent</b><small data-i18n="status.unknown">状态未知</small></span></span>
             </div>
+            <details class="status-help">
+              <summary data-i18n="status.why_not_active">为什么没亮？</summary>
+              <ul>
+                <li data-i18n="status.help_redis">Redis Memory 未知通常表示还没有执行 Chat，或本次没有会话历史。</li>
+                <li data-i18n="status.help_mysql">MySQL Memory 未显示绿色不代表容器未启动，可能只是本次没有长期记忆命中。</li>
+                <li data-i18n="status.help_config">Docker 中 MySQL 运行不等于应用启用了 MySQL 长期记忆。</li>
+                <li data-i18n="status.help_action">请先执行一次 Chat 或流式排查后查看状态。</li>
+              </ul>
+            </details>
           </div>
         </header>
 

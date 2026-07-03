@@ -400,6 +400,7 @@ func TestLoadAppliesTelemetryEnvironment(t *testing.T) {
 	}
 
 	t.Setenv("WATCHOPS_TELEMETRY_ENABLED", "true")
+	t.Setenv("WATCHOPS_TELEMETRY_SERVICE_NAME", "watchops-lite")
 	t.Setenv("WATCHOPS_TELEMETRY_ENVIRONMENT", "test")
 	t.Setenv("WATCHOPS_TELEMETRY_OTLP_ENDPOINT", "collector:4317")
 	t.Setenv("WATCHOPS_TELEMETRY_INSECURE", "false")
@@ -411,12 +412,24 @@ func TestLoadAppliesTelemetryEnvironment(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if !cfg.Telemetry.Enabled ||
+		cfg.Telemetry.ServiceName != "watchops-lite" ||
 		cfg.Telemetry.Environment != "test" ||
 		cfg.Telemetry.OTLPEndpoint != "collector:4317" ||
 		cfg.Telemetry.Insecure ||
 		cfg.Telemetry.SampleRatio != 0.5 ||
 		cfg.Telemetry.ExportTimeout.Value() != 750*time.Millisecond {
 		t.Fatalf("Telemetry config = %#v", cfg.Telemetry)
+	}
+}
+
+func TestDefaultTelemetryConfiguration(t *testing.T) {
+	cfg := Default()
+
+	if cfg.Telemetry.Enabled {
+		t.Fatal("expected telemetry to be disabled by default")
+	}
+	if cfg.Telemetry.ServiceName != "agent" {
+		t.Fatalf("Telemetry.ServiceName = %q, want agent", cfg.Telemetry.ServiceName)
 	}
 }
 

@@ -345,6 +345,11 @@ Bad-case review metadata may use the stable reasons `no_evidence`, `wrong_tool`,
 
 The application installs the official OpenTelemetry SDK and exports spans with OTLP over gRPC. Jaeger all-in-one accepts OTLP locally and provides the trace UI. Tracing is configurable and disabled by default.
 
+The default OpenTelemetry `service.name` is `agent`. Jaeger normally displays
+that service name beside each operation. Operators can override it without
+changing span names or trace structure by setting
+`WATCHOPS_TELEMETRY_SERVICE_NAME`, for example to `watchops-lite`.
+
 Implemented trace hierarchy:
 
 ```text

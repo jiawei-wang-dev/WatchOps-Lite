@@ -160,7 +160,7 @@ Open the local Agent demo console:
 http://localhost:8080/
 ```
 
-The build-free HTML/CSS/JavaScript console defaults to Chinese and includes a persisted 中文 / English switch. It provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, knowledge search, Redis session-history load/clear controls, and existing feedback/eval actions. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
+The build-free HTML/CSS/JavaScript console defaults to Chinese and includes a persisted 中文 / English switch. It provides normal Chat, a safe SSE execution timeline, grouped evidence and tool runs, structured expandable knowledge cards, Redis session-history load/clear controls, and existing feedback/eval actions. Explicit runtime badges distinguish active, available, fallback, disabled, unknown, and error states using both color and text derived from the latest visible Chat/SSE metadata. It automatically refreshes history after normal and streaming Chat responses. It also links request traces to local Jaeger and provides Grafana and Prometheus shortcuts. This is a local interview/demo surface, not a production frontend; no npm install or frontend build is required.
 
 Open the provisioned runtime dashboard at `http://localhost:3000/d/watchops-lite/watchops-lite-runtime`. Anonymous viewer access is enabled only for this loopback-bound local demo.
 
@@ -207,7 +207,7 @@ The flow demonstrates:
 6. A downvote is stored in MySQL.
 7. The feedback record seeds a reusable `bad_case`, which is executed by the rule-based eval runner.
 
-Open [Jaeger](http://localhost:16686), select the `watchops-lite` service, and search for the trace ID returned by Chat. Demo response state is stored under `/tmp/watchops-lite-demo` by default. Override the API or state location with:
+Open [Jaeger](http://localhost:16686), select the default `agent` service, and search for the trace ID returned by Chat. Jaeger showing the OpenTelemetry service name beside each span is expected. Set `WATCHOPS_TELEMETRY_SERVICE_NAME=watchops-lite` before starting the server if you prefer the project name. Existing traces retain the service name used when they were created. Demo response state is stored under `/tmp/watchops-lite-demo` by default. Override the API or state location with:
 
 ```bash
 export WATCHOPS_API_BASE_URL=http://localhost:8080

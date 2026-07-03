@@ -15,6 +15,7 @@ const state = {
   streamStatus: "not_started",
   streamStartedAt: "",
   streamEndedAt: "",
+  lastRequestStatus: "unknown",
 };
 
 const sourceLabels = {
@@ -271,6 +272,8 @@ function buildChatPayload(streamSuffix = "") {
 async function sendChat() {
   const button = byId("send-chat");
   try {
+    state.lastRequestStatus = "running";
+    renderRuntimeStatuses();
     const payload = buildChatPayload();
     setLoading(button, true, t("common.sending"));
     setResponseStatus(t("common.running"), "info");
@@ -284,6 +287,8 @@ async function sendChat() {
     setResponseStatus(t("common.completed"), "success");
     renderToast(t("dynamic.chat_completed"), "success");
   } catch (error) {
+    state.lastRequestStatus = "error";
+    renderRuntimeStatuses();
     setResponseStatus(t("common.failed"), "danger");
     renderToast(error.message, "error");
   } finally {
@@ -329,6 +334,7 @@ async function sendStreamChat() {
     updateRuntimeContext();
     renderToast(t("dynamic.stream_completed"), "success");
   } catch (error) {
+    state.lastRequestStatus = "error";
     setResponseStatus(t("common.failed"), "danger");
     const failedAt = new Date().toISOString();
     const failureEvent = {
@@ -342,6 +348,7 @@ async function sendStreamChat() {
     state.streamStatus = "failed";
     state.streamEndedAt = failedAt;
     renderStreamDashboard();
+    renderRuntimeStatuses();
     renderToast(error.message, "error");
   } finally {
     setLoading(byId("send-stream"), false, t("chat.stream"));
@@ -407,6 +414,7 @@ function resetStreamView() {
   state.streamStatus = "running";
   state.streamStartedAt = new Date().toISOString();
   state.streamEndedAt = "";
+  state.lastRequestStatus = "running";
   byId("stream-timeline").innerHTML = "";
   byId("raw-sse-details").open = false;
   renderStreamDashboard();
@@ -899,6 +907,7 @@ function acceptChatResponse(response) {
   state.latestRequestId = safeText(response?.request_id);
   state.latestTraceId = safeText(response?.trace_id);
   state.latestSessionId = safeText(response?.session_id);
+  state.lastRequestStatus = "success";
   renderChatResponse(response);
   renderToolRuns(response?.tool_runs);
   renderEvidenceGroups(response?.answer?.evidence);
@@ -1094,18 +1103,135 @@ function renderKnowledgeResults(results) {
     byId("knowledge-results").innerHTML = polishedEmpty(t("dynamic.no_knowledge"));
     return;
   }
-  byId("knowledge-results").innerHTML = items.map((item) => `
-    <article class="search-result">
-      <h4>${escapeHtml(item?.title || t("dynamic.untitled_knowledge"))}</h4>
-      <p>${escapeHtml(truncateText(item?.content || t("dynamic.no_snippet"), 420))}</p>
-      <div class="result-meta">
-        <span>document ${escapeHtml(item?.document_id || "—")}</span>
-        <span>chunk ${escapeHtml(item?.chunk_id || "—")}</span>
-        <span>score ${escapeHtml(String(item?.score ?? "—"))}</span>
-        ${item?.metadata?.retrieval_mode ? `<span>${escapeHtml(item.metadata.retrieval_mode)}</span>` : ""}
+  const duplicateIndexes = findDuplicateKnowledgeResults(items);
+  byId("knowledge-results").innerHTML = `
+    <div class="knowledge-results-heading">
+      <h3>${escapeHtml(t("knowledge.results"))}</h3>
+      <span class="source-badge">${escapeHtml(t("dynamic.item_count", { count: items.length }))}</span>
+    </div>
+    ${items.map((item, index) =>
+      renderKnowledgeCard(item, duplicateIndexes.has(index))).join("")}`;
+}
+
+function renderKnowledgeCard(item, isDuplicate) {
+  const rawContent = safeText(item?.content);
+  const title = knowledgeTitle(item);
+  const body = cleanKnowledgeMarkdown(rawContent, title);
+  const excerpt = truncateText(body || t("dynamic.no_snippet"), 320);
+  const metadata = item?.metadata && typeof item.metadata === "object" ?
+    item.metadata : {};
+  const attributes = [
+    ["knowledge.document", item?.document_id],
+    ["knowledge.chunk", item?.chunk_id],
+    ["knowledge.score", formatKnowledgeScore(item?.score)],
+    ["knowledge.retrieval_mode", metadata.retrieval_mode],
+    ["knowledge.rerank_provider", metadata.rerank_provider],
+    ["knowledge.service", metadata.service],
+    ["knowledge.dependency", metadata.dependency],
+    ["knowledge.category", metadata.category],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+  const paragraphs = knowledgeParagraphs(body);
+  return `
+    <article class="search-result knowledge-card">
+      <div class="knowledge-card-heading">
+        <div>
+          <span class="knowledge-card-kicker">${escapeHtml(t("knowledge.summary"))}</span>
+          <h4>${escapeHtml(title)}</h4>
+        </div>
+        ${isDuplicate ? `<span class="badge warning">${escapeHtml(t("knowledge.duplicate_seed"))}</span>` : ""}
       </div>
-      ${item?.metadata ? `<details><summary>${escapeHtml(t("dynamic.retrieval_metadata"))}</summary><pre>${escapeHtml(safeJson(item.metadata))}</pre></details>` : ""}
-    </article>`).join("");
+      <div class="knowledge-excerpt">${knowledgeParagraphs(excerpt)}</div>
+      <div class="knowledge-attributes">
+        ${attributes.map(([label, value]) => `
+          <span><b>${escapeHtml(t(label))}</b><code>${escapeHtml(String(value))}</code></span>`).join("")}
+      </div>
+      ${Array.from(body).length > Array.from(excerpt).length ? `
+        <details class="knowledge-expand">
+          <summary>
+            <span class="when-closed">${escapeHtml(t("knowledge.expand"))}</span>
+            <span class="when-open">${escapeHtml(t("knowledge.collapse"))}</span>
+          </summary>
+          <div class="knowledge-full-text">${paragraphs}</div>
+        </details>` : ""}
+      <details class="knowledge-metadata">
+        <summary>${escapeHtml(t("dynamic.retrieval_metadata"))}</summary>
+        <div class="knowledge-metadata-grid">
+          ${attributes.map(([label, value]) => `
+            <div><span>${escapeHtml(t(label))}</span><code>${escapeHtml(String(value))}</code></div>`).join("")}
+        </div>
+        <pre>${escapeHtml(safeJson(metadata))}</pre>
+      </details>
+      <details class="knowledge-raw">
+        <summary>${escapeHtml(t("knowledge.raw_content"))}</summary>
+        <pre>${escapeHtml(rawContent || t("dynamic.no_snippet"))}</pre>
+      </details>
+    </article>`;
+}
+
+function knowledgeTitle(item) {
+  const explicit = safeText(item?.title).trim();
+  if (explicit) return explicit.replace(/^#+\s*/, "");
+  const heading = safeText(item?.content).match(/^\s*#\s+(.+)$/m);
+  return heading?.[1]?.trim() || t("dynamic.untitled_knowledge");
+}
+
+function cleanKnowledgeMarkdown(content, title) {
+  const lines = safeText(content).replace(/\r\n/g, "\n").split("\n");
+  let firstHeadingRemoved = false;
+  return lines.map((line) => {
+    if (!firstHeadingRemoved && /^#\s+/.test(line.trim()) &&
+        line.trim().replace(/^#+\s*/, "").trim() === title) {
+      firstHeadingRemoved = true;
+      return "";
+    }
+    return line
+      .replace(/^\s{0,3}#{1,6}\s+/, "")
+      .replace(/^\s*[-*+]\s+/, "• ")
+      .trimEnd();
+  }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function knowledgeParagraphs(content) {
+  const paragraphs = safeText(content).split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  if (!paragraphs.length) return `<p>${escapeHtml(t("dynamic.no_snippet"))}</p>`;
+  return paragraphs.map((paragraph) =>
+    `<p>${escapeHtml(paragraph).replaceAll("\n", "<br>")}</p>`).join("");
+}
+
+function formatKnowledgeScore(value) {
+  const score = safeNumber(value);
+  return score === null ? "—" : score.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function findDuplicateKnowledgeResults(items) {
+  const duplicateIndexes = new Set();
+  const signatures = new Map();
+  items.forEach((item, index) => {
+    const title = normalizeKnowledgeSignature(knowledgeTitle(item));
+    const content = normalizeKnowledgeSignature(
+      cleanKnowledgeMarkdown(item?.content, knowledgeTitle(item)),
+    ).slice(0, 100);
+    const keys = [
+      title ? `title:${title}` : "",
+      content ? `content:${content}` : "",
+    ].filter(Boolean);
+    keys.forEach((key) => {
+      if (signatures.has(key)) {
+        duplicateIndexes.add(signatures.get(key));
+        duplicateIndexes.add(index);
+      } else {
+        signatures.set(key, index);
+      }
+    });
+  });
+  return duplicateIndexes;
+}
+
+function normalizeKnowledgeSignature(value) {
+  return safeText(value).toLocaleLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "");
 }
 
 function renderMemoryContext(response) {
@@ -1334,6 +1460,7 @@ function updateRuntimeContext() {
   setCopyValue("sidebar-request-id", state.latestRequestId);
   setCopyValue("sidebar-trace-id", state.latestTraceId);
   updateTraceGuide();
+  renderRuntimeStatuses();
   if (!hasResponse) return;
 
   const evidence = safeArray(response?.answer?.evidence);
@@ -1364,6 +1491,103 @@ function updateRuntimeContext() {
   byId("latest-tools").innerHTML = runs.length
     ? runs.slice(-5).map((run) => `<div class="mini-tool"><span>${escapeHtml(run?.tool || t("common.unknown"))}</span><span class="badge ${run?.success === false ? "danger" : "success"}">${run?.success === false ? escapeHtml(t("common.failed")) : "ok"}</span></div>`).join("")
     : `<span class="subtle">${escapeHtml(t("context.no_tools"))}</span>`;
+}
+
+function renderRuntimeStatuses() {
+  const response = state.latestChatResponse;
+  const metadata = response?.metadata || {};
+  const runs = safeArray(response?.tool_runs);
+  const hasResponse = Boolean(response);
+  const requestFailed = state.lastRequestStatus === "error";
+
+  setRuntimeStatus(
+    "status-eino",
+    requestFailed ? "error" : hasResponse ? "active" : "unknown",
+    requestFailed ? t("status.error") :
+      hasResponse ? t("status.graph_active") : t("status.unknown"),
+  );
+
+  const failedRun = runs.some((run) => run?.success === false);
+  const fallbackRun = runs.some(toolRunUsedFallback) ||
+    safeArray(response?.answer?.evidence).some((item) =>
+      item?.metadata?.fallback_used === true);
+  const toolState = requestFailed || failedRun ? "error" :
+    fallbackRun ? "fallback" :
+      runs.length ? "active" : hasResponse ? "available" : "unknown";
+  const toolLabel = toolState === "error" ? t("status.error") :
+    toolState === "fallback" ? t("status.fallback") :
+      runs.length ? t("status.tools_active", { count: runs.length }) :
+        hasResponse ? t("status.tools_available") : t("status.unknown");
+  setRuntimeStatus("status-tools", toolState, toolLabel);
+
+  const recentCount = safeNumber(metadata.recent_message_count);
+  const redisKnown = metadata.session_memory_available !== undefined ||
+    metadata.session_context_loaded !== undefined ||
+    recentCount !== null;
+  const redisState = metadata.session_memory_available === false ? "fallback" :
+    redisKnown && recentCount > 0 ? "active" :
+      redisKnown ? "available" : "unknown";
+  const redisLabel = redisState === "fallback" ? t("status.redis_fallback") :
+    redisState === "active" ? t("status.redis_active", { count: recentCount }) :
+      redisState === "available" ? t("status.redis_available") :
+        t("status.unknown");
+  setRuntimeStatus("status-redis", redisState, redisLabel);
+
+  const longTermCount = safeNumber(metadata.long_term_memory_count);
+  const longTermUnavailable = responseHasLimitation(
+    response,
+    "LONG_TERM_MEMORY_UNAVAILABLE",
+  ) || metadata.long_term_memory_available === false;
+  const mysqlState = longTermUnavailable ? "fallback" :
+    longTermCount > 0 ? "active" :
+      longTermCount !== null ? "available" : "unknown";
+  const mysqlLabel = mysqlState === "fallback" ? t("status.mysql_fallback") :
+    mysqlState === "active" ? t("status.mysql_active", { count: longTermCount }) :
+      mysqlState === "available" ? t("status.mysql_available") :
+        t("status.unknown");
+  setRuntimeStatus("status-mysql", mysqlState, mysqlLabel);
+
+  const sseState = state.streamStatus === "completed" ? "active" :
+    state.streamStatus === "failed" ? "error" :
+      state.streamStatus === "running" ? "available" : "unknown";
+  const sseLabel = sseState === "active" ? t("status.sse_completed") :
+    sseState === "error" ? t("status.sse_error") :
+      sseState === "available" ? t("status.sse_running") :
+        t("status.not_run");
+  setRuntimeStatus("status-sse", sseState, sseLabel);
+
+  const agentMode = safeText(metadata.agent_mode);
+  const fallbackUsed = metadata.fallback_used === true ||
+    agentMode === "deterministic";
+  const llmState = requestFailed ? "error" :
+    fallbackUsed ? "fallback" :
+      agentMode === "eino_react" ? "active" : "unknown";
+  const llmLabel = llmState === "error" ? t("status.error") :
+    llmState === "fallback" ? t("status.llm_fallback") :
+      llmState === "active" ? t("status.llm_active") : t("status.unknown");
+  setRuntimeStatus("status-llm", llmState, llmLabel);
+}
+
+function setRuntimeStatus(id, status, label) {
+  const element = byId(id);
+  if (!element) return;
+  element.className = `status-pill ${status}`;
+  const text = element.querySelector("small");
+  if (text) text.textContent = label;
+  element.title = `${t(`status.${status}`)} — ${label}`;
+}
+
+function toolRunUsedFallback(run) {
+  if (run?.fallback_used === true || run?.metadata?.fallback_used === true) {
+    return true;
+  }
+  const code = safeText(run?.error_code || run?.warning_code).toUpperCase();
+  return code.includes("FALLBACK");
+}
+
+function responseHasLimitation(response, code) {
+  return safeArray(response?.answer?.limitations).some((limitation) =>
+    safeText(limitation?.code).toUpperCase() === code);
 }
 
 function memoryPill(name, available) {

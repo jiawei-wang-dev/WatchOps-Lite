@@ -328,7 +328,7 @@ func Default() Config {
 		},
 		Telemetry: TelemetryConfig{
 			Enabled:       false,
-			ServiceName:   "watchops-lite",
+			ServiceName:   "agent",
 			Environment:   "local",
 			OTLPEndpoint:  "localhost:4317",
 			Insecure:      true,

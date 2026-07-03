@@ -121,7 +121,7 @@
   },
   "telemetry": {
     "enabled": false,
-    "service_name": "watchops-lite",
+    "service_name": "agent",
     "environment": "local",
     "otlp_endpoint": "localhost:4317",
     "insecure": true,

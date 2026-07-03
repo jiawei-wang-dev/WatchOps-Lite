@@ -15,11 +15,15 @@ Use the official OpenTelemetry Go API and SDK with the OTLP gRPC trace exporter.
 
 The provider records:
 
-- `service.name=watchops-lite`
+- `service.name=agent` by default
 - configured `deployment.environment`
 - parent-based trace-ID ratio sampling
 
 Tracing is disabled by default. Disabled tracing installs a no-op provider. Exporter connection or delivery failure is logged and does not stop HTTP, Chat, retrieval, feedback, or eval behavior.
+
+Jaeger displays `service.name` beside every span; this is expected. The short
+default keeps local traces readable. Set
+`WATCHOPS_TELEMETRY_SERVICE_NAME=watchops-lite` to restore the project name.
 
 Gin middleware extracts W3C `traceparent` and `baggage`, creates a server span, places its context on the request, and returns `X-Trace-ID`. Chat returns the active trace ID through its existing response field.
 
