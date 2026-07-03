@@ -63,6 +63,17 @@ type AgentFinding struct {
 	Metadata    map[string]any         `json:"metadata,omitempty"`
 }
 
+type MergedFindings struct {
+	Plan             TriagePlan             `json:"triage_plan"`
+	EvidenceFinding  AgentFinding           `json:"evidence_finding"`
+	KnowledgeFinding AgentFinding           `json:"knowledge_finding"`
+	Evidence         []common.EvidenceItem  `json:"evidence"`
+	EvidenceIDs      []string               `json:"evidence_ids"`
+	ToolRuns         []agenteino.ToolRun    `json:"tool_runs"`
+	Limitations      []agenteino.Limitation `json:"limitations"`
+	Metadata         map[string]any         `json:"metadata,omitempty"`
+}
+
 type MultiAgentResult struct {
 	Steps       []AgentStep           `json:"steps"`
 	Evidence    []common.EvidenceItem `json:"evidence"`

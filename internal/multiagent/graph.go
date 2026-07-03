@@ -92,13 +92,9 @@ type findingOutput struct {
 }
 
 type mergedOutput struct {
-	Triage           triageOutput
-	EvidenceFinding  AgentFinding
-	KnowledgeFinding AgentFinding
-	Evidence         []common.EvidenceItem
-	ToolRuns         []agenteino.ToolRun
-	Limitations      []agenteino.Limitation
-	Steps            []AgentStep
+	Triage triageOutput
+	Merged MergedFindings
+	Steps  []AgentStep
 }
 
 type synthesisOutput struct {
@@ -347,7 +343,37 @@ func (o *Orchestrator) runFinding(
 	finding, err := analyzer.Analyze(ctx, input.Plan)
 	if err != nil {
 		observability.MarkError(span, name+" failed")
-		return findingOutput{}, err
+		completed := o.now()
+		limitation := agenteino.Limitation{
+			Code: strings.ToUpper(string(role)) + "_AGENT_FAILED",
+			Message: localizedTriageText(
+				input.Plan.Language,
+				name+" 执行失败；综合诊断将仅使用其余可用证据。",
+				name+" failed; synthesis will use only the remaining available evidence.",
+			),
+		}
+		finding := AgentFinding{
+			Role:        role,
+			Summary:     limitation.Message,
+			Evidence:    []common.EvidenceItem{},
+			EvidenceIDs: []string{},
+			ToolRuns:    []agenteino.ToolRun{},
+			Limitations: []agenteino.Limitation{limitation},
+			Metadata:    map[string]any{"agent_failed": true},
+		}
+		return findingOutput{
+			Triage:  input,
+			Finding: finding,
+			Step: failedStep(
+				role,
+				name,
+				input.Plan.Query,
+				limitation.Message,
+				limitation,
+				started,
+				completed,
+			),
+		}, nil
 	}
 	finding.Role = role
 	completed := o.now()
@@ -380,28 +406,14 @@ func (o *Orchestrator) mergeFindings(
 		observability.MarkError(span, "multi-agent findings are incomplete")
 		return mergedOutput{}, errors.New("multi-agent findings are incomplete")
 	}
+	merged := MergeAgentFindings(
+		evidence.Triage.Plan,
+		evidence.Finding,
+		knowledge.Finding,
+	)
 	return mergedOutput{
-		Triage:           evidence.Triage,
-		EvidenceFinding:  evidence.Finding,
-		KnowledgeFinding: knowledge.Finding,
-		Evidence: append(
-			append([]common.EvidenceItem{}, evidence.Finding.Evidence...),
-			knowledge.Finding.Evidence...,
-		),
-		ToolRuns: append(
-			append([]agenteino.ToolRun{}, evidence.Finding.ToolRuns...),
-			knowledge.Finding.ToolRuns...,
-		),
-		Limitations: append(
-			append(
-				[]agenteino.Limitation{},
-				evidence.Triage.Plan.Limitations...,
-			),
-			append(
-				evidence.Finding.Limitations,
-				knowledge.Finding.Limitations...,
-			)...,
-		),
+		Triage: evidence.Triage,
+		Merged: merged,
 		Steps: []AgentStep{
 			evidence.Triage.Step,
 			evidence.Step,
@@ -418,12 +430,12 @@ func (o *Orchestrator) runSynthesis(
 	ctx, span := observability.StartSpan(ctx, "multiagent.synthesis")
 	defer span.End()
 	answer, err := o.synthesis.Synthesize(ctx, SynthesisInput{
-		Plan:             input.Triage.Plan,
-		EvidenceFinding:  input.EvidenceFinding,
-		KnowledgeFinding: input.KnowledgeFinding,
-		Evidence:         input.Evidence,
-		ToolRuns:         input.ToolRuns,
-		Limitations:      input.Limitations,
+		Plan:             input.Merged.Plan,
+		EvidenceFinding:  input.Merged.EvidenceFinding,
+		KnowledgeFinding: input.Merged.KnowledgeFinding,
+		Evidence:         input.Merged.Evidence,
+		ToolRuns:         input.Merged.ToolRuns,
+		Limitations:      input.Merged.Limitations,
 	})
 	if err != nil {
 		observability.MarkError(span, "Synthesis Agent failed")
@@ -461,8 +473,8 @@ func (o *Orchestrator) buildResponse(
 	steps = append(steps, input.Step)
 	return MultiAgentResult{
 		Steps:       steps,
-		Evidence:    input.Merged.Evidence,
-		ToolRuns:    input.Merged.ToolRuns,
+		Evidence:    input.Merged.Merged.Evidence,
+		ToolRuns:    input.Merged.Merged.ToolRuns,
 		FinalAnswer: input.Answer,
 		Metadata: map[string]any{
 			"agent_mode":   "multi_agent",
@@ -495,6 +507,31 @@ func completedStep(
 		StartedAt:   started,
 		CompletedAt: completed,
 		DurationMS:  completed.Sub(started).Milliseconds(),
+	}
+}
+
+func failedStep(
+	role AgentRole,
+	name string,
+	input string,
+	output string,
+	limitation agenteino.Limitation,
+	started time.Time,
+	completed time.Time,
+) AgentStep {
+	return AgentStep{
+		Role:        role,
+		Name:        name,
+		Status:      AgentStepFailed,
+		Input:       input,
+		Output:      output,
+		EvidenceIDs: []string{},
+		ToolRuns:    []agenteino.ToolRun{},
+		Limitations: []agenteino.Limitation{limitation},
+		StartedAt:   started,
+		CompletedAt: completed,
+		DurationMS:  completed.Sub(started).Milliseconds(),
+		Metadata:    map[string]any{"agent_failed": true},
 	}
 }
 
