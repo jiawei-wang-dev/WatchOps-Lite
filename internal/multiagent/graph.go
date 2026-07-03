@@ -471,15 +471,19 @@ func (o *Orchestrator) buildResponse(
 	defer span.End()
 	steps := append([]AgentStep{}, input.Merged.Steps...)
 	steps = append(steps, input.Step)
+	fallbackUsed, _ := input.Answer.Metadata["fallback_used"].(bool)
+	synthesisMode, _ := input.Answer.Metadata["synthesis_mode"].(string)
 	return MultiAgentResult{
 		Steps:       steps,
 		Evidence:    input.Merged.Merged.Evidence,
 		ToolRuns:    input.Merged.Merged.ToolRuns,
 		FinalAnswer: input.Answer,
 		Metadata: map[string]any{
-			"agent_mode":   "multi_agent",
-			"orchestrator": "eino_graph",
-			"roles":        RoleOrder(),
+			"agent_mode":     "multi_agent",
+			"orchestrator":   "eino_graph",
+			"roles":          RoleOrder(),
+			"fallback_used":  fallbackUsed,
+			"synthesis_mode": synthesisMode,
 		},
 	}, nil
 }
