@@ -68,12 +68,19 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 	if contentType := indexRecorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
 		t.Fatalf("index Content-Type = %q, want HTML", contentType)
 	}
-	if !strings.Contains(indexRecorder.Body.String(), "WatchOps-Lite Agent Console") {
+	if !strings.Contains(indexRecorder.Body.String(), "WatchOps-Lite 智能排障控制台") {
 		t.Fatalf("index does not contain console title")
 	}
-	for _, expected := range []string{"load-history", "clear-history", "history-messages"} {
+	for _, expected := range []string{
+		"load-history",
+		"clear-history",
+		"history-messages",
+		`data-lang="zh"`,
+		`data-lang="en"`,
+		`src="/web/i18n.js"`,
+	} {
 		if !strings.Contains(indexRecorder.Body.String(), expected) {
-			t.Fatalf("index does not contain history control %q", expected)
+			t.Fatalf("index does not contain console control %q", expected)
 		}
 	}
 
@@ -89,9 +96,27 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		"/api/v1/chat/history",
 		"loadHistory",
 		"clearHistory",
+		"WatchOpsI18n",
 	} {
 		if !strings.Contains(assetRecorder.Body.String(), expected) {
 			t.Fatalf("JavaScript asset does not contain history integration %q", expected)
+		}
+	}
+
+	i18nRecorder := httptest.NewRecorder()
+	router.ServeHTTP(i18nRecorder, httptest.NewRequest(http.MethodGet, "/web/i18n.js", nil))
+	if i18nRecorder.Code != http.StatusOK {
+		t.Fatalf("i18n asset status = %d, want %d", i18nRecorder.Code, http.StatusOK)
+	}
+	for _, expected := range []string{
+		"zh:",
+		"en:",
+		`"nav.chat"`,
+		`"chat.send"`,
+		"localStorage.setItem",
+	} {
+		if !strings.Contains(i18nRecorder.Body.String(), expected) {
+			t.Fatalf("i18n asset does not contain %q", expected)
 		}
 	}
 }
@@ -109,7 +134,7 @@ func TestDemoConsoleDoesNotShadowAPIRoutes(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
-	if strings.Contains(recorder.Body.String(), "WatchOps-Lite Agent Console") {
+	if strings.Contains(recorder.Body.String(), "WatchOps-Lite 智能排障控制台") {
 		t.Fatalf("unknown API route was shadowed by the demo console")
 	}
 }

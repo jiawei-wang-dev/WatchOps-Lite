@@ -290,6 +290,36 @@ h4 {
   gap: 7px;
 }
 
+.header-controls {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.language-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.language-button {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.language-button.active {
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
 .status-pill,
 .badge,
 .source-badge,
@@ -729,6 +759,10 @@ pre {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.timeline-legend b {
+  font-weight: inherit;
 }
 
 .dot {

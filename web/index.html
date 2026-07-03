@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="WatchOps-Lite local Agent operations console">
-    <title>WatchOps-Lite Agent Console</title>
+    <title>WatchOps-Lite 智能排障控制台</title>
     <link rel="stylesheet" href="/web/styles.css">
   </head>
   <body>
@@ -18,36 +18,36 @@
           </div>
           <div>
             <strong>WatchOps-Lite</strong>
-            <span>Agent Console</span>
+            <span data-i18n="brand.console">智能排障控制台</span>
           </div>
         </div>
 
         <nav class="nav-list" aria-label="Console sections">
           <button class="nav-item active" type="button" data-tab="chat">
-            <span class="nav-icon">C</span><span>Chat Console</span>
+            <span class="nav-icon">C</span><span data-i18n="nav.chat">对话诊断</span>
           </button>
           <button class="nav-item" type="button" data-tab="stream">
-            <span class="nav-icon">S</span><span>Streaming Trace</span>
+            <span class="nav-icon">S</span><span data-i18n="nav.stream">流式执行轨迹</span>
           </button>
           <button class="nav-item" type="button" data-tab="evidence">
-            <span class="nav-icon">E</span><span>Evidence</span>
+            <span class="nav-icon">E</span><span data-i18n="nav.evidence">证据</span>
           </button>
           <button class="nav-item" type="button" data-tab="knowledge">
-            <span class="nav-icon">K</span><span>Knowledge / Memory</span>
+            <span class="nav-icon">K</span><span data-i18n="nav.knowledge">知识库 / 记忆</span>
           </button>
           <button class="nav-item" type="button" data-tab="eval">
-            <span class="nav-icon">F</span><span>Eval / Feedback</span>
+            <span class="nav-icon">F</span><span data-i18n="nav.eval">评测 / 反馈</span>
           </button>
         </nav>
 
         <div class="sidebar-context">
-          <p class="eyebrow">Latest context</p>
+          <p class="eyebrow" data-i18n="context.latest">最近上下文</p>
           <div class="id-row">
-            <span>Request</span>
+            <span data-i18n="context.request">请求</span>
             <button id="sidebar-request-id" class="copy-value" type="button" data-copy="" title="Copy request ID">—</button>
           </div>
           <div class="id-row">
-            <span>Trace</span>
+            <span data-i18n="context.trace">Trace</span>
             <button id="sidebar-trace-id" class="copy-value" type="button" data-copy="" title="Copy trace ID">—</button>
           </div>
           <div class="sidebar-links">
@@ -61,54 +61,60 @@
       <main class="main-workspace">
         <header class="page-header">
           <div>
-            <p class="eyebrow">Reliability intelligence workspace</p>
-            <h1>WatchOps-Lite Agent Console</h1>
-            <p>Eino Graph · ReAct Tools · Evidence · Observability</p>
+            <p class="eyebrow" data-i18n="header.eyebrow">服务可靠性智能工作台</p>
+            <h1 data-i18n="header.title">WatchOps-Lite 智能排障控制台</h1>
+            <p data-i18n="header.subtitle">Eino Graph · ReAct 工具 · 证据 · 可观测性</p>
           </div>
-          <div class="status-cluster" aria-label="Runtime capabilities">
-            <span class="status-pill"><i></i>Eino Graph</span>
-            <span class="status-pill"><i></i>Tool Runtime</span>
-            <span class="status-pill neutral"><i></i>Redis Memory</span>
-            <span class="status-pill neutral"><i></i>MySQL Memory</span>
-            <span class="status-pill"><i></i>SSE Streaming</span>
+          <div class="header-controls">
+            <div class="language-switch" role="group" aria-label="Interface language">
+              <button class="language-button active" type="button" data-lang="zh" aria-pressed="true">中文</button>
+              <button class="language-button" type="button" data-lang="en" aria-pressed="false">English</button>
+            </div>
+            <div class="status-cluster" aria-label="Runtime capabilities">
+              <span class="status-pill"><i></i>Eino Graph</span>
+              <span class="status-pill"><i></i>Tool Runtime</span>
+              <span class="status-pill neutral"><i></i>Redis Memory</span>
+              <span class="status-pill neutral"><i></i>MySQL Memory</span>
+              <span class="status-pill"><i></i>SSE Streaming</span>
+            </div>
           </div>
         </header>
 
         <section id="tab-chat" class="tab-panel active" aria-labelledby="Chat Console">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Investigation</p>
-              <h2>Chat Console</h2>
-              <p>Ask an incident question and inspect the bounded, evidence-backed response.</p>
+              <p class="eyebrow" data-i18n="chat.eyebrow">故障调查</p>
+              <h2 data-i18n="chat.title">对话诊断</h2>
+              <p data-i18n="chat.description">输入故障问题，查看有边界且有证据支撑的回答。</p>
             </div>
           </div>
 
           <div class="card input-card">
             <div class="form-row">
-              <label for="session-id">Session ID</label>
+              <label for="session-id" data-i18n="chat.session_id">Session ID</label>
               <input id="session-id" type="text" value="demo-console-session" autocomplete="off">
             </div>
             <div class="form-row">
-              <label for="message">Reliability question</label>
-              <textarea id="message" rows="4">Why is the checkout error rate high in the last 20 minutes?</textarea>
+              <label for="message" data-i18n="chat.question">可靠性问题</label>
+              <textarea id="message" rows="4" data-i18n-placeholder="chat.question_placeholder">过去 20 分钟 checkout 服务错误率为什么升高？</textarea>
             </div>
             <div class="preset-block">
-              <span class="field-label">Preset investigations</span>
+              <span class="field-label" data-i18n="chat.presets">预设排查问题</span>
               <div id="preset-queries" class="chip-list">
-                <button type="button" class="query-chip">checkout error rate is high</button>
-                <button type="button" class="query-chip">payment timeout causing checkout failures</button>
-                <button type="button" class="query-chip">analyze slow trace</button>
-                <button type="button" class="query-chip">search checkout runbook</button>
-                <button type="button" class="query-chip">check active checkout alerts</button>
-                <button type="button" class="query-chip">show checkout service topology</button>
+                <button type="button" class="query-chip" data-preset="error_rate" data-i18n="preset.error_rate">checkout 错误率升高</button>
+                <button type="button" class="query-chip" data-preset="payment_timeout" data-i18n="preset.payment_timeout">payment 超时导致 checkout 失败</button>
+                <button type="button" class="query-chip" data-preset="slow_trace" data-i18n="preset.slow_trace">分析慢 Trace</button>
+                <button type="button" class="query-chip" data-preset="runbook" data-i18n="preset.runbook">检索 checkout runbook</button>
+                <button type="button" class="query-chip" data-preset="alerts" data-i18n="preset.alerts">检查 checkout 活跃告警</button>
+                <button type="button" class="query-chip" data-preset="topology" data-i18n="preset.topology">查看 checkout 服务拓扑</button>
               </div>
             </div>
             <div class="button-row">
               <button id="send-chat" class="button primary" type="button">
-                <span class="button-label">Send request</span>
+                <span class="button-label" data-i18n="chat.send">发送</span>
               </button>
               <button id="send-stream" class="button secondary" type="button">
-                <span class="button-label">Stream investigation</span>
+                <span class="button-label" data-i18n="chat.stream">流式排查</span>
               </button>
             </div>
           </div>
@@ -116,21 +122,21 @@
           <div class="card response-card">
             <div class="card-heading">
               <div>
-                <p class="eyebrow">Agent output</p>
-                <h3>Latest response</h3>
+                <p class="eyebrow" data-i18n="chat.output">Agent 输出</p>
+                <h3 data-i18n="chat.latest_response">最近回答</h3>
               </div>
-              <span id="response-status" class="badge neutral">Waiting</span>
+              <span id="response-status" class="badge neutral" data-i18n="chat.waiting">等待中</span>
             </div>
             <div id="response-summary" class="metric-grid">
-              <article><span>Evidence</span><strong>0</strong></article>
-              <article><span>Tool runs</span><strong>0</strong></article>
-              <article><span>Inferences</span><strong>0</strong></article>
-              <article><span>Limitations</span><strong>0</strong></article>
+              <article><span data-i18n="common.evidence">证据</span><strong>0</strong></article>
+              <article><span data-i18n="common.tool_runs">工具调用</span><strong>0</strong></article>
+              <article><span data-i18n="common.inferences">推断</span><strong>0</strong></article>
+              <article><span data-i18n="common.limitations">局限性</span><strong>0</strong></article>
             </div>
             <div id="chat-response" class="empty-state">
               <div class="empty-icon">↗</div>
-              <h4>Run a chat request first</h4>
-              <p>Conclusions, evidence, recommendations, and limitations will appear here.</p>
+              <h4 data-i18n="chat.empty_title">请先发起一次对话诊断</h4>
+              <p data-i18n="chat.empty_body">这里将展示结论、证据、处理建议和局限性。</p>
             </div>
           </div>
         </section>
@@ -138,25 +144,25 @@
         <section id="tab-stream" class="tab-panel" aria-labelledby="Streaming Trace">
           <div class="section-heading split">
             <div>
-              <p class="eyebrow">Live execution</p>
-              <h2>Streaming Trace</h2>
-              <p>Safe operational progress from the existing SSE endpoint—never private reasoning.</p>
+              <p class="eyebrow" data-i18n="stream.eyebrow">实时执行</p>
+              <h2 data-i18n="stream.title">流式执行轨迹</h2>
+              <p data-i18n="stream.description">展示 SSE 端点返回的安全执行进度，不包含私有推理过程。</p>
             </div>
             <button id="start-stream" class="button primary" type="button">
-              <span class="button-label">Start stream</span>
+              <span class="button-label" data-i18n="stream.start">开始流式排查</span>
             </button>
           </div>
           <div class="card">
             <div class="timeline-legend">
-              <span><i class="dot info"></i>Workflow</span>
-              <span><i class="dot success"></i>Completed</span>
-              <span><i class="dot warning"></i>Fallback</span>
-              <span><i class="dot danger"></i>Failed</span>
+              <span><i class="dot info"></i><b data-i18n="stream.workflow">工作流</b></span>
+              <span><i class="dot success"></i><b data-i18n="stream.completed">已完成</b></span>
+              <span><i class="dot warning"></i><b data-i18n="stream.fallback">已降级</b></span>
+              <span><i class="dot danger"></i><b data-i18n="stream.failed">失败</b></span>
             </div>
             <div id="stream-timeline" class="timeline">
               <div class="empty-state compact">
-                <h4>Streaming events will appear here</h4>
-                <p>Start a stream to follow graph nodes, tool calls, evidence collection, and completion.</p>
+                <h4 data-i18n="stream.empty_title">流式事件将在这里显示</h4>
+                <p data-i18n="stream.empty_body">启动后可查看图节点、工具调用、证据收集与执行完成事件。</p>
               </div>
             </div>
           </div>
@@ -165,32 +171,32 @@
         <section id="tab-evidence" class="tab-panel" aria-labelledby="Evidence">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Normalized sources</p>
-              <h2>Evidence</h2>
-              <p>Review tool execution and evidence grouped by observability source.</p>
+              <p class="eyebrow" data-i18n="evidence.eyebrow">标准化数据源</p>
+              <h2 data-i18n="evidence.title">证据</h2>
+              <p data-i18n="evidence.description">按可观测性数据源查看工具执行与证据。</p>
             </div>
           </div>
           <div id="evidence-summary" class="metric-grid six">
-            <article><span>Tool runs</span><strong>0</strong></article>
-            <article><span>Successful</span><strong>0</strong></article>
-            <article><span>Failed</span><strong>0</strong></article>
-            <article><span>Evidence</span><strong>0</strong></article>
-            <article><span>Limitations</span><strong>0</strong></article>
-            <article><span>Trace</span><strong>—</strong></article>
+            <article><span data-i18n="evidence.tool_runs">工具调用</span><strong>0</strong></article>
+            <article><span data-i18n="evidence.successful">成功</span><strong>0</strong></article>
+            <article><span data-i18n="evidence.failed">失败</span><strong>0</strong></article>
+            <article><span data-i18n="common.evidence">证据</span><strong>0</strong></article>
+            <article><span data-i18n="evidence.limitations">局限性</span><strong>0</strong></article>
+            <article><span data-i18n="evidence.trace">Trace</span><strong>—</strong></article>
           </div>
           <div class="card">
             <div class="card-heading">
-              <h3>Tool runs</h3>
-              <span class="subtle">Existing response data only</span>
+              <h3 data-i18n="evidence.tool_runs">工具调用</h3>
+              <span class="subtle" data-i18n="evidence.existing_only">仅展示现有响应数据</span>
             </div>
             <div id="tool-runs" class="table-wrap">
-              <div class="empty-state compact"><p>No tool runs available.</p></div>
+              <div class="empty-state compact"><p data-i18n="evidence.no_tools">暂无工具调用。</p></div>
             </div>
           </div>
           <div id="evidence-groups" class="evidence-groups">
             <div class="card empty-state">
-              <h4>No evidence collected yet</h4>
-              <p>Run a normal or streaming chat request to populate source groups.</p>
+              <h4 data-i18n="evidence.empty_title">尚未收集证据</h4>
+              <p data-i18n="evidence.empty_body">运行普通或流式对话后，将按数据源展示证据。</p>
             </div>
           </div>
         </section>
@@ -198,67 +204,67 @@
         <section id="tab-knowledge" class="tab-panel" aria-labelledby="Knowledge and Memory">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Retrieval context</p>
-              <h2>Knowledge / Memory</h2>
-              <p>Search the existing knowledge API and inspect memory signals exposed by Chat.</p>
+              <p class="eyebrow" data-i18n="knowledge.eyebrow">检索上下文</p>
+              <h2 data-i18n="knowledge.title">知识库 / 记忆</h2>
+              <p data-i18n="knowledge.description">检索现有知识 API，并查看 Chat 暴露的记忆信号。</p>
             </div>
           </div>
           <div class="two-card-grid">
             <div class="card">
               <div class="card-heading">
                 <div>
-                  <h3>Knowledge search</h3>
-                  <p>Uses <code>POST /api/v1/knowledge/search</code>.</p>
+                  <h3 data-i18n="knowledge.search_title">知识检索</h3>
+                  <p><span data-i18n="knowledge.search_api">使用</span> <code>POST /api/v1/knowledge/search</code></p>
                 </div>
               </div>
               <div class="inline-form">
-                <input id="knowledge-query" type="search" value="checkout timeout runbook" aria-label="Knowledge query">
+                <input id="knowledge-query" type="search" value="checkout 支付超时排障 runbook" aria-label="Knowledge query" data-i18n-placeholder="knowledge.query_label">
                 <button id="search-knowledge" class="button primary" type="button">
-                  <span class="button-label">Search</span>
+                  <span class="button-label" data-i18n="knowledge.search">检索</span>
                 </button>
               </div>
               <div id="knowledge-results" class="stack-list">
-                <div class="empty-state compact"><p>Search results will appear here.</p></div>
+                <div class="empty-state compact"><p data-i18n="knowledge.empty">检索结果将在这里显示。</p></div>
               </div>
             </div>
             <div class="card">
               <div class="card-heading">
                 <div>
-                  <h3>Memory context</h3>
-                  <p>Only context already exposed in the latest Chat response.</p>
+                  <h3 data-i18n="memory.title">记忆上下文</h3>
+                  <p data-i18n="memory.description">仅展示最近 Chat 响应已经暴露的上下文。</p>
                 </div>
               </div>
               <div id="memory-context" class="empty-state compact">
-                <h4>Run a chat request first</h4>
-                <p>Session and long-term memory status will appear here when available.</p>
+                <h4 data-i18n="memory.empty_title">请先发起一次对话诊断</h4>
+                <p data-i18n="memory.empty_body">可用时，这里将显示会话记忆和长期记忆状态。</p>
               </div>
             </div>
           </div>
           <div class="card history-card">
             <div class="card-heading">
               <div>
-                <h3>Session chat history</h3>
-                <p>Redis recent messages and rolling summary for the current Session ID.</p>
+                <h3 data-i18n="history.title">会话历史</h3>
+                <p data-i18n="history.description">当前 Session ID 对应的 Redis 最近消息与滚动摘要。</p>
               </div>
               <div class="button-row">
                 <button id="load-history" class="button secondary" type="button">
-                  <span class="button-label">Load history</span>
+                  <span class="button-label" data-i18n="history.load">加载历史</span>
                 </button>
                 <button id="clear-history" class="button danger-outline" type="button">
-                  <span class="button-label">Clear history</span>
+                  <span class="button-label" data-i18n="history.clear">清空历史</span>
                 </button>
               </div>
             </div>
             <div id="history-summary" class="history-summary">
-              <div class="empty-state compact"><p>No session summary loaded.</p></div>
+              <div class="empty-state compact"><p data-i18n="history.no_summary">尚未加载会话摘要。</p></div>
             </div>
             <div id="history-messages" class="history-messages">
               <div class="empty-state compact">
-                <p>Load history or complete a Chat request to show recent messages.</p>
+                <p data-i18n="history.empty">加载历史或完成对话后可查看最近消息。</p>
               </div>
             </div>
-            <p class="history-boundary">
-              Clearing this panel removes only Redis session context. Confirmed MySQL long-term memory is retained.
+            <p class="history-boundary" data-i18n="history.boundary">
+              清空操作只删除 Redis 会话上下文，已确认的 MySQL 长期记忆会保留。
             </p>
           </div>
         </section>
@@ -266,57 +272,57 @@
         <section id="tab-eval" class="tab-panel" aria-labelledby="Eval and Feedback">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Learning loop</p>
-              <h2>Eval / Feedback</h2>
-              <p>Submit feedback for the latest response or run existing rule-based eval cases.</p>
+              <p class="eyebrow" data-i18n="eval.eyebrow">反馈闭环</p>
+              <h2 data-i18n="eval.title">评测 / 反馈</h2>
+              <p data-i18n="eval.description">为最近回答提交反馈，或运行已有的规则评测案例。</p>
             </div>
           </div>
           <div class="two-card-grid">
             <div class="card">
               <div class="card-heading">
                 <div>
-                  <h3>Response feedback</h3>
-                  <p>Requires a completed Chat response and MySQL.</p>
+                  <h3 data-i18n="feedback.title">回答反馈</h3>
+                  <p data-i18n="feedback.description">需要已完成的 Chat 响应和可用的 MySQL。</p>
                 </div>
               </div>
               <div class="rating-control" role="group" aria-label="Feedback rating">
-                <button class="rating-button" type="button" data-rating="up">↑ Helpful</button>
-                <button class="rating-button" type="button" data-rating="down">↓ Needs work</button>
+                <button class="rating-button" type="button" data-rating="up" data-i18n="feedback.helpful">↑ 有帮助</button>
+                <button class="rating-button" type="button" data-rating="down" data-i18n="feedback.needs_work">↓ 需改进</button>
               </div>
               <label class="form-row" for="feedback-comment">
-                <span>Optional comment</span>
-                <textarea id="feedback-comment" rows="3" placeholder="What was useful or missing?"></textarea>
+                <span data-i18n="feedback.comment">可选备注</span>
+                <textarea id="feedback-comment" rows="3" placeholder="哪些内容有帮助，或缺少了什么？" data-i18n-placeholder="feedback.comment_placeholder"></textarea>
               </label>
               <button id="submit-feedback" class="button primary" type="button" disabled>
-                <span class="button-label">Submit feedback</span>
+                <span class="button-label" data-i18n="feedback.submit">提交反馈</span>
               </button>
-              <div id="feedback-result" class="inline-note">Feedback requires a completed chat response.</div>
+              <div id="feedback-result" class="inline-note" data-i18n="feedback.requires_chat">需要先完成一次对话诊断。</div>
             </div>
             <div class="card">
               <div class="card-heading">
                 <div>
-                  <h3>Rule-based eval</h3>
-                  <p>Runs stored cases through the existing synchronous eval API.</p>
+                  <h3 data-i18n="eval.rule_title">规则评测</h3>
+                  <p data-i18n="eval.rule_description">通过现有同步 Eval API 运行已存储案例。</p>
                 </div>
               </div>
               <div class="form-grid">
                 <label class="form-row" for="eval-case-type">
-                  <span>Case type</span>
+                  <span data-i18n="eval.case_type">案例类型</span>
                   <select id="eval-case-type">
-                    <option value="bad_case">Bad cases</option>
-                    <option value="good_case">Good cases</option>
+                    <option value="bad_case" data-i18n="eval.bad_cases">Bad cases</option>
+                    <option value="good_case" data-i18n="eval.good_cases">Good cases</option>
                   </select>
                 </label>
                 <label class="form-row" for="eval-limit">
-                  <span>Limit</span>
+                  <span data-i18n="eval.limit">数量限制</span>
                   <input id="eval-limit" type="number" min="1" max="20" value="5">
                 </label>
               </div>
               <button id="run-eval" class="button secondary" type="button">
-                <span class="button-label">Run eval</span>
+                <span class="button-label" data-i18n="eval.run">运行评测</span>
               </button>
               <div id="eval-result" class="empty-state compact">
-                <p>Eval summary will appear here. MySQL must be available.</p>
+                <p data-i18n="eval.empty">评测摘要将在这里显示；MySQL 必须可用。</p>
               </div>
             </div>
           </div>
@@ -325,33 +331,33 @@
 
       <aside class="insight-panel">
         <div class="insight-heading">
-          <p class="eyebrow">Runtime insight</p>
-          <h2>Latest context</h2>
+          <p class="eyebrow" data-i18n="context.runtime">运行上下文</p>
+          <h2 data-i18n="context.latest">最近上下文</h2>
         </div>
         <div id="runtime-empty" class="empty-state compact">
-          <p>Run a chat request to populate runtime context.</p>
+          <p data-i18n="context.empty">运行一次对话诊断以加载运行上下文。</p>
         </div>
         <div id="runtime-context" class="runtime-context hidden">
           <dl>
-            <div><dt>Session</dt><dd id="insight-session">—</dd></div>
-            <div><dt>Request</dt><dd id="insight-request">—</dd></div>
-            <div><dt>Trace</dt><dd id="insight-trace">—</dd></div>
-            <div><dt>Evidence</dt><dd id="insight-evidence">0</dd></div>
-            <div><dt>Tool runs</dt><dd id="insight-tools">0</dd></div>
-            <div><dt>Limitations</dt><dd id="insight-limitations">0</dd></div>
-            <div><dt>Agent latency</dt><dd id="insight-latency">—</dd></div>
+            <div><dt data-i18n="context.session">会话</dt><dd id="insight-session">—</dd></div>
+            <div><dt data-i18n="context.request">请求</dt><dd id="insight-request">—</dd></div>
+            <div><dt data-i18n="context.trace">Trace</dt><dd id="insight-trace">—</dd></div>
+            <div><dt data-i18n="context.evidence">证据</dt><dd id="insight-evidence">0</dd></div>
+            <div><dt data-i18n="context.tools">工具调用</dt><dd id="insight-tools">0</dd></div>
+            <div><dt data-i18n="context.limitations">局限性</dt><dd id="insight-limitations">0</dd></div>
+            <div><dt data-i18n="context.latency">Agent 耗时</dt><dd id="insight-latency">—</dd></div>
           </dl>
           <div id="memory-pills" class="pill-row"></div>
           <div class="insight-actions">
-            <a id="trace-link" class="button secondary disabled" href="http://localhost:16686" target="_blank" rel="noreferrer">Open trace</a>
+            <a id="trace-link" class="button secondary disabled" href="http://localhost:16686" target="_blank" rel="noreferrer" data-i18n="context.open_trace">打开 Trace</a>
           </div>
           <div>
-            <p class="eyebrow">Latest tools</p>
-            <div id="latest-tools" class="mini-list"><span class="subtle">No tool runs.</span></div>
+            <p class="eyebrow" data-i18n="context.latest_tools">最近工具</p>
+            <div id="latest-tools" class="mini-list"><span class="subtle" data-i18n="context.no_tools">暂无工具调用。</span></div>
           </div>
         </div>
         <div class="observability-card">
-          <p class="eyebrow">Local observability</p>
+          <p class="eyebrow" data-i18n="context.observability">本地可观测性</p>
           <a href="http://localhost:16686" target="_blank" rel="noreferrer"><span>Jaeger</span><b>↗</b></a>
           <a href="http://localhost:3000" target="_blank" rel="noreferrer"><span>Grafana</span><b>↗</b></a>
           <a href="http://localhost:9090" target="_blank" rel="noreferrer"><span>Prometheus</span><b>↗</b></a>
@@ -360,6 +366,7 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/web/i18n.js" defer></script>
     <script src="/web/app.js" defer></script>
   </body>
 </html>
