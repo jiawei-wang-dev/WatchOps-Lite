@@ -2,6 +2,8 @@ package eino
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
@@ -95,6 +97,7 @@ func (r *FallbackRunner) runFallback(
 		return AgentOutput{}, primaryErr
 	}
 	reason := fallbackReason(primaryErr)
+	errorType, safeMessage := fallbackErrorSummary(primaryErr)
 	runtimemetrics.IncAgentFallback(reason)
 
 	ctx, span := observability.StartSpan(
@@ -102,6 +105,9 @@ func (r *FallbackRunner) runFallback(
 		"agent.fallback",
 		attribute.Bool("fallback_used", true),
 		attribute.String("fallback_runner", "deterministic"),
+		attribute.String("fallback_reason", reason),
+		attribute.String("primary_error_type", errorType),
+		attribute.String("primary_error_safe_message", safeMessage),
 	)
 	defer span.End()
 	output, fallbackErr := r.fallback.Run(ctx, input)
@@ -114,6 +120,8 @@ func (r *FallbackRunner) runFallback(
 	}
 	output.Metadata["fallback_used"] = true
 	output.Metadata["fallback_reason"] = reason
+	output.Metadata["primary_error_type"] = errorType
+	output.Metadata["primary_error_safe_message"] = safeMessage
 	output.Limitations = append(output.Limitations, Limitation{
 		Code: "AGENT_LLM_FALLBACK",
 		Message: localizedText(
@@ -140,6 +148,33 @@ func fallbackReason(err error) string {
 		return controlled.reason
 	}
 	return "llm_unavailable"
+}
+
+func fallbackErrorSummary(err error) (string, string) {
+	if err == nil {
+		return "unknown", "unknown Agent fallback trigger"
+	}
+	if controlled, ok := err.(controlledFallbackError); ok {
+		return "controlled_failure_boundary", "Failure Controller requested deterministic fallback: " + controlled.reason
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout", "LLM Agent execution timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled", "LLM Agent execution was canceled"
+	}
+	message := err.Error()
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "eino react execution failed"):
+		return "react_execution_failed", "Eino ReAct execution failed before producing a valid final answer"
+	case strings.Contains(lower, "json"):
+		return "invalid_json", "LLM Agent returned output that could not be parsed as required JSON"
+	case strings.Contains(lower, "tool"):
+		return "tool_calling_failed", "LLM Agent tool-calling loop failed"
+	default:
+		return "llm_unavailable", "LLM Agent primary path failed"
+	}
 }
 
 func outputNeedsControlledFallback(output AgentOutput) (bool, string) {

@@ -187,8 +187,25 @@ func TestFallbackRunnerUsesDeterministicRunnerOnModelFailure(t *testing.T) {
 	}
 	if output.Metadata["fallback_used"] != true ||
 		output.Metadata["fallback_reason"] != "llm_unavailable" ||
+		output.Metadata["primary_error_type"] != "llm_unavailable" ||
 		!hasLimitation(output.Limitations, "AGENT_LLM_FALLBACK") {
 		t.Fatalf("output = %#v", output)
+	}
+}
+
+func TestFallbackRunnerAddsSafePrimaryErrorMetadata(t *testing.T) {
+	tools, _ := BuildMockTools()
+	primary := &runnerStub{err: context.DeadlineExceeded}
+	runner := NewFallbackRunner(primary, NewDeterministicRunner(tools))
+
+	output, err := runner.Run(context.Background(), validAgentInput())
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if output.Metadata["primary_error_type"] != "timeout" ||
+		output.Metadata["primary_error_safe_message"] != "LLM Agent execution timed out" ||
+		output.Metadata["fallback_reason"] != "llm_unavailable" {
+		t.Fatalf("metadata = %#v", output.Metadata)
 	}
 }
 
@@ -218,6 +235,7 @@ func TestFallbackRunnerUsesDeterministicRunnerAfterRepairFailure(t *testing.T) {
 	}
 	if output.Metadata["fallback_used"] != true ||
 		output.Metadata["fallback_reason"] != "invalid_final_json" ||
+		output.Metadata["primary_error_type"] != "controlled_failure_boundary" ||
 		!hasLimitation(output.Limitations, "AGENT_LLM_FALLBACK") {
 		t.Fatalf("output = %#v", output)
 	}

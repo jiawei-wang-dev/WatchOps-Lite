@@ -153,7 +153,7 @@ func (r *ReActRunner) runPrepared(
 	finalMessage, err := r.agent.Generate(ctx, messages, futureOption)
 	if err != nil {
 		observability.MarkError(span, "Eino ReAct execution failed")
-		return AgentOutput{}, fmt.Errorf("Eino ReAct execution failed")
+		return AgentOutput{}, fmt.Errorf("Eino ReAct execution failed: %w", err)
 	}
 	evidenceItems, evidenceGroups, toolRuns, toolLimitations := collectToolResults(
 		future.GetMessages(),
