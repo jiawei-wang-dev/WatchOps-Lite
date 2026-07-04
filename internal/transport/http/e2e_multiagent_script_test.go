@@ -65,6 +65,7 @@ func TestMultiAgentDemoScriptChecksJSONSSEAndSingleCompatibility(t *testing.T) {
 		"WATCHOPS_API_BASE_URL="+server.URL,
 		"WATCHOPS_DEMO_STATE_DIR="+stateDir,
 		"WATCHOPS_MULTI_AGENT_TIMEOUT_SECONDS=5",
+		"WATCHOPS_EXPECT_MULTI_AGENT_LLM=false",
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -103,6 +104,12 @@ func multiAgentScriptFixture() string {
 		"evidence":[{"id":"ev-1","source_type":"logs","content":"timeout"}],
 		"tool_runs":[],
 		"trace_id":"trace-1",
-		"metadata":{}
+		"metadata":{
+			"multi_agent_llm_used":false,
+			"multi_agent_llm_call_count":0,
+			"evidence_fallback_used":true,
+			"knowledge_fallback_used":true,
+			"synthesis_fallback_used":true
+		}
 	}`
 }

@@ -638,6 +638,10 @@ Single-Agent remains the default and its API, prompt, ReAct graph, Redis memory,
 
 Exit status: complete. English and Chinese Single-Agent and Multi-Agent demo gates are verified locally.
 
+### Multi-Agent role LLM analysis — Completed
+
+The bounded Multi-Agent demo now optionally uses the configured Eino ChatModel in the Evidence, Knowledge, and Synthesis roles. Evidence analyzes only returned observability evidence, Knowledge analyzes only retrieved runbooks and bounded historical memory, and Synthesis produces the existing evidence-bound answer schema. Triage remains deterministic. Every role retains deterministic fallback for missing configuration, timeouts, model errors, malformed JSON, and invalid evidence references. The Single-Agent endpoints and graph are unchanged.
+
 ## Enhancement: Knowledge Ingestion and Retrieval Dedupe — Completed
 
 Delivered:

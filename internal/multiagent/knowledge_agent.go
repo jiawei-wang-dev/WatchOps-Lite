@@ -20,6 +20,7 @@ type KnowledgeAgent struct {
 	tool                einotool.InvokableTool
 	longTermMemory      longterm.Store
 	longTermMemoryLimit int
+	llm                 *RoleLLM
 }
 
 func NewKnowledgeAgent(
@@ -50,6 +51,11 @@ func NewKnowledgeAgent(
 		longTermMemory:      longTermMemory,
 		longTermMemoryLimit: longTermMemoryLimit,
 	}, nil
+}
+
+func (a *KnowledgeAgent) WithLLM(llm *RoleLLM) *KnowledgeAgent {
+	a.llm = llm
+	return a
 }
 
 func (a *KnowledgeAgent) Analyze(
@@ -134,6 +140,35 @@ func (a *KnowledgeAgent) Analyze(
 		summaries,
 		len(finding.Limitations),
 	)
+	finding.Metadata["knowledge_llm_used"] = false
+	finding.Metadata["knowledge_llm_attempted"] = false
+	finding.Metadata["knowledge_model"] = ""
+	finding.Metadata["knowledge_fallback_used"] = true
+	finding.Metadata["knowledge_llm_duration_ms"] = int64(0)
+	if a.llm != nil {
+		finding.Metadata["knowledge_llm_attempted"] = true
+		analysis, call, err := a.llm.analyzeKnowledge(
+			ctx,
+			plan,
+			finding.Evidence,
+			memories,
+			finding.Limitations,
+		)
+		finding.Metadata["knowledge_model"] = a.llm.modelName
+		finding.Metadata["knowledge_llm_duration_ms"] = call.durationMS
+		if err == nil {
+			finding.Summary = strings.TrimSpace(analysis.KnowledgeSummary)
+			finding.EvidenceIDs = append([]string{}, analysis.EvidenceIDs...)
+			finding.Metadata["knowledge_llm_used"] = true
+			finding.Metadata["knowledge_fallback_used"] = false
+			finding.Metadata["runbook_supported_actions"] = analysis.RunbookActions
+			finding.Metadata["historical_patterns"] = analysis.HistoricalPatterns
+			finding.Metadata["unsafe_actions_to_avoid"] =
+				analysis.UnsafeActionsToAvoid
+		} else {
+			finding.Metadata["knowledge_llm_error"] = "analysis_failed"
+		}
+	}
 	return finding, nil
 }
 

@@ -50,6 +50,7 @@ cd "${ROOT_DIR}"
 payload="$(
   python3 -c '
 import json
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -86,6 +87,7 @@ curl --fail-with-body --silent --show-error \
 
 python3 -c '
 import json
+import os
 import sys
 
 path, language = sys.argv[1:3]
@@ -106,6 +108,33 @@ if not answer["evidence"]:
     raise SystemExit("Multi-Agent response contains no evidence.")
 if not response.get("request_id") or not response.get("trace_id"):
     raise SystemExit("Multi-Agent response is missing request_id or trace_id.")
+metadata = response.get("metadata") or {}
+expect_setting = os.environ.get("WATCHOPS_EXPECT_MULTI_AGENT_LLM")
+expect_llm = (
+    expect_setting.lower() in ("1", "true", "yes")
+    if expect_setting is not None
+    else bool(os.environ.get("WATCHOPS_LLM_API_KEY"))
+)
+if expect_llm:
+    if metadata.get("multi_agent_llm_call_count", 0) < 2:
+        raise SystemExit("Multi-Agent response did not execute at least two LLM role calls.")
+    if not (
+        metadata.get("evidence_llm_used") or metadata.get("knowledge_llm_used")
+    ):
+        raise SystemExit("Evidence or Knowledge Agent did not use LLM analysis.")
+    if not metadata.get("synthesis_llm_used"):
+        raise SystemExit("Synthesis Agent did not use LLM analysis.")
+    for role in ("evidence", "knowledge", "synthesis"):
+        if metadata.get(f"{role}_llm_used") and not metadata.get(f"{role}_model"):
+            raise SystemExit(f"{role} LLM metadata is missing its model.")
+else:
+    if metadata.get("multi_agent_llm_used"):
+        raise SystemExit("Multi-Agent reported LLM use without an expected LLM key.")
+    if metadata.get("multi_agent_llm_call_count") != 0:
+        raise SystemExit("Multi-Agent reported LLM calls in deterministic fallback mode.")
+    for role in ("evidence", "knowledge", "synthesis"):
+        if metadata.get(f"{role}_fallback_used") is not True:
+            raise SystemExit(f"{role} did not report deterministic fallback mode.")
 if language == "zh":
     text = " ".join(
         str(item.get("text") or item.get("message") or "")
@@ -126,7 +155,9 @@ curl --no-buffer --fail-with-body --silent --show-error --http1.1 \
   -d "${payload}" >"${STATE_DIR}/multi-agent-stream.sse"
 
 python3 -c '
+import json
 import sys
+import os
 
 text = open(sys.argv[1], encoding="utf-8").read()
 events = [
@@ -148,6 +179,16 @@ if missing:
     raise SystemExit(f"Multi-Agent stream is missing events: {missing}")
 if events.index("final_answer") > events.index("multi_agent_completed"):
     raise SystemExit("final_answer must precede multi_agent_completed.")
+expect_setting = os.environ.get("WATCHOPS_EXPECT_MULTI_AGENT_LLM")
+expect_llm = (
+    expect_setting.lower() in ("1", "true", "yes")
+    if expect_setting is not None
+    else bool(os.environ.get("WATCHOPS_LLM_API_KEY"))
+)
+if expect_llm:
+    for event in ("agent_llm_started", "agent_llm_completed"):
+        if event not in events:
+            raise SystemExit(f"Multi-Agent LLM stream is missing event: {event}")
 print("Verified Multi-Agent SSE lifecycle and terminal event ordering.")
 ' "${STATE_DIR}/multi-agent-stream.sse"
 
@@ -161,6 +202,7 @@ curl --fail-with-body --silent --show-error \
 
 python3 -c '
 import json
+import os
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:

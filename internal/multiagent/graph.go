@@ -403,20 +403,22 @@ func (o *Orchestrator) runFinding(
 		completed.Sub(started).Milliseconds(),
 		len(finding.Evidence),
 	)
+	step := completedStep(
+		role,
+		name,
+		input.Plan.Query,
+		finding.Summary,
+		finding.EvidenceIDs,
+		finding.ToolRuns,
+		finding.Limitations,
+		started,
+		completed,
+	)
+	step.Metadata = cloneMetadata(finding.Metadata)
 	return findingOutput{
 		Triage:  input,
 		Finding: finding,
-		Step: completedStep(
-			role,
-			name,
-			input.Plan.Query,
-			finding.Summary,
-			finding.EvidenceIDs,
-			finding.ToolRuns,
-			finding.Limitations,
-			started,
-			completed,
-		),
+		Step:    step,
 	}, nil
 }
 
@@ -493,20 +495,22 @@ func (o *Orchestrator) runSynthesis(
 		completed.Sub(started).Milliseconds(),
 		len(answer.Evidence),
 	)
+	step := completedStep(
+		AgentRoleSynthesis,
+		"Synthesis Agent",
+		input.Triage.Plan.Query,
+		firstConclusion(answer),
+		evidenceIDs,
+		nil,
+		answer.Limitations,
+		started,
+		completed,
+	)
+	step.Metadata = cloneMetadata(answer.Metadata)
 	return synthesisOutput{
 		Merged: input,
 		Answer: answer,
-		Step: completedStep(
-			AgentRoleSynthesis,
-			"Synthesis Agent",
-			input.Triage.Plan.Query,
-			firstConclusion(answer),
-			evidenceIDs,
-			nil,
-			answer.Limitations,
-			started,
-			completed,
-		),
+		Step:   step,
 	}, nil
 }
 
@@ -520,19 +524,105 @@ func (o *Orchestrator) buildResponse(
 	steps = append(steps, input.Step)
 	fallbackUsed, _ := input.Answer.Metadata["fallback_used"].(bool)
 	synthesisMode, _ := input.Answer.Metadata["synthesis_mode"].(string)
+	evidenceMetadata := input.Merged.Merged.EvidenceFinding.Metadata
+	knowledgeMetadata := input.Merged.Merged.KnowledgeFinding.Metadata
+	synthesisMetadata := input.Answer.Metadata
+	evidenceUsed := metadataBool(evidenceMetadata, "evidence_llm_used")
+	knowledgeUsed := metadataBool(knowledgeMetadata, "knowledge_llm_used")
+	synthesisUsed := metadataBool(synthesisMetadata, "synthesis_llm_used")
+	llmCallCount := 0
+	for _, role := range []struct {
+		metadata map[string]any
+		key      string
+	}{
+		{evidenceMetadata, "evidence_llm_attempted"},
+		{knowledgeMetadata, "knowledge_llm_attempted"},
+		{synthesisMetadata, "synthesis_llm_attempted"},
+	} {
+		if metadataBool(role.metadata, role.key) {
+			llmCallCount++
+		}
+	}
+	llmRoles := make([]string, 0, 3)
+	if evidenceUsed {
+		llmRoles = append(llmRoles, string(AgentRoleEvidence))
+	}
+	if knowledgeUsed {
+		llmRoles = append(llmRoles, string(AgentRoleKnowledge))
+	}
+	if synthesisUsed {
+		llmRoles = append(llmRoles, string(AgentRoleSynthesis))
+	}
+	metadata := map[string]any{
+		"agent_mode":                 "multi_agent",
+		"orchestrator":               "eino_graph",
+		"roles":                      RoleOrder(),
+		"fallback_used":              fallbackUsed,
+		"synthesis_mode":             synthesisMode,
+		"multi_agent_llm_used":       len(llmRoles) > 0,
+		"multi_agent_llm_roles":      llmRoles,
+		"multi_agent_llm_call_count": llmCallCount,
+	}
+	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
+	copyRoleLLMMetadata(metadata, knowledgeMetadata, "knowledge")
+	copyRoleLLMMetadata(metadata, synthesisMetadata, "synthesis")
+	ensureRoleLLMMetadata(metadata, "evidence")
+	ensureRoleLLMMetadata(metadata, "knowledge")
+	ensureRoleLLMMetadata(metadata, "synthesis")
 	return MultiAgentResult{
 		Steps:       steps,
 		Evidence:    input.Merged.Merged.Evidence,
 		ToolRuns:    input.Merged.Merged.ToolRuns,
 		FinalAnswer: input.Answer,
-		Metadata: map[string]any{
-			"agent_mode":     "multi_agent",
-			"orchestrator":   "eino_graph",
-			"roles":          RoleOrder(),
-			"fallback_used":  fallbackUsed,
-			"synthesis_mode": synthesisMode,
-		},
+		Metadata:    metadata,
 	}, nil
+}
+
+func ensureRoleLLMMetadata(metadata map[string]any, role string) {
+	defaults := map[string]any{
+		role + "_llm_used":        false,
+		role + "_llm_attempted":   false,
+		role + "_model":           "",
+		role + "_fallback_used":   true,
+		role + "_llm_duration_ms": int64(0),
+	}
+	for key, value := range defaults {
+		if _, exists := metadata[key]; !exists {
+			metadata[key] = value
+		}
+	}
+}
+
+func copyRoleLLMMetadata(
+	target map[string]any,
+	source map[string]any,
+	role string,
+) {
+	for _, suffix := range []string{
+		"llm_used",
+		"llm_attempted",
+		"model",
+		"fallback_used",
+		"llm_duration_ms",
+	} {
+		key := role + "_" + suffix
+		if value, exists := source[key]; exists {
+			target[key] = value
+		}
+	}
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	value, _ := metadata[key].(bool)
+	return value
+}
+
+func cloneMetadata(metadata map[string]any) map[string]any {
+	result := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		result[key] = value
+	}
+	return result
 }
 
 func completedStep(

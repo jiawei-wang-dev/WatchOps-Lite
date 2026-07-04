@@ -946,6 +946,13 @@ function describeSSEEvent(type, data) {
     agent_step_started: t("event.agent_step_started", { role }),
     agent_step_completed: t("event.agent_step_completed", { role }),
     synthesis_started: t("event.synthesis_started"),
+    agent_llm_started: t("event.agent_llm_started", { role }),
+    agent_llm_completed: t("event.agent_llm_completed", {
+      role,
+      model: safeText(data.model) || t("common.unknown"),
+      latency: latency === null ? "—" : formatLatency(latency),
+    }),
+    agent_llm_failed: t("event.agent_llm_failed", { role, code: codeText }),
     multi_agent_completed: t("event.multi_agent_completed"),
     multi_agent_failed: t("event.multi_agent_failed", {
       code: codeText,
@@ -971,6 +978,12 @@ function renderMultiAgentSteps(response) {
 
   const steps = safeArray(response?.agent_steps);
   const status = byId("multi-agent-status");
+  const llmCount = byId("multi-agent-llm-count");
+  if (llmCount) {
+    llmCount.textContent = String(
+      safeNumber(response?.metadata?.multi_agent_llm_call_count) ?? 0,
+    );
+  }
   const workflowStatus = steps.length ? "completed" :
     state.streamStatus === "running" && state.latestSSEEvents.some((event) =>
       event.type === "multi_agent_started") ? "running" : "pending";
@@ -994,6 +1007,18 @@ function renderMultiAgentSteps(response) {
       safeArray(step.evidence_ids).length : liveEvidenceCount ?? 0;
     const duration = step ?
       safeNumber(step.duration_ms) : safeNumber(completedEvent?.data?.latency_ms);
+    const metadata = step?.metadata || {};
+    const prefix = role === "evidence" || role === "knowledge" ||
+      role === "synthesis" ? role : "";
+    const llmUsed = prefix ? metadata[`${prefix}_llm_used`] === true : false;
+    const llmFallback = prefix ?
+      metadata[`${prefix}_fallback_used`] === true : false;
+    const modelName = prefix ? safeText(metadata[`${prefix}_model`]) : "";
+    const llmDuration = prefix ?
+      safeNumber(metadata[`${prefix}_llm_duration_ms`]) : null;
+    const analysisMode = role === "triage" ? t("multi.rule_based") :
+      llmUsed ? t("multi.llm_active") :
+      llmFallback ? t("multi.llm_fallback") : "—";
     return `
       <article class="agent-role-card ${escapeHtml(stepStatus)}">
         <div class="agent-role-heading">
@@ -1009,6 +1034,9 @@ function renderMultiAgentSteps(response) {
           <div><dt>${escapeHtml(t("common.tool_runs"))}</dt><dd>${escapeHtml(toolNames.join(", ") || "—")}</dd></div>
           <div><dt>${escapeHtml(t("common.evidence"))}</dt><dd>${evidenceCount}</dd></div>
           <div><dt>${escapeHtml(t("common.limitations"))}</dt><dd>${safeArray(step?.limitations).length}</dd></div>
+          <div><dt>${escapeHtml(t("multi.analysis_mode"))}</dt><dd>${escapeHtml(analysisMode)}</dd></div>
+          <div><dt>${escapeHtml(t("multi.model"))}</dt><dd>${escapeHtml(modelName || "—")}</dd></div>
+          <div><dt>${escapeHtml(t("multi.llm_latency"))}</dt><dd>${llmDuration === null ? "—" : escapeHtml(formatLatency(llmDuration))}</dd></div>
         </dl>
         ${step?.output ? `<details><summary>${escapeHtml(t("multi.step_output"))}</summary><p>${escapeHtml(truncateText(step.output, 420))}</p></details>` : ""}
       </article>`;

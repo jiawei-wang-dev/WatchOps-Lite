@@ -27,6 +27,7 @@ var evidenceToolBySource = map[string]string{
 
 type EvidenceAgent struct {
 	tools map[string]einotool.InvokableTool
+	llm   *RoleLLM
 }
 
 func NewEvidenceAgent(
@@ -45,6 +46,11 @@ func NewEvidenceAgent(
 		available[info.Name] = current
 	}
 	return &EvidenceAgent{tools: available}, nil
+}
+
+func (a *EvidenceAgent) WithLLM(llm *RoleLLM) *EvidenceAgent {
+	a.llm = llm
+	return a
 }
 
 func (a *EvidenceAgent) Analyze(
@@ -104,6 +110,34 @@ func (a *EvidenceAgent) Analyze(
 		summaries,
 		len(finding.Limitations),
 	)
+	finding.Metadata["evidence_llm_used"] = false
+	finding.Metadata["evidence_llm_attempted"] = false
+	finding.Metadata["evidence_model"] = ""
+	finding.Metadata["evidence_fallback_used"] = true
+	finding.Metadata["evidence_llm_duration_ms"] = int64(0)
+	if a.llm != nil {
+		finding.Metadata["evidence_llm_attempted"] = true
+		analysis, call, err := a.llm.analyzeEvidence(
+			ctx,
+			plan,
+			finding.Evidence,
+			finding.Limitations,
+		)
+		finding.Metadata["evidence_model"] = a.llm.modelName
+		finding.Metadata["evidence_llm_duration_ms"] = call.durationMS
+		if err == nil {
+			finding.Summary = strings.TrimSpace(analysis.ObservationSummary)
+			finding.EvidenceIDs = append([]string{}, analysis.EvidenceIDs...)
+			finding.Metadata["evidence_llm_used"] = true
+			finding.Metadata["evidence_fallback_used"] = false
+			finding.Metadata["supported_signals"] = analysis.SupportedSignals
+			finding.Metadata["suspected_failure_pattern"] =
+				analysis.SuspectedFailurePattern
+			finding.Metadata["missing_evidence"] = analysis.MissingEvidence
+		} else {
+			finding.Metadata["evidence_llm_error"] = "analysis_failed"
+		}
+	}
 	return finding, nil
 }
 

@@ -128,6 +128,13 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		result.Metadata["orchestrator"] != "eino_graph" {
 		t.Fatalf("Metadata = %#v", result.Metadata)
 	}
+	if result.Metadata["multi_agent_llm_used"] != false ||
+		result.Metadata["multi_agent_llm_call_count"] != 0 ||
+		result.Metadata["evidence_fallback_used"] != true ||
+		result.Metadata["knowledge_fallback_used"] != true ||
+		result.Metadata["synthesis_fallback_used"] != true {
+		t.Fatalf("deterministic LLM metadata = %#v", result.Metadata)
+	}
 }
 
 func TestOrchestratorDoesNotCompileWithoutAllRoles(t *testing.T) {
@@ -141,5 +148,90 @@ func TestOrchestratorDoesNotCompileWithoutAllRoles(t *testing.T) {
 
 	if _, err := orchestrator.Execute(context.Background(), Input{}); err == nil {
 		t.Fatal("Execute() error = nil, want unavailable graph error")
+	}
+}
+
+type llmMetadataAnalyzer struct {
+	role AgentRole
+}
+
+func (a llmMetadataAnalyzer) Analyze(
+	_ context.Context,
+	_ TriagePlan,
+) (AgentFinding, error) {
+	prefix := string(a.role)
+	id := prefix + "-1"
+	return AgentFinding{
+		Role:        a.role,
+		Summary:     prefix + " LLM summary",
+		EvidenceIDs: []string{id},
+		Evidence: []common.EvidenceItem{{
+			ID: id, SourceType: prefix, Content: prefix + " evidence",
+		}},
+		Metadata: map[string]any{
+			prefix + "_llm_used":        true,
+			prefix + "_llm_attempted":   true,
+			prefix + "_model":           "test-model",
+			prefix + "_fallback_used":   false,
+			prefix + "_llm_duration_ms": int64(5),
+		},
+	}, nil
+}
+
+type llmMetadataSynthesizer struct{}
+
+func (llmMetadataSynthesizer) Synthesize(
+	_ context.Context,
+	input SynthesisInput,
+) (agenteino.AgentOutput, error) {
+	return agenteino.AgentOutput{
+		Conclusions: []agenteino.Conclusion{{
+			Text:        "Combined diagnosis",
+			EvidenceIDs: []string{"evidence-1", "knowledge-1"},
+		}},
+		Metadata: map[string]any{
+			"synthesis_llm_used":        true,
+			"synthesis_llm_attempted":   true,
+			"synthesis_model":           "test-model",
+			"synthesis_fallback_used":   false,
+			"synthesis_llm_duration_ms": int64(5),
+			"synthesis_mode":            "llm",
+			"fallback_used":             false,
+		},
+	}, nil
+}
+
+func TestOrchestratorAggregatesMultiAgentLLMMetadata(t *testing.T) {
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		llmMetadataAnalyzer{role: AgentRoleEvidence},
+		llmMetadataAnalyzer{role: AgentRoleKnowledge},
+		llmMetadataSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		SessionID: "session-1",
+		Message:   "Investigate checkout",
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Metadata["multi_agent_llm_used"] != true ||
+		result.Metadata["multi_agent_llm_call_count"] != 3 ||
+		result.Metadata["synthesis_model"] != "test-model" {
+		t.Fatalf("Metadata = %#v", result.Metadata)
+	}
+	roles, ok := result.Metadata["multi_agent_llm_roles"].([]string)
+	if !ok || len(roles) != 3 {
+		t.Fatalf("multi_agent_llm_roles = %#v", result.Metadata["multi_agent_llm_roles"])
+	}
+	for _, step := range result.Steps[1:] {
+		if step.Metadata == nil {
+			t.Fatalf("step metadata missing for role %s", step.Role)
+		}
 	}
 }

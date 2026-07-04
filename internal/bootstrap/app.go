@@ -372,12 +372,24 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	multiAgentLLM := buildMultiAgentRoleLLM(
+		context.Background(),
+		cfg,
+		logger,
+		newOpenAICompatibleModel,
+	)
+	evidenceAgent.WithLLM(multiAgentLLM)
+	knowledgeAgent.WithLLM(multiAgentLLM)
+	var multiAgentSynthesizer multiagent.Synthesizer
+	if multiAgentLLM != nil {
+		multiAgentSynthesizer = multiagent.NewLLMSynthesizer(multiAgentLLM)
+	}
 	multiAgentService := multiagent.NewService(multiagent.NewOrchestrator(
 		context.Background(),
 		multiagent.NewDeterministicTriageAgent("checkout"),
 		evidenceAgent,
 		knowledgeAgent,
-		multiagent.NewSynthesisAgent(nil),
+		multiagent.NewSynthesisAgent(multiAgentSynthesizer),
 	))
 	evalService, err := eval.NewServiceWithRunner(
 		evalStore,

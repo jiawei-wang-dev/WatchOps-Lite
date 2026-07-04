@@ -12,6 +12,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/multiagent"
 )
 
 type chatModelFactory func(
@@ -73,6 +74,49 @@ func buildAgentRunner(
 		deterministic,
 		agentControlConfig(cfg.Agent),
 	)
+}
+
+func buildMultiAgentRoleLLM(
+	ctx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	factory chatModelFactory,
+) *multiagent.RoleLLM {
+	if !cfg.LLM.Enabled {
+		logger.Info("Multi-Agent role LLM analysis disabled")
+		return nil
+	}
+	apiKey := strings.TrimSpace(os.Getenv(cfg.LLM.APIKeyEnv))
+	if strings.TrimSpace(cfg.LLM.Model) == "" || apiKey == "" {
+		logger.Warn(
+			"Multi-Agent role LLM configuration is incomplete; deterministic role analysis selected",
+			"model_configured", strings.TrimSpace(cfg.LLM.Model) != "",
+			"api_key_configured", apiKey != "",
+		)
+		return nil
+	}
+	chatModel, err := factory(ctx, cfg.LLM, apiKey)
+	if err != nil {
+		logger.Warn(
+			"Multi-Agent role LLM initialization failed; deterministic role analysis selected",
+			"error", err,
+		)
+		return nil
+	}
+	analyzer, err := multiagent.NewRoleLLM(
+		chatModel,
+		cfg.LLM.Model,
+		cfg.LLM.RequestTimeout.Value(),
+	)
+	if err != nil {
+		logger.Warn(
+			"Multi-Agent role LLM configuration failed; deterministic role analysis selected",
+			"error", err,
+		)
+		return nil
+	}
+	logger.Info("Multi-Agent role LLM analysis enabled", "model", cfg.LLM.Model)
+	return analyzer
 }
 
 func agentControlConfig(cfg config.AgentConfig) control.Config {

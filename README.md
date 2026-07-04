@@ -95,7 +95,9 @@ Triage
   -> Synthesis Agent
 ```
 
-The Evidence and Knowledge branches use native Eino Graph fan-out/fan-in. Evidence Agent reuses existing read-only Eino tools through Tool Guard and Tool Runtime; Knowledge Agent is restricted to knowledge retrieval and confirmed long-term memory. Synthesis can reference only merged evidence IDs. Agents are diagnostic roles, while tools remain atomic external capabilities.
+The Evidence and Knowledge branches use native Eino Graph fan-out/fan-in. Evidence Agent reuses existing read-only Eino tools through Tool Guard and Tool Runtime; Knowledge Agent is restricted to knowledge retrieval and confirmed long-term memory. When the configured model is available, Evidence and Knowledge each perform a bounded structured LLM analysis of their already-returned data, and Synthesis uses another bounded LLM call to produce the existing answer schema. Synthesis can reference only merged evidence IDs. Invalid JSON, timeouts, unavailable models, or invented evidence references fall back to the existing deterministic role logic without failing the request. Agents are diagnostic roles, while tools remain atomic external capabilities.
+
+Without an LLM key, the same endpoints remain fully deterministic and expose per-role fallback metadata. With an LLM key, response metadata and SSE events show which roles used the model, the configured model name, call count, and bounded latency—never private reasoning or raw prompts.
 
 This is deliberately a lightweight interview/demo mode—not a planner, multi-agent platform, autonomous remediation system, or claim of production-scale orchestration.
 

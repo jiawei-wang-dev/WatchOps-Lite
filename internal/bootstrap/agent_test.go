@@ -110,6 +110,53 @@ func TestBuildAgentRunnerFallsBackForMissingLLMConfig(t *testing.T) {
 	}
 }
 
+func TestBuildMultiAgentRoleLLMUsesConfiguredModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.LLM.Enabled = true
+	cfg.LLM.Model = "test-model"
+	t.Setenv(cfg.LLM.APIKeyEnv, "test-key")
+	factoryCalled := false
+	analyzer := buildMultiAgentRoleLLM(
+		context.Background(),
+		cfg,
+		testAgentLogger(),
+		func(
+			context.Context,
+			config.LLMConfig,
+			string,
+		) (model.ToolCallingChatModel, error) {
+			factoryCalled = true
+			return bootstrapModelStub{}, nil
+		},
+	)
+	if !factoryCalled || analyzer == nil {
+		t.Fatalf("factoryCalled = %v, analyzer = %#v", factoryCalled, analyzer)
+	}
+}
+
+func TestBuildMultiAgentRoleLLMFallsBackWithoutKey(t *testing.T) {
+	cfg := config.Default()
+	cfg.LLM.Enabled = true
+	cfg.LLM.Model = "test-model"
+	t.Setenv(cfg.LLM.APIKeyEnv, "")
+	analyzer := buildMultiAgentRoleLLM(
+		context.Background(),
+		cfg,
+		testAgentLogger(),
+		func(
+			context.Context,
+			config.LLMConfig,
+			string,
+		) (model.ToolCallingChatModel, error) {
+			t.Fatal("model factory must not run without an API key")
+			return nil, nil
+		},
+	)
+	if analyzer != nil {
+		t.Fatalf("analyzer = %#v, want deterministic fallback", analyzer)
+	}
+}
+
 func testAgentLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }

@@ -28,10 +28,18 @@ func (a *SynthesisAgent) Synthesize(
 	input SynthesisInput,
 ) (agenteino.AgentOutput, error) {
 	if a.primary != nil {
-		output, err := a.primary.Synthesize(ctx, input)
+		primaryOutput, err := a.primary.Synthesize(ctx, input)
 		if err == nil {
-			if validationErr := validateSynthesisOutput(output, input.Evidence); validationErr == nil {
-				return normalizeSynthesisOutput(output, input, false, ""), nil
+			if validationErr := validateSynthesisOutput(
+				primaryOutput,
+				input.Evidence,
+			); validationErr == nil {
+				return normalizeSynthesisOutput(
+					primaryOutput,
+					input,
+					false,
+					"",
+				), nil
 			} else {
 				err = validationErr
 			}
@@ -40,6 +48,7 @@ func (a *SynthesisAgent) Synthesize(
 		if fallbackErr != nil {
 			return agenteino.AgentOutput{}, fallbackErr
 		}
+		mergeSynthesisMetadata(fallback.Metadata, primaryOutput.Metadata)
 		return normalizeSynthesisOutput(
 			fallback,
 			input,
@@ -230,10 +239,39 @@ func normalizeSynthesisOutput(
 	if fallbackReason != "" {
 		output.Metadata["fallback_reason"] = fallbackReason
 	}
+	if _, exists := output.Metadata["synthesis_llm_used"]; !exists {
+		output.Metadata["synthesis_llm_used"] = false
+	}
+	if _, exists := output.Metadata["synthesis_llm_attempted"]; !exists {
+		output.Metadata["synthesis_llm_attempted"] = false
+	}
+	if _, exists := output.Metadata["synthesis_model"]; !exists {
+		output.Metadata["synthesis_model"] = ""
+	}
+	output.Metadata["synthesis_fallback_used"] = fallbackUsed
+	if _, exists := output.Metadata["synthesis_llm_duration_ms"]; !exists {
+		output.Metadata["synthesis_llm_duration_ms"] = int64(0)
+	}
 	if _, exists := output.Metadata["synthesis_mode"]; !exists {
 		output.Metadata["synthesis_mode"] = "primary"
 	}
 	return output
+}
+
+func mergeSynthesisMetadata(target map[string]any, source map[string]any) {
+	if target == nil {
+		return
+	}
+	for key, value := range source {
+		switch key {
+		case "synthesis_llm_used",
+			"synthesis_llm_attempted",
+			"synthesis_model",
+			"synthesis_fallback_used",
+			"synthesis_llm_duration_ms":
+			target[key] = value
+		}
+	}
 }
 
 func validFindingEvidenceIDs(
