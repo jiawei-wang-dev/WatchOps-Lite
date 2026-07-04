@@ -29,6 +29,8 @@ func newSerialSSEWriter(
 }
 
 func (w *serialSSEWriter) Write(eventType string, data any) {
+	// Multi-Agent roles may emit from concurrent branches; ResponseWriter is not
+	// concurrency-safe, so SSE events pass through one serialized writer.
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.failed || w.ctx.Err() != nil {

@@ -89,6 +89,8 @@ func (r *Runtime) Execute(ctx context.Context, input any) (result Result) {
 	executionContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
 	defer cancel()
 
+	// Runtime owns the deadline instead of individual tools so every backend has
+	// the same failure semantics and tracing attributes.
 	completed := make(chan operationResult, 1)
 	go func() {
 		result, err := r.config.Operation(executionContext, input)
@@ -153,6 +155,8 @@ func (r *Runtime) fallbackOrFailure(
 	if r.config.Fallback == nil || ctx.Err() != nil {
 		return finishFailure(r.config, startedAt, primaryError)
 	}
+	// Fallback returns a degraded but valid ToolResult. The warning and metadata
+	// make degradation visible without forcing the Agent to special-case mocks.
 	ctx, span := observability.StartSpan(
 		ctx,
 		"tool.runtime.fallback",

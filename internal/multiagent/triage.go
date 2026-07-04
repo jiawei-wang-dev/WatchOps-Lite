@@ -108,6 +108,9 @@ func (a *LLMTriageAgent) Plan(ctx context.Context, input Input) (TriagePlan, err
 	if a.llm == nil {
 		return a.fallback.Plan(ctx, input)
 	}
+	// Triage is allowed to improve the investigation plan with an LLM, but not
+	// to make root-cause claims. Any unsafe or malformed plan falls back to the
+	// deterministic classifier so downstream roles receive a bounded contract.
 	rulePlan, err := a.fallback.Plan(ctx, input)
 	if err != nil {
 		return TriagePlan{}, err

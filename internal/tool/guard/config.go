@@ -14,6 +14,8 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
+		// The allowlist keeps the Agent in a read-only observability posture even
+		// if a future prompt tries to route into an unsupported action.
 		AllowedTools: []string{
 			"query_metrics",
 			"query_logs",

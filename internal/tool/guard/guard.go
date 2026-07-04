@@ -91,6 +91,9 @@ func (g *Guard) validateFields(toolName string, input any) *validationError {
 		return &validationError{field: "input", message: "tool input must be a structured object"}
 	}
 
+	// Parameter validation is intentionally shallow and generic: it blocks
+	// unbounded queries and malformed identifiers without coupling the guard to
+	// every tool's business schema.
 	if service, ok := stringField(value, "Service"); ok {
 		if err := g.validateService(service); err != nil {
 			return err

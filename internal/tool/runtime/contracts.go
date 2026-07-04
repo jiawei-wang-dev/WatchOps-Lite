@@ -31,6 +31,9 @@ type Warning struct {
 	Message string `json:"message"`
 }
 
+// Result is the normalization boundary between heterogeneous backends and the
+// Agent. Tools may query Prometheus, Elasticsearch, Jaeger, or mocks, but the
+// Agent only sees evidence, warnings, structured errors, and latency.
 type Result struct {
 	Tool       string          `json:"tool"`
 	SourceType SourceType      `json:"source_type"`

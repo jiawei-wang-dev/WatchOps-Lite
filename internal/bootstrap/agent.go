@@ -33,6 +33,8 @@ func buildAgentRunner(
 		logger.Info("deterministic Agent runner selected")
 		return deterministic
 	}
+	// LLM availability is checked before constructing Eino so local demos,
+	// tests, and degraded environments keep the same deterministic behavior.
 	if !cfg.LLM.Enabled {
 		logger.Warn("LLM is disabled; deterministic Agent fallback selected")
 		return deterministic
@@ -69,6 +71,8 @@ func buildAgentRunner(
 		"prompt_version", cfg.Agent.PromptVersion,
 		"max_iterations", cfg.Agent.MaxIterations,
 	)
+	// The deterministic runner remains in the hot path as a safety net for
+	// model errors, invalid final JSON, and failure-controller boundaries.
 	return agenteino.NewFallbackRunnerWithControl(
 		einoRunner,
 		deterministic,
@@ -82,6 +86,9 @@ func buildMultiAgentRoleLLM(
 	logger *slog.Logger,
 	factory chatModelFactory,
 ) *multiagent.RoleLLM {
+	// Multi-Agent roles share the same ChatModel adapter, but each role still
+	// validates its own JSON boundary so a weak role output never poisons the
+	// rest of the graph.
 	if !cfg.LLM.Enabled {
 		logger.Info("Multi-Agent role LLM analysis disabled")
 		return nil

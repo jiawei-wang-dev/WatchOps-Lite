@@ -37,6 +37,9 @@ type App struct {
 	shutdownTimeout     time.Duration
 }
 
+// New is intentionally the only broad composition root: infrastructure clients,
+// stores, tools, agents, and transports are wired here so feature packages can
+// stay focused on domain behavior instead of hidden global dependencies.
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	var metricsHandler http.Handler
 	runtimemetrics.SetDefault(nil)
@@ -213,6 +216,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	// Redis backs short-lived conversation context only. If this layer is
+	// unavailable we fail fast, because bounded recent messages and rolling
+	// summaries are part of the Chat prompt contract.
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:         cfg.Redis.Address,
 		Username:     cfg.Redis.Username,
@@ -240,6 +246,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	evalStore := eval.Store(eval.UnavailableStore{})
 	var longTermMemoryService *longterm.Service
 	var profileLoader profile.Loader
+	// MySQL is optional for the demo path: unavailable stores preserve public API
+	// behavior while surfacing degraded feedback/eval/memory capability.
 	if cfg.MySQL.Enabled {
 		client, err := mysqlplatform.New(mysqlplatform.Config{
 			DSN:             cfg.MySQL.DSN,
@@ -316,6 +324,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		feedbackStore = mysqlFeedbackStore
 		evalStore = mysqlEvalStore
 
+		// Schema readiness should not prevent the observability demo from
+		// starting; request-time stores still return structured unavailable
+		// errors when durable state cannot be reached.
 		mysqlContext, cancel := context.WithTimeout(context.Background(), cfg.MySQL.RequestTimeout.Value())
 		if err := client.Ping(mysqlContext); err != nil {
 			logger.Warn("MySQL is not ready; startup will continue", "error", err)
@@ -331,6 +342,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Single-Agent and Multi-Agent are deliberately separate runners. This keeps
+	// the production-style ReAct path stable while the bounded multi-role demo
+	// can evolve without changing the public Chat flow.
 	agentRunner := buildAgentRunner(
 		context.Background(),
 		cfg,

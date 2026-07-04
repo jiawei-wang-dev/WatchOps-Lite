@@ -30,6 +30,8 @@ func (a *SynthesisAgent) Synthesize(
 	if a.primary != nil {
 		primaryOutput, err := a.primary.Synthesize(ctx, input)
 		if err == nil {
+			// Synthesis is the only role allowed to produce conclusions, so its
+			// output is revalidated against evidence IDs before it can reach the API.
 			if validationErr := validateSynthesisOutput(
 				primaryOutput,
 				input.Evidence,

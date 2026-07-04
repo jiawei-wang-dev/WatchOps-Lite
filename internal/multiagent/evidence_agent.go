@@ -57,6 +57,8 @@ func (a *EvidenceAgent) Analyze(
 	ctx context.Context,
 	plan TriagePlan,
 ) (AgentFinding, error) {
+	// Evidence Agent is intentionally observation-only: it may summarize metrics,
+	// logs, alerts, traces, and topology, but synthesis owns any diagnostic claim.
 	finding := AgentFinding{
 		Role:        AgentRoleEvidence,
 		Evidence:    []common.EvidenceItem{},

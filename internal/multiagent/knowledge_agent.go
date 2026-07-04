@@ -62,6 +62,9 @@ func (a *KnowledgeAgent) Analyze(
 	ctx context.Context,
 	plan TriagePlan,
 ) (AgentFinding, error) {
+	// Runbooks and long-term memory are guidance, not proof of the current
+	// incident. The final answer must cite current evidence before turning this
+	// guidance into a recommendation.
 	finding := AgentFinding{
 		Role:        AgentRoleKnowledge,
 		Evidence:    []common.EvidenceItem{},

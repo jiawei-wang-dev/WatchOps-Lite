@@ -119,6 +119,9 @@ func NewOrchestrator(
 			return time.Now().UTC()
 		},
 	}
+	// The graph is a bounded role-demonstration path, not a replacement for the
+	// default Single-Agent ReAct flow. Keeping it typed makes fan-out/fan-in
+	// explicit and prevents role metadata from leaking into transport code.
 	orchestrator.graph, orchestrator.graphErr = compileGraph(ctx, orchestrator)
 	return orchestrator
 }

@@ -328,6 +328,9 @@ func (l *RoleLLM) callJSON(
 	target any,
 	validate func() error,
 ) (llmCallResult, error) {
+	// Role prompts intentionally cross a JSON boundary. Parsing and validation
+	// are kept here so every LLM-backed role has the same safe fallback trigger
+	// for malformed output, invented evidence IDs, or contract drift.
 	started := time.Now()
 	spanName := "multiagent." + string(role) + ".llm_call"
 	ctx, span := observability.StartSpan(
