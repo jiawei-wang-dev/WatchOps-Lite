@@ -116,15 +116,17 @@ expect_llm = (
     else bool(os.environ.get("WATCHOPS_LLM_API_KEY"))
 )
 if expect_llm:
-    if metadata.get("multi_agent_llm_call_count", 0) < 2:
-        raise SystemExit("Multi-Agent response did not execute at least two LLM role calls.")
+    if metadata.get("multi_agent_llm_call_count", 0) < 4:
+        raise SystemExit("Multi-Agent response did not execute all four expected LLM role calls.")
+    if not metadata.get("triage_llm_used"):
+        raise SystemExit("Triage Agent did not use LLM planning.")
     if not (
         metadata.get("evidence_llm_used") or metadata.get("knowledge_llm_used")
     ):
         raise SystemExit("Evidence or Knowledge Agent did not use LLM analysis.")
     if not metadata.get("synthesis_llm_used"):
         raise SystemExit("Synthesis Agent did not use LLM analysis.")
-    for role in ("evidence", "knowledge", "synthesis"):
+    for role in ("triage", "evidence", "knowledge", "synthesis"):
         if metadata.get(f"{role}_llm_used") and not metadata.get(f"{role}_model"):
             raise SystemExit(f"{role} LLM metadata is missing its model.")
 else:
@@ -132,7 +134,7 @@ else:
         raise SystemExit("Multi-Agent reported LLM use without an expected LLM key.")
     if metadata.get("multi_agent_llm_call_count") != 0:
         raise SystemExit("Multi-Agent reported LLM calls in deterministic fallback mode.")
-    for role in ("evidence", "knowledge", "synthesis"):
+    for role in ("triage", "evidence", "knowledge", "synthesis"):
         if metadata.get(f"{role}_fallback_used") is not True:
             raise SystemExit(f"{role} did not report deterministic fallback mode.")
 if language == "zh":
@@ -189,6 +191,21 @@ if expect_llm:
     for event in ("agent_llm_started", "agent_llm_completed"):
         if event not in events:
             raise SystemExit(f"Multi-Agent LLM stream is missing event: {event}")
+    triage_llm_events = []
+    current_event = None
+    for line in text.splitlines():
+        if line.startswith("event: "):
+            current_event = line.removeprefix("event: ").strip()
+        elif line.startswith("data: ") and current_event in {"agent_llm_started", "agent_llm_completed"}:
+            try:
+                data = json.loads(line.removeprefix("data: ").strip())
+            except json.JSONDecodeError:
+                continue
+            if data.get("agent_role") == "triage" or data.get("role") == "triage":
+                triage_llm_events.append(current_event)
+    for event in ("agent_llm_started", "agent_llm_completed"):
+        if event not in triage_llm_events:
+            raise SystemExit(f"Multi-Agent stream is missing triage {event}.")
 print("Verified Multi-Agent SSE lifecycle and terminal event ordering.")
 ' "${STATE_DIR}/multi-agent-stream.sse"
 

@@ -5,7 +5,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -89,5 +91,135 @@ func TestDeterministicTriageUsesBoundedFallbackForUnknownService(t *testing.T) {
 			len(plan.EvidencePlan),
 			maxEvidencePlanSize,
 		)
+	}
+}
+
+func TestLLMTriageAgentUsesValidLLMPlan(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{response: schema.AssistantMessage(`{
+			"service":"checkout",
+			"incident_type":"high_error_rate",
+			"severity_hint":"warning",
+			"evidence_plan":["metrics","logs","traces","knowledge"],
+			"language":"en",
+			"time_window_reason":"Use the supplied incident time range.",
+			"triage_summary":"Investigate checkout high error rate using metrics, logs, traces, and knowledge.",
+			"constraints":["Do not claim root cause before evidence is reviewed."]
+		}`, nil)},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Service != "checkout" ||
+		plan.IncidentType != IncidentHighErrorRate ||
+		plan.Metadata["triage_llm_used"] != true ||
+		plan.Metadata["triage_fallback_used"] != false ||
+		plan.Metadata["triage_model"] != "test-model" {
+		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestLLMTriageAgentInvalidJSONFallsBack(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{response: schema.AssistantMessage("not-json", nil)},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_llm_used"] != false ||
+		plan.Metadata["triage_llm_attempted"] != true ||
+		plan.Metadata["triage_fallback_used"] != true ||
+		plan.Metadata["triage_fallback_reason"] != "invalid_json" {
+		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+}
+
+func TestLLMTriageAgentInvalidEvidencePlanFallsBack(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{response: schema.AssistantMessage(`{
+			"service":"checkout",
+			"incident_type":"high_error_rate",
+			"severity_hint":"warning",
+			"evidence_plan":["database_magic"],
+			"language":"en",
+			"time_window_reason":"Use the supplied incident time range.",
+			"triage_summary":"Investigate checkout high error rate.",
+			"constraints":[]
+		}`, nil)},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_fallback_used"] != true ||
+		plan.Metadata["triage_fallback_reason"] != "invalid_output" {
+		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+}
+
+func TestLLMTriageAgentRejectsFinalDiagnosisClaim(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{response: schema.AssistantMessage(`{
+			"service":"checkout",
+			"incident_type":"high_error_rate",
+			"severity_hint":"critical",
+			"evidence_plan":["metrics","logs"],
+			"language":"en",
+			"time_window_reason":"Use the supplied incident time range.",
+			"triage_summary":"The root cause is payment timeout.",
+			"constraints":[]
+		}`, nil)},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_fallback_used"] != true ||
+		plan.Metadata["triage_fallback_reason"] != "invalid_output" {
+		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+}
+
+func TestLLMTriageAgentWithoutLLMKeepsDeterministicMetadata(t *testing.T) {
+	plan, err := NewLLMTriageAgent("checkout", nil).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_llm_attempted"] != false ||
+		plan.Metadata["triage_llm_used"] != false ||
+		plan.Metadata["triage_fallback_used"] != true {
+		t.Fatalf("metadata = %#v", plan.Metadata)
 	}
 }

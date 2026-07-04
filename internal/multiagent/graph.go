@@ -276,6 +276,16 @@ func (o *Orchestrator) runTriage(
 		observability.MarkError(span, "Triage Agent failed")
 		return triageOutput{}, err
 	}
+	span.SetAttributes(
+		attribute.String("agent.role", string(AgentRoleTriage)),
+		attribute.String("agent.mode", metadataString(plan.Metadata, "triage_mode")),
+		attribute.String("llm.model", metadataString(plan.Metadata, "triage_model")),
+		attribute.Bool("llm.used", metadataBool(plan.Metadata, "triage_llm_used")),
+		attribute.Bool("fallback.used", metadataBool(plan.Metadata, "triage_fallback_used")),
+		attribute.String("incident_type", plan.IncidentType),
+		attribute.String("service", plan.Service),
+		attribute.Int("evidence_plan_count", len(plan.EvidencePlan)),
+	)
 	completed := o.now()
 	output := plan.Summary
 	if output == "" {
@@ -289,20 +299,22 @@ func (o *Orchestrator) runTriage(
 		completed.Sub(started).Milliseconds(),
 		0,
 	)
+	step := completedStep(
+		AgentRoleTriage,
+		"Triage Agent",
+		input.Input.Message,
+		output,
+		nil,
+		nil,
+		plan.Limitations,
+		started,
+		completed,
+	)
+	step.Metadata = cloneMetadata(plan.Metadata)
 	return triageOutput{
 		Input: input.Input,
 		Plan:  plan,
-		Step: completedStep(
-			AgentRoleTriage,
-			"Triage Agent",
-			input.Input.Message,
-			output,
-			nil,
-			nil,
-			plan.Limitations,
-			started,
-			completed,
-		),
+		Step:  step,
 	}, nil
 }
 
@@ -524,9 +536,11 @@ func (o *Orchestrator) buildResponse(
 	steps = append(steps, input.Step)
 	fallbackUsed, _ := input.Answer.Metadata["fallback_used"].(bool)
 	synthesisMode, _ := input.Answer.Metadata["synthesis_mode"].(string)
+	triageMetadata := input.Merged.Triage.Plan.Metadata
 	evidenceMetadata := input.Merged.Merged.EvidenceFinding.Metadata
 	knowledgeMetadata := input.Merged.Merged.KnowledgeFinding.Metadata
 	synthesisMetadata := input.Answer.Metadata
+	triageUsed := metadataBool(triageMetadata, "triage_llm_used")
 	evidenceUsed := metadataBool(evidenceMetadata, "evidence_llm_used")
 	knowledgeUsed := metadataBool(knowledgeMetadata, "knowledge_llm_used")
 	synthesisUsed := metadataBool(synthesisMetadata, "synthesis_llm_used")
@@ -535,6 +549,7 @@ func (o *Orchestrator) buildResponse(
 		metadata map[string]any
 		key      string
 	}{
+		{triageMetadata, "triage_llm_attempted"},
 		{evidenceMetadata, "evidence_llm_attempted"},
 		{knowledgeMetadata, "knowledge_llm_attempted"},
 		{synthesisMetadata, "synthesis_llm_attempted"},
@@ -543,7 +558,10 @@ func (o *Orchestrator) buildResponse(
 			llmCallCount++
 		}
 	}
-	llmRoles := make([]string, 0, 3)
+	llmRoles := make([]string, 0, 4)
+	if triageUsed {
+		llmRoles = append(llmRoles, string(AgentRoleTriage))
+	}
 	if evidenceUsed {
 		llmRoles = append(llmRoles, string(AgentRoleEvidence))
 	}
@@ -563,9 +581,11 @@ func (o *Orchestrator) buildResponse(
 		"multi_agent_llm_roles":      llmRoles,
 		"multi_agent_llm_call_count": llmCallCount,
 	}
+	copyRoleLLMMetadata(metadata, triageMetadata, "triage")
 	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
 	copyRoleLLMMetadata(metadata, knowledgeMetadata, "knowledge")
 	copyRoleLLMMetadata(metadata, synthesisMetadata, "synthesis")
+	ensureRoleLLMMetadata(metadata, "triage")
 	ensureRoleLLMMetadata(metadata, "evidence")
 	ensureRoleLLMMetadata(metadata, "knowledge")
 	ensureRoleLLMMetadata(metadata, "synthesis")
@@ -585,6 +605,7 @@ func ensureRoleLLMMetadata(metadata map[string]any, role string) {
 		role + "_model":           "",
 		role + "_fallback_used":   true,
 		role + "_llm_duration_ms": int64(0),
+		role + "_mode":            "rule_based",
 	}
 	for key, value := range defaults {
 		if _, exists := metadata[key]; !exists {
@@ -604,6 +625,7 @@ func copyRoleLLMMetadata(
 		"model",
 		"fallback_used",
 		"llm_duration_ms",
+		"mode",
 	} {
 		key := role + "_" + suffix
 		if value, exists := source[key]; exists {
@@ -614,6 +636,11 @@ func copyRoleLLMMetadata(
 
 func metadataBool(metadata map[string]any, key string) bool {
 	value, _ := metadata[key].(bool)
+	return value
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	value, _ := metadata[key].(string)
 	return value
 }
 

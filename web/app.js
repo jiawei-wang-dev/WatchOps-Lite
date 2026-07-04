@@ -1014,16 +1014,14 @@ function renderMultiAgentSteps(response) {
     const duration = step ?
       safeNumber(step.duration_ms) : safeNumber(completedEvent?.data?.latency_ms);
     const metadata = step?.metadata || {};
-    const prefix = role === "evidence" || role === "knowledge" ||
-      role === "synthesis" ? role : "";
-    const llmUsed = prefix ? metadata[`${prefix}_llm_used`] === true : false;
-    const llmFallback = prefix ?
-      metadata[`${prefix}_fallback_used`] === true : false;
-    const modelName = prefix ? safeText(metadata[`${prefix}_model`]) : "";
-    const llmDuration = prefix ?
+    const prefix = role;
+    const llmUsed = metadata[`${prefix}_llm_used`] === true;
+    const llmFallback = metadata[`${prefix}_fallback_used`] === true;
+    const modelName = safeText(metadata[`${prefix}_model`]);
+    const llmDuration = llmUsed ?
       safeNumber(metadata[`${prefix}_llm_duration_ms`]) : null;
-    const analysisMode = role === "triage" ? t(multiAgentModeLabels.triage) :
-      llmUsed ? t(multiAgentModeLabels[role]) :
+    const analysisMode = llmUsed ? t(multiAgentModeLabels[role]) :
+      role === "triage" ? t("multi.rule_based") :
       llmFallback ? t("multi.llm_fallback") : t(multiAgentModeLabels[role]);
     const output = safeText(step?.output);
     return `

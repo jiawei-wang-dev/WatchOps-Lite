@@ -26,6 +26,30 @@ func (fakeTriagePlanner) Plan(
 	}, nil
 }
 
+type llmMetadataTriagePlanner struct{}
+
+func (llmMetadataTriagePlanner) Plan(
+	_ context.Context,
+	input Input,
+) (TriagePlan, error) {
+	return TriagePlan{
+		Service:      "checkout",
+		IncidentType: "high_error_rate",
+		EvidencePlan: []string{"metrics", "knowledge"},
+		Query:        input.Message,
+		TimeContext:  input.TimeContext,
+		Language:     "en",
+		Metadata: map[string]any{
+			"triage_llm_used":        true,
+			"triage_llm_attempted":   true,
+			"triage_model":           "test-model",
+			"triage_fallback_used":   false,
+			"triage_llm_duration_ms": int64(5),
+			"triage_mode":            "llm",
+		},
+	}, nil
+}
+
 type recordingAnalyzer struct {
 	role AgentRole
 	mu   *sync.Mutex
@@ -130,6 +154,7 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 	}
 	if result.Metadata["multi_agent_llm_used"] != false ||
 		result.Metadata["multi_agent_llm_call_count"] != 0 ||
+		result.Metadata["triage_fallback_used"] != true ||
 		result.Metadata["evidence_fallback_used"] != true ||
 		result.Metadata["knowledge_fallback_used"] != true ||
 		result.Metadata["synthesis_fallback_used"] != true {
@@ -204,7 +229,7 @@ func (llmMetadataSynthesizer) Synthesize(
 func TestOrchestratorAggregatesMultiAgentLLMMetadata(t *testing.T) {
 	orchestrator := NewOrchestrator(
 		context.Background(),
-		fakeTriagePlanner{},
+		llmMetadataTriagePlanner{},
 		llmMetadataAnalyzer{role: AgentRoleEvidence},
 		llmMetadataAnalyzer{role: AgentRoleKnowledge},
 		llmMetadataSynthesizer{},
@@ -221,15 +246,16 @@ func TestOrchestratorAggregatesMultiAgentLLMMetadata(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if result.Metadata["multi_agent_llm_used"] != true ||
-		result.Metadata["multi_agent_llm_call_count"] != 3 ||
+		result.Metadata["multi_agent_llm_call_count"] != 4 ||
+		result.Metadata["triage_model"] != "test-model" ||
 		result.Metadata["synthesis_model"] != "test-model" {
 		t.Fatalf("Metadata = %#v", result.Metadata)
 	}
 	roles, ok := result.Metadata["multi_agent_llm_roles"].([]string)
-	if !ok || len(roles) != 3 {
+	if !ok || len(roles) != 4 {
 		t.Fatalf("multi_agent_llm_roles = %#v", result.Metadata["multi_agent_llm_roles"])
 	}
-	for _, step := range result.Steps[1:] {
+	for _, step := range result.Steps {
 		if step.Metadata == nil {
 			t.Fatalf("step metadata missing for role %s", step.Role)
 		}

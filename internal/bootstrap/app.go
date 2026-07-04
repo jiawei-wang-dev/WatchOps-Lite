@@ -386,7 +386,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	}
 	multiAgentService := multiagent.NewService(multiagent.NewOrchestrator(
 		context.Background(),
-		multiagent.NewDeterministicTriageAgent("checkout"),
+		multiagent.NewLLMTriageAgent("checkout", multiAgentLLM),
 		evidenceAgent,
 		knowledgeAgent,
 		multiagent.NewSynthesisAgent(multiAgentSynthesizer),

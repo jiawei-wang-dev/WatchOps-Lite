@@ -79,8 +79,88 @@ type synthesisStatement struct {
 	EvidenceIDs []string `json:"evidence_ids"`
 }
 
+type triageLLMOutput struct {
+	Service          string   `json:"service"`
+	IncidentType     string   `json:"incident_type"`
+	SeverityHint     string   `json:"severity_hint"`
+	EvidencePlan     []string `json:"evidence_plan"`
+	Language         string   `json:"language"`
+	TimeWindowReason string   `json:"time_window_reason"`
+	TriageSummary    string   `json:"triage_summary"`
+	Constraints      []string `json:"constraints"`
+}
+
 type llmCallResult struct {
 	durationMS int64
+}
+
+func (l *RoleLLM) planTriage(
+	ctx context.Context,
+	input Input,
+	rulePlan TriagePlan,
+) (TriagePlan, llmCallResult, error) {
+	payload := map[string]any{
+		"user_message":           boundedSummary(input.Message, 1000),
+		"time_context":           input.TimeContext,
+		"language":               rulePlan.Language,
+		"available_services":     supportedServices(),
+		"allowed_evidence_types": supportedEvidenceSources,
+		"rule_based_candidate":   boundedPlanForPrompt(rulePlan),
+		"constraints": []string{
+			"Triage must not make final root-cause claims.",
+			"Triage must only produce a bounded investigation plan.",
+			"Triage must choose evidence types from the allowed list.",
+			"Triage must output JSON only.",
+			"Do not expose private chain-of-thought.",
+		},
+	}
+	var output triageLLMOutput
+	call, err := l.callJSON(
+		ctx,
+		AgentRoleTriage,
+		`You are the Triage Agent in a service reliability investigation.
+Produce only a bounded investigation plan, not a final diagnosis.
+Do not claim a root cause, do not invent evidence, and do not expose chain-of-thought.
+Choose evidence_plan values only from the allowed_evidence_types list.
+Use the requested language for triage_summary and constraints.
+Return JSON only with:
+service, incident_type, severity_hint, evidence_plan, language,
+time_window_reason, triage_summary, constraints.
+incident_type must be one of:
+high_error_rate, latency, timeout, dependency_failure, unknown.`,
+		payload,
+		&output,
+		func() error {
+			return validateTriageLLMOutput(output)
+		},
+	)
+	if err != nil {
+		return TriagePlan{}, call, err
+	}
+	plan := TriagePlan{
+		Service:      strings.TrimSpace(output.Service),
+		IncidentType: normalizeTriageIncidentType(output.IncidentType),
+		EvidencePlan: normalizeEvidencePlan(output.EvidencePlan),
+		Query:        strings.TrimSpace(input.Message),
+		Summary:      strings.TrimSpace(output.TriageSummary),
+		TimeContext:  input.TimeContext,
+		Language:     normalizeTriageLanguage(output.Language, rulePlan.Language),
+		Limitations:  append([]agenteino.Limitation{}, rulePlan.Limitations...),
+		Metadata: map[string]any{
+			"triage_severity_hint":      normalizeSeverityHint(output.SeverityHint),
+			"triage_time_window_reason": boundedSummary(output.TimeWindowReason, 240),
+			"triage_constraints":        boundedStringSlice(output.Constraints, 5, 160),
+		},
+	}
+	if plan.Summary == "" {
+		plan.Summary = localizedTriageSummary(
+			plan.Language,
+			plan.Service,
+			plan.IncidentType,
+			plan.EvidencePlan,
+		)
+	}
+	return plan, call, nil
 }
 
 func (l *RoleLLM) analyzeEvidence(
@@ -297,7 +377,9 @@ func (l *RoleLLM) callJSON(
 	duration := time.Since(started).Milliseconds()
 	span.SetAttributes(
 		attribute.Int64("llm.duration_ms", duration),
+		attribute.Bool("llm.used", true),
 		attribute.Bool("fallback_used", false),
+		attribute.Bool("fallback.used", false),
 	)
 	agenteino.EmitStreamEvent(ctx, "agent_llm_completed", map[string]any{
 		"role":        string(role),
@@ -320,7 +402,9 @@ func (l *RoleLLM) failCall(
 	span.SetAttributes(
 		attribute.Int64("llm.duration_ms", duration),
 		attribute.String("error_code", reason),
+		attribute.Bool("llm.used", false),
 		attribute.Bool("fallback_used", true),
+		attribute.Bool("fallback.used", true),
 	)
 	observability.MarkError(span, "multi-agent role LLM analysis failed")
 	agenteino.EmitStreamEvent(ctx, "agent_llm_failed", map[string]any{
@@ -358,6 +442,138 @@ func validateSynthesisDraft(
 		}
 	}
 	return nil
+}
+
+func validateTriageLLMOutput(output triageLLMOutput) error {
+	if strings.TrimSpace(output.Service) == "" {
+		return errors.New("triage LLM returned empty service")
+	}
+	if !isSupportedService(output.Service) {
+		return fmt.Errorf("triage LLM returned unsupported service %q", output.Service)
+	}
+	incidentType := normalizeTriageIncidentType(output.IncidentType)
+	if incidentType == "" {
+		return fmt.Errorf("triage LLM returned invalid incident_type %q", output.IncidentType)
+	}
+	if len(normalizeEvidencePlan(output.EvidencePlan)) == 0 {
+		return errors.New("triage LLM returned empty or unsupported evidence_plan")
+	}
+	if summary := strings.TrimSpace(output.TriageSummary); summary == "" {
+		return errors.New("triage LLM returned empty triage_summary")
+	} else if containsFinalDiagnosisClaim(summary) {
+		return errors.New("triage LLM returned final diagnosis instead of triage plan")
+	}
+	for _, constraint := range output.Constraints {
+		if containsFinalDiagnosisClaim(constraint) {
+			return errors.New("triage LLM constraints contain final diagnosis language")
+		}
+	}
+	return nil
+}
+
+func normalizeTriageIncidentType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case IncidentHighErrorRate:
+		return IncidentHighErrorRate
+	case IncidentLatency:
+		return IncidentLatency
+	case "timeout", IncidentPaymentTimeout:
+		return "timeout"
+	case "dependency_failure":
+		return "dependency_failure"
+	case IncidentUnknown, "":
+		return IncidentUnknown
+	default:
+		return ""
+	}
+}
+
+func normalizeEvidencePlan(values []string) []string {
+	allowed := map[string]bool{}
+	for _, source := range supportedEvidenceSources {
+		allowed[source] = true
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, maxEvidencePlanSize)
+	for _, value := range values {
+		source := strings.ToLower(strings.TrimSpace(value))
+		if !allowed[source] || seen[source] {
+			continue
+		}
+		seen[source] = true
+		result = append(result, source)
+		if len(result) == maxEvidencePlanSize {
+			break
+		}
+	}
+	return result
+}
+
+func normalizeTriageLanguage(value string, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "zh", "en":
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	if fallback == "zh" {
+		return "zh"
+	}
+	return "en"
+}
+
+func normalizeSeverityHint(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "info", "warning", "critical":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
+}
+
+func supportedServices() []string {
+	return []string{"checkout", "payment", "inventory", "catalog", "redis", "mysql"}
+}
+
+func isSupportedService(value string) bool {
+	service := strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range supportedServices() {
+		if service == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func containsFinalDiagnosisClaim(value string) bool {
+	text := strings.ToLower(strings.TrimSpace(value))
+	return containsAny(
+		text,
+		"root cause is",
+		"confirmed root cause",
+		"definitive root cause",
+		"final diagnosis",
+		"根因是",
+		"最终根因",
+		"已确认根因",
+		"确定是",
+	)
+}
+
+func boundedStringSlice(values []string, limit int, maxLength int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	result := make([]string, 0, limit)
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, boundedSummary(value, maxLength))
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
 }
 
 type LLMSynthesizer struct {

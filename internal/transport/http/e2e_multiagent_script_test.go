@@ -107,6 +107,7 @@ func multiAgentScriptFixture() string {
 		"metadata":{
 			"multi_agent_llm_used":false,
 			"multi_agent_llm_call_count":0,
+			"triage_fallback_used":true,
 			"evidence_fallback_used":true,
 			"knowledge_fallback_used":true,
 			"synthesis_fallback_used":true

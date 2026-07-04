@@ -2,6 +2,7 @@ package multiagent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"unicode"
 
@@ -32,12 +33,24 @@ type DeterministicTriageAgent struct {
 	defaultService string
 }
 
+type LLMTriageAgent struct {
+	fallback *DeterministicTriageAgent
+	llm      *RoleLLM
+}
+
 func NewDeterministicTriageAgent(defaultService string) *DeterministicTriageAgent {
 	defaultService = strings.TrimSpace(defaultService)
 	if defaultService == "" {
 		defaultService = "checkout"
 	}
 	return &DeterministicTriageAgent{defaultService: defaultService}
+}
+
+func NewLLMTriageAgent(defaultService string, llm *RoleLLM) *LLMTriageAgent {
+	return &LLMTriageAgent{
+		fallback: NewDeterministicTriageAgent(defaultService),
+		llm:      llm,
+	}
 }
 
 func (a *DeterministicTriageAgent) Plan(
@@ -76,11 +89,84 @@ func (a *DeterministicTriageAgent) Plan(
 		Language:    language,
 		Limitations: limitations,
 		Metadata: map[string]any{
-			"triage_mode":       "deterministic",
-			"normalized_query":  query,
-			"service_confident": serviceCertain,
+			"triage_mode":            "rule_based",
+			"triage_llm_used":        false,
+			"triage_llm_attempted":   false,
+			"triage_model":           "",
+			"triage_fallback_used":   true,
+			"triage_llm_duration_ms": int64(0),
+			"normalized_query":       query,
+			"service_confident":      serviceCertain,
 		},
 	}, nil
+}
+
+func (a *LLMTriageAgent) Plan(ctx context.Context, input Input) (TriagePlan, error) {
+	if a == nil || a.fallback == nil {
+		return TriagePlan{}, errors.New("triage fallback planner is required")
+	}
+	if a.llm == nil {
+		return a.fallback.Plan(ctx, input)
+	}
+	rulePlan, err := a.fallback.Plan(ctx, input)
+	if err != nil {
+		return TriagePlan{}, err
+	}
+	plan, call, err := a.llm.planTriage(ctx, input, rulePlan)
+	if err != nil {
+		fallbackPlan := rulePlan
+		fallbackPlan.Metadata = mergeTriageMetadata(fallbackPlan.Metadata, map[string]any{
+			"triage_mode":            "rule_based",
+			"triage_llm_used":        false,
+			"triage_llm_attempted":   true,
+			"triage_model":           "",
+			"triage_fallback_used":   true,
+			"triage_llm_duration_ms": call.durationMS,
+			"triage_fallback_reason": safeTriageFailureReason(err),
+		})
+		return fallbackPlan, nil
+	}
+	plan.Query = strings.TrimSpace(input.Message)
+	plan.TimeContext = input.TimeContext
+	plan.Metadata = mergeTriageMetadata(plan.Metadata, map[string]any{
+		"triage_mode":            "llm",
+		"triage_llm_used":        true,
+		"triage_llm_attempted":   true,
+		"triage_model":           a.llm.modelName,
+		"triage_fallback_used":   false,
+		"triage_llm_duration_ms": call.durationMS,
+	})
+	return plan, nil
+}
+
+func mergeTriageMetadata(base map[string]any, overrides map[string]any) map[string]any {
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range overrides {
+		merged[key] = value
+	}
+	return merged
+}
+
+func safeTriageFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "invalid_json"):
+		return "invalid_json"
+	case strings.Contains(message, "invalid_output"):
+		return "invalid_output"
+	case strings.Contains(message, "model_call_failed"):
+		return "model_call_failed"
+	case strings.Contains(message, "empty_model_response"):
+		return "empty_model_response"
+	default:
+		return "llm_unavailable"
+	}
 }
 
 func detectLanguage(value string) string {
