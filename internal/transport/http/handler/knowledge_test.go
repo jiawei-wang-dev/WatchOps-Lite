@@ -33,7 +33,11 @@ func (s knowledgeExecutorStub) GetDocument(context.Context, string) (retrievalkn
 func TestKnowledgeIngestReturnsCreated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler := NewKnowledge(knowledgeExecutorStub{
-		ingestResult: retrievalknowledge.IngestResult{DocumentID: "doc_1", ChunkCount: 2},
+		ingestResult: retrievalknowledge.IngestResult{
+			DocumentID: "doc_1",
+			ChunkCount: 2,
+			Status:     "seeded",
+		},
 	})
 	router := gin.New()
 	router.POST("/api/v1/knowledge/documents", handler.Ingest)
@@ -54,8 +58,39 @@ func TestKnowledgeIngestReturnsCreated(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.DocumentID != "doc_1" || response.ChunkCount != 2 {
+	if response.DocumentID != "doc_1" ||
+		response.ChunkCount != 2 ||
+		response.Status != "seeded" {
 		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestKnowledgeIngestReturnsOKForDuplicate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewKnowledge(knowledgeExecutorStub{
+		ingestResult: retrievalknowledge.IngestResult{
+			DocumentID: "doc_existing",
+			ChunkCount: 2,
+			Status:     "skipped_duplicate",
+		},
+	})
+	router := gin.New()
+	router.POST("/api/v1/knowledge/documents", handler.Ingest)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/knowledge/documents",
+		bytes.NewBufferString(
+			`{"title":"Runbook","source":"manual","content":"Check latency."}`,
+		),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK ||
+		!bytes.Contains(recorder.Body.Bytes(), []byte(`"skipped_duplicate"`)) {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

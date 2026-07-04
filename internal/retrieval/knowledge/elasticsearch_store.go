@@ -81,14 +81,15 @@ func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) 
 	response.Body.Close()
 
 	properties := map[string]any{
-		"chunk_id":    map[string]string{"type": "keyword"},
-		"document_id": map[string]string{"type": "keyword"},
-		"title":       map[string]string{"type": "text"},
-		"content":     map[string]string{"type": "text"},
-		"source":      map[string]string{"type": "keyword"},
-		"chunk_index": map[string]string{"type": "integer"},
-		"metadata":    map[string]any{"type": "object", "dynamic": true},
-		"created_at":  map[string]string{"type": "date"},
+		"chunk_id":     map[string]string{"type": "keyword"},
+		"document_id":  map[string]string{"type": "keyword"},
+		"content_hash": map[string]string{"type": "keyword"},
+		"title":        map[string]string{"type": "text"},
+		"content":      map[string]string{"type": "text"},
+		"source":       map[string]string{"type": "keyword"},
+		"chunk_index":  map[string]string{"type": "integer"},
+		"metadata":     map[string]any{"type": "object", "dynamic": true},
+		"created_at":   map[string]string{"type": "date"},
 	}
 	if s.vectorDimension > 0 {
 		properties["embedding"] = s.vectorMapping()
@@ -119,11 +120,14 @@ func (s *ElasticsearchStore) EnsureIndex(ctx context.Context) (resultErr error) 
 }
 
 func (s *ElasticsearchStore) ensureVectorMapping(ctx context.Context) error {
-	if s.vectorDimension == 0 {
-		return nil
+	properties := map[string]any{
+		"content_hash": map[string]string{"type": "keyword"},
+	}
+	if s.vectorDimension > 0 {
+		properties["embedding"] = s.vectorMapping()
 	}
 	body, err := json.Marshal(map[string]any{
-		"properties": map[string]any{"embedding": s.vectorMapping()},
+		"properties": properties,
 	})
 	if err != nil {
 		return fmt.Errorf("encode vector mapping: %w", err)
@@ -142,6 +146,78 @@ func (s *ElasticsearchStore) ensureVectorMapping(ctx context.Context) error {
 		return responseError(response, "update knowledge vector mapping")
 	}
 	return nil
+}
+
+func (s *ElasticsearchStore) FindByContentHash(
+	ctx context.Context,
+	contentHash string,
+) (DuplicateDocument, error) {
+	body, err := json.Marshal(map[string]any{
+		"size": 1000,
+		"query": map[string]any{
+			"term": map[string]string{"content_hash": contentHash},
+		},
+		"sort": []any{
+			map[string]any{"created_at": map[string]string{
+				"order":   "asc",
+				"missing": "_last",
+			}},
+			map[string]string{"document_id": "asc"},
+			map[string]string{"chunk_index": "asc"},
+		},
+		"_source": []string{"document_id"},
+	})
+	if err != nil {
+		return DuplicateDocument{}, fmt.Errorf(
+			"encode content hash query: %w",
+			err,
+		)
+	}
+	response, err := s.client.Do(ctx, elasticsearchplatform.Request{
+		Method:      http.MethodPost,
+		Path:        "/" + url.PathEscape(s.index) + "/_search",
+		Body:        bytes.NewReader(body),
+		ContentType: "application/json",
+	})
+	if err != nil {
+		return DuplicateDocument{}, dependencyError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return DuplicateDocument{}, responseError(
+			response,
+			"find knowledge content hash",
+		)
+	}
+	var result struct {
+		Hits struct {
+			Hits []struct {
+				Source struct {
+					DocumentID string `json:"document_id"`
+				} `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := decodeJSON(response.Body, &result); err != nil {
+		return DuplicateDocument{}, fmt.Errorf(
+			"decode content hash response: %w",
+			err,
+		)
+	}
+	if len(result.Hits.Hits) == 0 {
+		return DuplicateDocument{}, ErrNotFound
+	}
+	documentID := result.Hits.Hits[0].Source.DocumentID
+	chunkCount := 0
+	for _, hit := range result.Hits.Hits {
+		if hit.Source.DocumentID == documentID {
+			chunkCount++
+		}
+	}
+	return DuplicateDocument{
+		DocumentID: documentID,
+		ChunkCount: chunkCount,
+	}, nil
 }
 
 func (s *ElasticsearchStore) vectorMapping() map[string]any {
@@ -293,14 +369,16 @@ func (s *ElasticsearchStore) Search(
 		if chunkID == "" {
 			chunkID = hit.ID
 		}
+		metadata := searchResultMetadata(hit.Source)
 		results = append(results, SearchResult{
 			ChunkID:    chunkID,
 			DocumentID: hit.Source.DocumentID,
+			ChunkIndex: hit.Source.Index,
 			Title:      hit.Source.Title,
 			Content:    hit.Source.Content,
 			Source:     hit.Source.Source,
 			Score:      hit.Score,
-			Metadata:   cloneMetadata(hit.Source.Metadata),
+			Metadata:   metadata,
 		})
 	}
 	return results, nil
@@ -383,17 +461,28 @@ func (s *ElasticsearchStore) SearchVector(
 		if chunkID == "" {
 			chunkID = hit.ID
 		}
+		metadata := searchResultMetadata(hit.Source)
 		results = append(results, SearchResult{
 			ChunkID:    chunkID,
 			DocumentID: hit.Source.DocumentID,
+			ChunkIndex: hit.Source.Index,
 			Title:      hit.Source.Title,
 			Content:    hit.Source.Content,
 			Source:     hit.Source.Source,
 			Score:      hit.Score,
-			Metadata:   cloneMetadata(hit.Source.Metadata),
+			Metadata:   metadata,
 		})
 	}
 	return results, nil
+}
+
+func searchResultMetadata(chunk Chunk) map[string]any {
+	metadata := cloneMetadata(chunk.Metadata)
+	metadata["chunk_index"] = chunk.Index
+	if chunk.ContentHash != "" {
+		metadata["content_hash"] = chunk.ContentHash
+	}
+	return metadata
 }
 
 func (s *ElasticsearchStore) GetDocument(

@@ -13,6 +13,10 @@ type VectorStore interface {
 	SearchVector(context.Context, VectorSearchQuery) ([]SearchResult, error)
 }
 
+type ContentHashStore interface {
+	FindByContentHash(context.Context, string) (DuplicateDocument, error)
+}
+
 type UnavailableStore struct{}
 
 func (UnavailableStore) EnsureIndex(context.Context) error {

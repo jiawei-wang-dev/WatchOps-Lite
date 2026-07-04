@@ -2,8 +2,7 @@ package knowledge
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -28,7 +27,6 @@ type Service struct {
 	reranker  rerank.Reranker
 	config    ServiceConfig
 	now       func() time.Time
-	newID     func() (string, error)
 }
 
 type ServiceConfig struct {
@@ -102,7 +100,6 @@ func NewServiceWithReranker(
 		reranker:  reranker,
 		config:    config,
 		now:       func() time.Time { return time.Now().UTC() },
-		newID:     generateDocumentID,
 	}, nil
 }
 
@@ -131,19 +128,43 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 		observability.MarkError(span, "knowledge document validation failed")
 		return IngestResult{}, fmt.Errorf("%w: title, source, and content are required", ErrInvalidArgument)
 	}
-	if document.ID == "" {
-		id, err := s.newID()
-		if err != nil {
-			observability.MarkError(span, "knowledge document ID generation failed")
-			return IngestResult{}, fmt.Errorf("generate document ID: %w", err)
+	contentHash := ContentHash(document.Content)
+	document.Metadata = cloneMetadata(document.Metadata)
+	document.Metadata["content_hash"] = contentHash
+	document.Metadata["source"] = document.Source
+	document.Metadata["title"] = document.Title
+	if err := s.store.EnsureIndex(ctx); err != nil {
+		observability.MarkError(span, "knowledge index unavailable")
+		return IngestResult{}, err
+	}
+	if hashStore, ok := s.store.(ContentHashStore); ok {
+		duplicate, err := hashStore.FindByContentHash(ctx, contentHash)
+		switch {
+		case err == nil && duplicate.DocumentID != "":
+			span.SetAttributes(
+				attribute.String("document_id", duplicate.DocumentID),
+				attribute.String("ingest.status", "skipped_duplicate"),
+				attribute.Bool("duplicate", true),
+			)
+			return IngestResult{
+				DocumentID: duplicate.DocumentID,
+				ChunkCount: duplicate.ChunkCount,
+				Status:     "skipped_duplicate",
+			}, nil
+		case err != nil && !errors.Is(err, ErrNotFound):
+			observability.MarkError(span, "knowledge duplicate lookup failed")
+			return IngestResult{}, err
 		}
-		document.ID = id
+	}
+	if document.ID == "" {
+		document.ID = documentIDFromContentHash(contentHash)
 	}
 	if document.CreatedAt.IsZero() {
 		document.CreatedAt = s.now()
 	}
-	document.Metadata = cloneMetadata(document.Metadata)
-	span.SetAttributes(attribute.String("document_id", document.ID))
+	span.SetAttributes(
+		attribute.String("document_id", document.ID),
+	)
 
 	_, chunkSpan := observability.StartSpan(
 		ctx,
@@ -151,6 +172,9 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 		attribute.String("document_id", document.ID),
 	)
 	chunks := s.chunker.Split(document)
+	for index := range chunks {
+		chunks[index].ContentHash = contentHash
+	}
 	chunkSpan.SetAttributes(attribute.Int("chunk_count", len(chunks)))
 	chunkSpan.End()
 	if len(chunks) == 0 {
@@ -189,12 +213,6 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 		attribute.String("document_id", document.ID),
 		attribute.Int("chunk_count", len(chunks)),
 	)
-	if err := s.store.EnsureIndex(indexContext); err != nil {
-		observability.MarkError(indexSpan, "knowledge index unavailable")
-		indexSpan.End()
-		observability.MarkError(span, "knowledge ingestion failed")
-		return IngestResult{}, err
-	}
 	if err := s.store.IndexChunks(indexContext, chunks); err != nil {
 		observability.MarkError(indexSpan, "knowledge chunk indexing failed")
 		indexSpan.End()
@@ -203,7 +221,11 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 	}
 	indexSpan.End()
 	span.SetAttributes(attribute.Int("chunk_count", len(chunks)))
-	return IngestResult{DocumentID: document.ID, ChunkCount: len(chunks)}, nil
+	return IngestResult{
+		DocumentID: document.ID,
+		ChunkCount: len(chunks),
+		Status:     "seeded",
+	}, nil
 }
 
 func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult, error) {
@@ -239,14 +261,22 @@ func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult
 		query.Filters[key] = strings.TrimSpace(value)
 	}
 	candidateQuery := query
+	candidateQuery.Limit = min(
+		maxSearchLimit,
+		max(query.Limit*4, query.Limit),
+	)
 	if s.reranker != nil {
-		candidateQuery.Limit = max(query.Limit, s.config.RerankCandidateK)
+		candidateQuery.Limit = max(
+			candidateQuery.Limit,
+			s.config.RerankCandidateK,
+		)
 	}
 	results, err := s.searchByMode(ctx, candidateQuery, span)
 	if err != nil {
 		observability.MarkError(span, "knowledge search failed")
 		return nil, err
 	}
+	results = dedupeSearchResults(results)
 	if s.reranker != nil && len(results) > 0 {
 		results, err = s.rerankResults(ctx, query.Query, results, min(query.Limit, s.config.RerankTopK))
 		if err != nil {
@@ -256,8 +286,25 @@ func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult
 	} else {
 		results = trimResults(results, query.Limit)
 	}
-	span.SetAttributes(attribute.Int("result_count", len(results)))
+	results = trimResults(dedupeSearchResults(results), query.Limit)
+	span.SetAttributes(
+		attribute.Int("result_count", len(results)),
+		attribute.Int("deduped_duplicate_count", dedupedResultCount(results)),
+	)
 	return results, nil
+}
+
+func dedupedResultCount(results []SearchResult) int {
+	total := 0
+	for _, result := range results {
+		if count, ok := metadataFloat(
+			result.Metadata,
+			"deduped_duplicate_count",
+		); ok {
+			total += int(count)
+		}
+	}
+	return total
 }
 
 func (s *Service) rerankResults(
@@ -586,10 +633,10 @@ func (s *Service) GetDocument(ctx context.Context, documentID string) (DocumentI
 	return result, nil
 }
 
-func generateDocumentID() (string, error) {
-	var bytes [12]byte
-	if _, err := rand.Read(bytes[:]); err != nil {
-		return "", err
+func documentIDFromContentHash(contentHash string) string {
+	const idHashLength = 24
+	if len(contentHash) > idHashLength {
+		contentHash = contentHash[:idHashLength]
 	}
-	return "doc_" + hex.EncodeToString(bytes[:]), nil
+	return "doc_" + contentHash
 }

@@ -236,11 +236,12 @@ Long-term search matches title, summary, service, and tags with a configured def
 ### 6.1 Ingestion Path
 
 ```text
-JSON document -> Validate -> Normalize -> Chunk
+JSON document -> Validate -> Normalize -> Full-content SHA-256
+              -> Existing-hash lookup -> Chunk
               -> Elasticsearch bulk index (refresh=wait_for)
 ```
 
-The MVP accepts plain-text or Markdown content synchronously. Elasticsearch stores the chunks, source metadata, and generated document identity. Durable ingestion states, duplicate detection, file extraction, deletion, and asynchronous jobs are deferred.
+The MVP accepts plain-text or Markdown content synchronously. Hash normalization standardizes newlines, repeated whitespace, Markdown heading markers, and ASCII case while preserving complete Unicode content. Elasticsearch stores the full-content hash on every chunk and in document metadata. A matching hash returns the existing document ID and chunk count with `skipped_duplicate` before chunking, embedding, or indexing. Same-title documents with different content remain distinct. Durable lifecycle states, force reimport, file extraction, deletion, and asynchronous jobs remain deferred.
 
 ### 6.2 Retrieval Path
 
@@ -251,8 +252,11 @@ The MVP accepts plain-text or Markdown content synchronously. Elasticsearch stor
 5. Retrieve BM25 and/or Elasticsearch dense-vector candidates.
 6. Fuse hybrid candidates with reciprocal rank fusion (RRF).
 7. Expand recall to the configured rerank candidate set.
-8. Rerank candidates with the deterministic rule-based scorer or optional external `/rerank` provider.
-9. Convert final chunks into source-attributed evidence with retrieval and rerank metadata.
+8. Deduplicate candidates before reranking so duplicate seeds do not consume the final candidate budget.
+9. Rerank candidates with the deterministic rule-based scorer or optional external `/rerank` provider.
+10. Deduplicate again using final rerank scores, then convert chunks into source-attributed evidence.
+
+Retrieval dedupe prefers exact chunk ID, document ID plus chunk index, full-content hash plus chunk index, then a rune-safe normalized title/content fingerprint for historical records without hashes. The highest retrieval/rerank score wins and equal scores retain original order. Metadata reports the hidden count and a bounded list of duplicate IDs. This affects returned results only; it never deletes historical Elasticsearch documents.
 
 The rule-based reranker combines the original retrieval score with service match, title/content overlap, operational-identifier match, runbook preference, recency, and empty-content penalties. External reranking is optional. Provider timeout, invalid/empty output, missing credentials, or unavailability falls back to the rule-based scorer and records a safe `rerank_fallback_reason`; initial retrieval evidence is not discarded.
 

@@ -12,6 +12,7 @@ type IngestKnowledgeRequest struct {
 type IngestKnowledgeResponse struct {
 	DocumentID string `json:"document_id"`
 	ChunkCount int    `json:"chunk_count"`
+	Status     string `json:"status"`
 }
 
 type SearchKnowledgeRequest struct {

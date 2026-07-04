@@ -46,7 +46,9 @@ func TestElasticsearchStoreCreatesIndexAndBulkIndexesChunks(t *testing.T) {
 		t.Fatalf("EnsureIndex() error = %v", err)
 	}
 	if err := store.IndexChunks(context.Background(), []Chunk{{
-		ID: "doc_1_chunk_0000", DocumentID: "doc_1", Title: "Runbook", Content: "Check saturation",
+		ID: "doc_1_chunk_0000", DocumentID: "doc_1",
+		ContentHash: "hash-123", Title: "Runbook",
+		Content: "Check saturation",
 	}}); err != nil {
 		t.Fatalf("IndexChunks() error = %v", err)
 	}
@@ -59,6 +61,33 @@ func TestElasticsearchStoreCreatesIndexAndBulkIndexesChunks(t *testing.T) {
 	bulkBody, _ := io.ReadAll(executor.requests[2].Body)
 	if !strings.Contains(string(bulkBody), `"doc_1_chunk_0000"`) {
 		t.Fatalf("bulk body = %s", bulkBody)
+	}
+	if !strings.Contains(string(bulkBody), `"content_hash"`) {
+		t.Fatalf("bulk body does not include content_hash: %s", bulkBody)
+	}
+}
+
+func TestElasticsearchStoreFindsExistingDocumentByContentHash(t *testing.T) {
+	executor := &executorStub{responses: []*http.Response{
+		response(http.StatusOK, `{
+			"hits":{"hits":[
+				{"_source":{"document_id":"doc_existing"}},
+				{"_source":{"document_id":"doc_existing"}},
+				{"_source":{"document_id":"doc_duplicate"}}
+			]}
+		}`),
+	}}
+	store, _ := NewElasticsearchStore(executor, "watchops_knowledge")
+	result, err := store.FindByContentHash(context.Background(), "hash-123")
+	if err != nil {
+		t.Fatalf("FindByContentHash() error = %v", err)
+	}
+	if result.DocumentID != "doc_existing" || result.ChunkCount != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	body, _ := io.ReadAll(executor.requests[0].Body)
+	if !strings.Contains(string(body), `"content_hash":"hash-123"`) {
+		t.Fatalf("query body = %s", body)
 	}
 }
 

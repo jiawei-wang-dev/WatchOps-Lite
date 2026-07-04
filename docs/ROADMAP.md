@@ -638,6 +638,22 @@ Single-Agent remains the default and its API, prompt, ReAct graph, Redis memory,
 
 Exit status: complete. English and Chinese Single-Agent and Multi-Agent demo gates are verified locally.
 
+## Enhancement: Knowledge Ingestion and Retrieval Dedupe — Completed
+
+Delivered:
+
+- Unicode-safe normalized full-content SHA-256 for knowledge documents
+- Ingestion-time Elasticsearch content-hash lookup and `skipped_duplicate` response
+- Content hash stored on chunks and document metadata
+- Retrieval dedupe by chunk identity, document/chunk index, content hash, and legacy rune-safe content fingerprint
+- Highest-score selection with stable equal-score ordering
+- Duplicate-count metadata and bilingual console notice
+- Repeatable English and Chinese seed scripts without additional duplicate documents
+
+The feature prevents new duplicate pollution and hides historical duplicates from API, Agent, Multi-Agent, and retrieval-eval results. It does not delete existing Elasticsearch data or treat matching titles alone as duplicates.
+
+Exit status: complete.
+
 ## Milestone Dependencies
 
 ```mermaid

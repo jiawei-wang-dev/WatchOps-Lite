@@ -21,15 +21,16 @@ type Document struct {
 }
 
 type Chunk struct {
-	ID         string         `json:"chunk_id"`
-	DocumentID string         `json:"document_id"`
-	Title      string         `json:"title"`
-	Content    string         `json:"content"`
-	Source     string         `json:"source"`
-	Index      int            `json:"chunk_index"`
-	Metadata   map[string]any `json:"metadata"`
-	CreatedAt  time.Time      `json:"created_at"`
-	Embedding  []float32      `json:"embedding,omitempty"`
+	ID          string         `json:"chunk_id"`
+	DocumentID  string         `json:"document_id"`
+	ContentHash string         `json:"content_hash,omitempty"`
+	Title       string         `json:"title"`
+	Content     string         `json:"content"`
+	Source      string         `json:"source"`
+	Index       int            `json:"chunk_index"`
+	Metadata    map[string]any `json:"metadata"`
+	CreatedAt   time.Time      `json:"created_at"`
+	Embedding   []float32      `json:"embedding,omitempty"`
 }
 
 type SearchQuery struct {
@@ -41,6 +42,7 @@ type SearchQuery struct {
 type SearchResult struct {
 	ChunkID       string         `json:"chunk_id"`
 	DocumentID    string         `json:"document_id"`
+	ChunkIndex    int            `json:"chunk_index"`
 	Title         string         `json:"title"`
 	Content       string         `json:"content"`
 	Source        string         `json:"source"`
@@ -70,4 +72,10 @@ type DocumentInfo struct {
 type IngestResult struct {
 	DocumentID string `json:"document_id"`
 	ChunkCount int    `json:"chunk_count"`
+	Status     string `json:"status"`
+}
+
+type DuplicateDocument struct {
+	DocumentID string
+	ChunkCount int
 }

@@ -59,8 +59,25 @@ print(json.dumps({
 ' "${DOCUMENT_PATH}" "${DOCUMENT_TITLE}" "${DEMO_LANG}"
 )"
 
-curl --fail-with-body --silent --show-error \
+response="$(
+  curl --fail-with-body --silent --show-error \
   "${API_BASE_URL}/api/v1/knowledge/documents" \
   -H "Content-Type: application/json" \
   --data-binary "${payload}"
-printf "\n"
+)"
+
+python3 -c '
+import json
+import sys
+
+response = json.loads(sys.argv[1])
+status = response.get("status", "seeded")
+if status not in {"seeded", "skipped_duplicate", "already_exists"}:
+    raise SystemExit(f"Unexpected knowledge seed status: {status}")
+print(json.dumps(response, ensure_ascii=False))
+print("Knowledge seed {}: document_id={} chunk_count={}".format(
+    status,
+    response.get("document_id", ""),
+    response.get("chunk_count", 0),
+))
+' "${response}"

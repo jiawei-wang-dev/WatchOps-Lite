@@ -379,11 +379,14 @@ Successful response (`201 Created`):
 ```json
 {
   "document_id": "doc_0123456789abcdef01234567",
-  "chunk_count": 2
+  "chunk_count": 2,
+  "status": "seeded"
 }
 ```
 
-The service splits content by paragraphs, merges text up to the configured chunk size, and assigns stable chunk IDs from the document ID and chunk index.
+The service computes a normalized SHA-256 over the complete content before chunking. Re-uploading equivalent content with different whitespace, newlines, Markdown heading depth, or ASCII case returns `200 OK`, the existing document identity, and `"status":"skipped_duplicate"` without indexing more chunks. Same-title documents with different bodies remain distinct.
+
+The service then splits new content by paragraphs, merges text up to the configured chunk size, and assigns stable chunk IDs from the document ID and chunk index.
 
 ## Knowledge Search
 
@@ -430,6 +433,8 @@ Successful response:
 ```
 
 `limit` defaults to the configured final result count and must be between 1 and 20. Retrieval mode is configured as `bm25`, `vector`, or `hybrid`. Hybrid mode uses RRF and can explicitly fall back to BM25 when embeddings are disabled or unavailable. Score component fields are omitted when they do not apply.
+
+Before returning, the service deduplicates exact chunk IDs, repeated document/chunk indexes, matching content hashes, and legacy normalized title/content fingerprints. The highest score wins; equal scores preserve retrieval order. Kept-result metadata may include `deduped_duplicate_count`, `dedupe_reason`, `dedupe_key`, and a bounded `hidden_duplicate_ids` list. Existing duplicate Elasticsearch records are not deleted.
 
 ## Knowledge Document Metadata
 

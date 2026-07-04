@@ -54,6 +54,7 @@ The local demo uses deterministic Agent routing, Prometheus-backed metrics, Elas
 - MySQL cross-session incident memory created only from evidence-backed positive feedback or explicit trusted sources
 - Optional MySQL OnCall user profiles rendered as bounded Agent context
 - Elasticsearch BM25, optional vector retrieval, RRF hybrid fusion, and deterministic reranking with an optional external provider
+- Full-content SHA-256 ingestion dedupe plus retrieval-time chunk/content dedupe for historical knowledge records
 - Elasticsearch-backed `query_logs` with bounded filters and explicit mock fallback
 - Prometheus-backed `query_metrics` with allowlisted queries and explicit mock fallback
 - Local Prometheus demo alert rules consumed by `query_alerts`
@@ -239,7 +240,7 @@ export WATCHOPS_API_BASE_URL=http://localhost:8080
 export WATCHOPS_DEMO_STATE_DIR=/tmp/watchops-lite-demo
 ```
 
-The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Knowledge, feedback, and eval scripts create additional records.
+The log seed uses stable IDs, shifts fixture timestamps into the current 20-minute demo window, and safely replaces its events on rerun. Knowledge ingestion stores a normalized full-content hash and returns `skipped_duplicate` with the existing document ID when the same runbook is seeded again. Search also deduplicates historical records by chunk identity, content hash, or a rune-safe title/content fingerprint. It does not delete old Elasticsearch records. The Chat script generates the matching time range so Prometheus and Elasticsearch evidence can be correlated. Feedback and eval scripts create additional records.
 
 Generate a larger repeatable JSONL scenario without overwriting the committed fixture:
 

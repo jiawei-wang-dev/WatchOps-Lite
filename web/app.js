@@ -1217,11 +1217,20 @@ function renderKnowledgeResults(results) {
     return;
   }
   const duplicateIndexes = findDuplicateKnowledgeResults(items);
+  const hiddenDuplicateCount = items.reduce((total, item) => {
+    const count = safeNumber(item?.metadata?.deduped_duplicate_count);
+    return total + (count === null ? 0 : count);
+  }, 0);
   byId("knowledge-results").innerHTML = `
     <div class="knowledge-results-heading">
       <h3>${escapeHtml(t("knowledge.results"))}</h3>
       <span class="source-badge">${escapeHtml(t("dynamic.item_count", { count: items.length }))}</span>
     </div>
+    ${hiddenDuplicateCount > 0 ? `
+      <div class="inline-note success-note">${escapeHtml(t(
+        "knowledge.duplicates_hidden",
+        { count: hiddenDuplicateCount },
+      ))}</div>` : ""}
     ${items.map((item, index) =>
       renderKnowledgeCard(item, duplicateIndexes.has(index))).join("")}`;
 }
@@ -1325,10 +1334,9 @@ function findDuplicateKnowledgeResults(items) {
     const title = normalizeKnowledgeSignature(knowledgeTitle(item));
     const content = normalizeKnowledgeSignature(
       cleanKnowledgeMarkdown(item?.content, knowledgeTitle(item)),
-    ).slice(0, 100);
+    ).slice(0, 1000);
     const keys = [
-      title ? `title:${title}` : "",
-      content ? `content:${content}` : "",
+      title && content ? `title_content:${title}:${content}` : "",
     ].filter(Boolean);
     keys.forEach((key) => {
       if (signatures.has(key)) {

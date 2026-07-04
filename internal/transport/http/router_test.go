@@ -154,6 +154,7 @@ func TestRouterServesEmbeddedDemoConsole(t *testing.T) {
 		`"stream.raw_events"`,
 		`"trace.guide_title"`,
 		`"knowledge.duplicate_seed"`,
+		`"knowledge.duplicates_hidden"`,
 		`"knowledge.raw_content"`,
 		`"status.redis_active"`,
 		`"status.llm_fallback"`,

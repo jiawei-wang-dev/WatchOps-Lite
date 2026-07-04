@@ -116,8 +116,6 @@ func TestServiceIndexesEmbeddingsWhenProviderIsEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServiceWithConfig() error = %v", err)
 	}
-	service.newID = func() (string, error) { return "doc_embed", nil }
-
 	_, err = service.Ingest(context.Background(), Document{
 		Title: "Runbook", Source: "test", Content: "Inspect checkout saturation.",
 	})

@@ -40,9 +40,15 @@ func (h *Knowledge) Ingest(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, dto.IngestKnowledgeResponse{
+	statusCode := http.StatusCreated
+	if result.Status == "skipped_duplicate" ||
+		result.Status == "already_exists" {
+		statusCode = http.StatusOK
+	}
+	c.JSON(statusCode, dto.IngestKnowledgeResponse{
 		DocumentID: result.DocumentID,
 		ChunkCount: result.ChunkCount,
+		Status:     result.Status,
 	})
 }
 
