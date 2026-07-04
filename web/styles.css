@@ -425,16 +425,21 @@ h4 {
 
 .agent-role-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 12px;
 }
 
 .agent-role-card {
+  display: grid;
   min-width: 0;
+  min-width: 0;
+  align-content: start;
+  gap: 10px;
   padding: 13px;
   border: 1px solid #e8e5f4;
   border-radius: 12px;
   background: #fff;
+  overflow: hidden;
 }
 
 .agent-role-card.completed {
@@ -460,11 +465,13 @@ h4 {
 
 .agent-role-heading {
   justify-content: space-between;
+  min-width: 0;
 }
 
 .agent-role-heading h4 {
   margin: 0;
   font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .agent-role-index {
@@ -479,24 +486,25 @@ h4 {
   font-weight: 700;
 }
 
-.agent-role-card > p {
-  min-height: 46px;
-  margin: 9px 0;
+.agent-role-desc {
+  margin: 0;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
 }
 
 .agent-role-card dl {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   margin: 0;
 }
 
 .agent-role-card dl div {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(94px, 0.42fr) minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
-  font-size: 0.66rem;
+  font-size: 0.68rem;
 }
 
 .agent-role-card dt {
@@ -504,22 +512,86 @@ h4 {
 }
 
 .agent-role-card dd {
-  overflow: hidden;
   margin: 0;
   font-weight: 600;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.agent-role-field {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.tool-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.tool-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  background: #f5f3ff;
+  color: #5b21b6;
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.agent-role-runtime {
+  padding-top: 0;
 }
 
 .agent-role-card details {
-  margin-top: 9px;
+  margin-top: 0;
   font-size: 0.68rem;
+}
+
+.agent-output-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-output-details .when-open {
+  display: none;
+}
+
+.agent-output-details[open] .when-open {
+  display: inline;
+}
+
+.agent-output-details[open] .when-closed {
+  display: none;
+}
+
+.agent-output-details:not([open]) p {
+  display: -webkit-box;
+  max-height: 10.8em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 7;
 }
 
 .agent-role-card details p {
   margin: 7px 0 0;
+  padding: 0 12px 12px;
   color: #475569;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .status-pill,
@@ -1419,6 +1491,11 @@ pre {
   overflow-x: auto;
 }
 
+.tool-fallback-note {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1524,12 +1601,14 @@ tr:last-child td {
   gap: 10px;
 }
 
-.history-message {
-  max-width: 88%;
+.history-message,
+.history-exchange {
+  max-width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 13px;
   background: var(--panel-soft);
+  overflow: hidden;
 }
 
 .history-message.user {
@@ -1552,6 +1631,40 @@ tr:last-child td {
   margin: 7px 0 0;
   color: #334155;
   font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.history-exchange {
+  background: #fff;
+}
+
+.history-exchange-body {
+  display: grid;
+  gap: 9px;
+  margin: 9px 0 0;
+}
+
+.history-exchange-body div {
+  display: grid;
+  gap: 3px;
+}
+
+.history-exchange-body dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.history-exchange-body dd {
+  margin: 0;
+  color: #334155;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-exchange-body code {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
@@ -1819,6 +1932,51 @@ tr:last-child td {
   background: var(--panel-soft);
   color: var(--muted);
   font-size: 0.76rem;
+}
+
+.eval-case-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.eval-case-row {
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.eval-case-row.passed {
+  border-color: #bbf7d0;
+  background: var(--success-soft);
+}
+
+.eval-case-row.failed {
+  border-color: #fecaca;
+  background: var(--danger-soft);
+}
+
+.eval-case-row div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.eval-case-row p,
+.eval-case-row small {
+  display: block;
+  margin: 7px 0 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.eval-case-row small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
 }
 
 .insight-panel {

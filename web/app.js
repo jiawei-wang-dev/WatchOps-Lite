@@ -120,6 +120,12 @@ const multiAgentStepDefinitions = [
 ];
 
 const multiAgentRoles = ["triage", "evidence", "knowledge", "synthesis"];
+const multiAgentModeLabels = {
+  triage: "multi.mode_triage",
+  evidence: "multi.mode_evidence",
+  knowledge: "multi.mode_knowledge",
+  synthesis: "multi.mode_synthesis",
+};
 
 const evidenceSourceOrder = [
   "metrics",
@@ -1016,9 +1022,10 @@ function renderMultiAgentSteps(response) {
     const modelName = prefix ? safeText(metadata[`${prefix}_model`]) : "";
     const llmDuration = prefix ?
       safeNumber(metadata[`${prefix}_llm_duration_ms`]) : null;
-    const analysisMode = role === "triage" ? t("multi.rule_based") :
-      llmUsed ? t("multi.llm_active") :
-      llmFallback ? t("multi.llm_fallback") : "—";
+    const analysisMode = role === "triage" ? t(multiAgentModeLabels.triage) :
+      llmUsed ? t(multiAgentModeLabels[role]) :
+      llmFallback ? t("multi.llm_fallback") : t(multiAgentModeLabels[role]);
+    const output = safeText(step?.output);
     return `
       <article class="agent-role-card ${escapeHtml(stepStatus)}">
         <div class="agent-role-heading">
@@ -1028,17 +1035,26 @@ function renderMultiAgentSteps(response) {
           </div>
           <span class="badge ${statusTone(stepStatus)}">${escapeHtml(streamStatusLabel(stepStatus))}</span>
         </div>
-        <p>${escapeHtml(t(`multi.role_${role}_desc`))}</p>
-        <dl>
+        <p class="agent-role-desc">${escapeHtml(t(`multi.role_${role}_desc`))}</p>
+        <dl class="agent-role-facts">
           <div><dt>${escapeHtml(t("stream.duration"))}</dt><dd>${duration === null ? "—" : escapeHtml(formatLatency(duration))}</dd></div>
-          <div><dt>${escapeHtml(t("common.tool_runs"))}</dt><dd>${escapeHtml(toolNames.join(", ") || "—")}</dd></div>
           <div><dt>${escapeHtml(t("common.evidence"))}</dt><dd>${evidenceCount}</dd></div>
           <div><dt>${escapeHtml(t("common.limitations"))}</dt><dd>${safeArray(step?.limitations).length}</dd></div>
+        </dl>
+        <div class="agent-role-field">
+          <span>${escapeHtml(t("common.tool_runs"))}</span>
+          <div class="tool-chip-list">${toolNames.length ?
+            toolNames.map((tool) => `<code class="tool-chip">${escapeHtml(tool)}</code>`).join("") :
+            `<span class="subtle">—</span>`}
+          </div>
+        </div>
+        <dl class="agent-role-runtime">
           <div><dt>${escapeHtml(t("multi.analysis_mode"))}</dt><dd>${escapeHtml(analysisMode)}</dd></div>
           <div><dt>${escapeHtml(t("multi.model"))}</dt><dd>${escapeHtml(modelName || "—")}</dd></div>
           <div><dt>${escapeHtml(t("multi.llm_latency"))}</dt><dd>${llmDuration === null ? "—" : escapeHtml(formatLatency(llmDuration))}</dd></div>
+          <div><dt>${escapeHtml(t("multi.fallback"))}</dt><dd>${escapeHtml(llmFallback ? t("common.yes") : t("common.no"))}</dd></div>
         </dl>
-        ${step?.output ? `<details><summary>${escapeHtml(t("multi.step_output"))}</summary><p>${escapeHtml(truncateText(step.output, 420))}</p></details>` : ""}
+        ${output ? `<details class="agent-output-details"><summary><span>${escapeHtml(t("multi.step_output"))}</span><span class="when-closed">${escapeHtml(t("multi.expand"))}</span><span class="when-open">${escapeHtml(t("multi.collapse"))}</span></summary><p>${escapeHtml(output)}</p></details>` : ""}
       </article>`;
   }).join("");
 }
@@ -1136,15 +1152,17 @@ function renderToolRuns(toolRuns) {
     byId("tool-runs").innerHTML = `<div class="empty-state compact"><p>${escapeHtml(t("evidence.no_tools"))}</p></div>`;
   } else {
     byId("tool-runs").innerHTML = `
+      <div class="inline-note warning-note tool-fallback-note">${escapeHtml(t("tool.degraded_explanation"))}</div>
       <table>
         <thead><tr><th>${escapeHtml(t("dynamic.tool"))}</th><th>${escapeHtml(t("common.status"))}</th><th>${escapeHtml(t("dynamic.latency"))}</th><th>${escapeHtml(t("common.evidence"))}</th><th>${escapeHtml(t("dynamic.fallback_error"))}</th></tr></thead>
         <tbody>${runs.map((run) => {
           const failed = run?.success === false;
-          const fallback = Number(run?.warning_count || 0) > 0;
-          const status = failed ? t("common.failed") : fallback ? t("stream.fallback") : t("dynamic.success");
+          const fallback = toolRunUsedFallback(run) || Number(run?.warning_count || 0) > 0;
+          const status = failed ? t("tool.status_failed") :
+            fallback ? t("tool.status_degraded") : t("tool.status_success");
           const tone = failed ? "danger" : fallback ? "warning" : "success";
           const detail = run?.error_code || (fallback ? t("dynamic.warning_count", {
-            count: run.warning_count,
+            count: run.warning_count ?? 0,
           }) : "—");
           return `<tr>
             <td><strong>${escapeHtml(run?.tool || t("common.unknown"))}</strong></td>
@@ -1392,12 +1410,17 @@ function renderMemoryContext(response) {
   });
   const sessionAvailable = metadata.session_memory_available;
   const longTermAvailable = metadata.long_term_memory_available;
+  const longTermCount = safeNumber(metadata.long_term_memory_count) ?? memoryEvidence.length;
+  const memoryMatchMessage = longTermCount > 0 ?
+    t("memory.long_term_loaded", { count: longTermCount }) :
+    t("memory.no_long_term_match");
   byId("memory-context").className = "";
   byId("memory-context").innerHTML = `
     <div class="memory-status-grid">
       <article><span>${escapeHtml(t("dynamic.session_memory"))}</span><strong>${availabilityLabel(sessionAvailable)}</strong></article>
       <article><span>${escapeHtml(t("dynamic.long_term_memory"))}</span><strong>${availabilityLabel(longTermAvailable)}</strong></article>
     </div>
+    <div class="inline-note ${longTermCount > 0 ? "success-note" : "info-note"}">${escapeHtml(memoryMatchMessage)}</div>
     ${memoryEvidence.length
       ? memoryEvidence.map((item) => `<div class="evidence-row"><p>${escapeHtml(item?.content || t("dynamic.memory_unavailable"))}</p><div class="evidence-meta"><span>${escapeHtml(item?.id || "memory")}</span></div></div>`).join("")
       : `<div class="inline-note">${escapeHtml(t("dynamic.no_memory_evidence"))}</div>`}
@@ -1482,22 +1505,88 @@ function renderHistory(response) {
       `<div class="empty-state compact"><p>${escapeHtml(t("dynamic.no_recent_messages"))}</p></div>`;
     return;
   }
-  byId("history-messages").innerHTML = messages.map((message) => {
-    const role = safeText(message?.role).toLowerCase() || "unknown";
-    const roleClass = role === "user" ? "user" : role === "assistant" ? "assistant" : "system";
-    return `<article class="history-message ${roleClass}">
+  const exchanges = buildHistoryExchanges(messages);
+  byId("history-messages").innerHTML = exchanges.map((exchange) => `
+    <article class="history-exchange">
       <div class="history-message-head">
-        <strong>${escapeHtml(role)}</strong>
-        <time>${escapeHtml(formatHistoryTime(message?.created_at))}</time>
+        <strong>${escapeHtml(t("history.conversation"))}</strong>
+        <time>${escapeHtml(formatHistoryTime(exchange.created_at))}</time>
       </div>
-      <p>${escapeHtml(message?.content || t("dynamic.message_unavailable"))}</p>
-      ${message?.metadata ? `
+      <dl class="history-exchange-body">
+        <div>
+          <dt>${escapeHtml(t("history.user_message"))}</dt>
+          <dd>${escapeHtml(exchange.user || t("dynamic.message_unavailable"))}</dd>
+        </div>
+        <div>
+          <dt>${escapeHtml(t("history.assistant_summary"))}</dt>
+          <dd>${escapeHtml(truncateText(exchange.assistant || t("dynamic.message_unavailable"), 360))}</dd>
+        </div>
+        <div>
+          <dt>request_id</dt>
+          <dd><code>${escapeHtml(exchange.request_id || "—")}</code></dd>
+        </div>
+      </dl>
+      ${exchange.metadata ? `
         <details>
           <summary>${escapeHtml(t("dynamic.message_metadata"))}</summary>
-          <pre>${escapeHtml(safeJson(message.metadata))}</pre>
+          <pre>${escapeHtml(safeJson(exchange.metadata))}</pre>
         </details>` : ""}
-    </article>`;
-  }).join("");
+    </article>`).join("");
+}
+
+function buildHistoryExchanges(messages) {
+  const chronological = [...messages].sort((a, b) => {
+    const at = parseHistoryDate(a?.created_at);
+    const bt = parseHistoryDate(b?.created_at);
+    if (at !== null && bt !== null && at !== bt) return at - bt;
+    return 0;
+  });
+  const exchanges = [];
+  let pendingUser = null;
+  chronological.forEach((message) => {
+    const role = safeText(message?.role).toLowerCase();
+    if (role === "user") {
+      pendingUser = message;
+      return;
+    }
+    if (role === "assistant") {
+      exchanges.push({
+        user: pendingUser?.content || "",
+        assistant: message?.content || "",
+        created_at: message?.created_at || pendingUser?.created_at || "",
+        request_id: message?.request_id || pendingUser?.request_id || "",
+        metadata: message?.metadata || pendingUser?.metadata,
+      });
+      pendingUser = null;
+      return;
+    }
+    exchanges.push({
+      user: role || t("common.unknown"),
+      assistant: message?.content || "",
+      created_at: message?.created_at || "",
+      request_id: message?.request_id || "",
+      metadata: message?.metadata,
+    });
+  });
+  if (pendingUser) {
+    exchanges.push({
+      user: pendingUser.content || "",
+      assistant: "",
+      created_at: pendingUser.created_at || "",
+      request_id: pendingUser.request_id || "",
+      metadata: pendingUser.metadata,
+    });
+  }
+  const hasTimestamp = exchanges.some((exchange) => parseHistoryDate(exchange.created_at) !== null);
+  return hasTimestamp ? exchanges.sort((a, b) =>
+    (parseHistoryDate(b.created_at) ?? 0) - (parseHistoryDate(a.created_at) ?? 0)) :
+    exchanges.reverse();
+}
+
+function parseHistoryDate(value) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time;
 }
 
 function renderHistoryError(message) {
@@ -1581,20 +1670,44 @@ async function runEval() {
       method: "POST",
       body: JSON.stringify({ case_type: caseType, limit }),
     });
+    let resultDetails = [];
+    if (result?.run_id) {
+      try {
+        const details = await apiFetch(`/api/v1/eval/runs/${encodeURIComponent(result.run_id)}/results`);
+        resultDetails = safeArray(details?.results);
+      } catch {
+        resultDetails = [];
+      }
+    }
     byId("eval-result").className = "";
-    byId("eval-result").innerHTML = `
+    const total = Number(result?.total ?? 0);
+    const failedReasons = resultDetails.flatMap((item) => safeArray(item?.failure_reasons))
+      .filter(Boolean);
+    byId("eval-result").innerHTML = total === 0 ? `
+      <div class="empty-state compact"><p>${escapeHtml(t("eval.no_cases"))}</p></div>
+      <div class="inline-note">${escapeHtml(t("dynamic.run_id"))}: ${escapeHtml(result?.run_id || t("dynamic.not_returned"))}</div>` : `
       <div class="memory-status-grid">
         <article><span>${escapeHtml(t("common.total"))}</span><strong>${escapeHtml(String(result?.total ?? 0))}</strong></article>
         <article><span>${escapeHtml(t("common.passed"))}</span><strong>${escapeHtml(String(result?.passed ?? 0))}</strong></article>
         <article><span>${escapeHtml(t("common.failed"))}</span><strong>${escapeHtml(String(result?.failed ?? 0))}</strong></article>
         <article><span>${escapeHtml(t("common.status"))}</span><strong>${escapeHtml(result?.status || t("common.unknown"))}</strong></article>
       </div>
-      <div class="inline-note">${escapeHtml(t("dynamic.run_id"))}: ${escapeHtml(result?.run_id || t("dynamic.not_returned"))}</div>`;
+      <div class="inline-note">${escapeHtml(t("eval.major_failure_reasons"))}: ${escapeHtml(failedReasons.slice(0, 4).join(" · ") || "—")}</div>
+      <div class="inline-note">${escapeHtml(t("dynamic.run_id"))}: ${escapeHtml(result?.run_id || t("dynamic.not_returned"))}</div>
+      ${resultDetails.length ? `<div class="eval-case-list">${resultDetails.map((item) => `
+        <article class="eval-case-row ${item?.passed ? "passed" : "failed"}">
+          <div><b>${escapeHtml(item?.case_id || t("common.unknown"))}</b><span>${escapeHtml(item?.passed ? t("common.passed") : t("common.failed"))}</span></div>
+          <p>${escapeHtml(safeArray(item?.failure_reasons).join(" · ") || t("eval.no_failure_reasons"))}</p>
+          <small>request_id: ${escapeHtml(item?.request_id || "—")} · trace_id: ${escapeHtml(item?.trace_id || "—")}</small>
+        </article>`).join("")}</div>` : ""}`;
     renderToast(t("dynamic.eval_completed"), "success");
   } catch (error) {
+    const message = String(error.message || "");
+    const hint = message.includes("503") ?
+      t("eval.mysql_unavailable") : t("dynamic.eval_unavailable", { message });
     byId("eval-result").innerHTML = polishedEmpty(t("dynamic.eval_unavailable", {
       message: error.message,
-    }));
+    })) + `<div class="inline-note danger-note">${escapeHtml(hint)}</div>`;
     renderToast(error.message, "error");
   } finally {
     setLoading(button, false, t("eval.run"));

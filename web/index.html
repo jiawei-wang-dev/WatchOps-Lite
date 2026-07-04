@@ -356,6 +356,9 @@
                 <h4 data-i18n="memory.empty_title">请先发起一次对话诊断</h4>
                 <p data-i18n="memory.empty_body">可用时，这里将显示会话记忆和长期记忆状态。</p>
               </div>
+              <div class="inline-note info-note" data-i18n="memory.mysql_explanation">
+                Redis 用于当前会话短期上下文；MySQL 用于保存用户确认过的长期经验、反馈案例和评测案例。普通提问不会每次都命中 MySQL，只有当问题与已保存长期记忆相似时才会作为上下文加载。
+              </div>
             </div>
           </div>
           <div class="card history-card">
@@ -436,9 +439,12 @@
                   <input id="eval-limit" type="number" min="1" max="20" value="5">
                 </label>
               </div>
-              <button id="run-eval" class="button secondary" type="button">
+            <button id="run-eval" class="button secondary" type="button">
                 <span class="button-label" data-i18n="eval.run">运行评测</span>
               </button>
+              <div class="inline-note info-note" data-i18n="eval.usage_note">
+                规则评测会从 MySQL 中读取已保存的反馈案例或 bad cases，并检查回答是否包含结论、证据、建议、局限性和 evidence_id。请先在一次 Chat 后提交反馈，再运行评测。
+              </div>
               <div id="eval-result" class="empty-state compact">
                 <p data-i18n="eval.empty">评测摘要将在这里显示；MySQL 必须可用。</p>
               </div>
