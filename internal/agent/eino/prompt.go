@@ -58,8 +58,17 @@ Available diagnostic skills:
 User profile context:
 {{.user_profile_context}}
 
-Preloaded knowledge:
+Pre-retrieved relevant knowledge:
 {{.retrieved_knowledge}}
+
+Pre-RAG metadata:
+{{.pre_rag_metadata}}
+
+Pre-RAG instructions:
+- Treat the pre-retrieved chunks as initial context, not final proof.
+- If logs, metrics, traces, or new clues suggest a different path, call search_knowledge again for second-pass RAG.
+- Prefer citing chunk IDs or evidence IDs when knowledge supports a recommendation.
+- If Pre-RAG is unavailable or insufficient, state that as a limitation instead of inventing context.
 
 Current message:
 {{.current_message}}
@@ -140,6 +149,11 @@ func (b *PromptBuilder) Build(ctx context.Context, input AgentInput) ([]*schema.
 		observability.MarkError(span, "Agent prompt rendering failed")
 		return nil, fmt.Errorf("encode retrieved knowledge: %w", err)
 	}
+	preRAGMetadata, err := json.Marshal(input.PreRAGMetadata)
+	if err != nil {
+		observability.MarkError(span, "Agent prompt rendering failed")
+		return nil, fmt.Errorf("encode pre-rag metadata: %w", err)
+	}
 	messages, err := b.template.Format(ctx, map[string]any{
 		"prompt_version":               b.version,
 		"session_summary":              string(summary),
@@ -148,6 +162,7 @@ func (b *PromptBuilder) Build(ctx context.Context, input AgentInput) ([]*schema.
 		"diagnostic_skills":            string(diagnosticSkills),
 		"user_profile_context":         string(userProfileContext),
 		"retrieved_knowledge":          string(retrievedKnowledge),
+		"pre_rag_metadata":             string(preRAGMetadata),
 		"current_message":              input.CurrentMessage,
 		"time_from":                    input.TimeContext.From,
 		"time_to":                      input.TimeContext.To,

@@ -74,6 +74,19 @@ func (a *KnowledgeAgent) Analyze(
 		Metadata:    map[string]any{},
 	}
 	summaries := []string{}
+	roleRAGChunks := plan.RoleRAG.ChunksByRole[AgentRoleKnowledge]
+	if len(roleRAGChunks) > 0 {
+		roleEvidence := roleRAGChunksAsEvidence(roleRAGChunks)
+		finding.Evidence = append(finding.Evidence, roleEvidence...)
+		for _, item := range roleEvidence {
+			finding.EvidenceIDs = append(finding.EvidenceIDs, item.ID)
+		}
+		summaries = append(
+			summaries,
+			"pre-rag: "+boundedSummary(roleRAGChunks[0].Content, 260),
+		)
+		finding.Metadata["role_rag_chunk_count"] = len(roleRAGChunks)
+	}
 	if planIncludesSource(plan, "knowledge") {
 		result, run, limitation := a.invokeKnowledge(ctx, plan)
 		finding.ToolRuns = append(finding.ToolRuns, run)

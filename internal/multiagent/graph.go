@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -17,6 +18,7 @@ import (
 const (
 	graphName          = "watchops_multi_agent"
 	nodeNormalizeInput = "normalize_multi_agent_input"
+	nodeRoleRAG        = "role_aware_rag"
 	nodeTriage         = "triage_agent"
 	nodeEvidence       = "evidence_agent"
 	nodeKnowledge      = "knowledge_agent"
@@ -70,6 +72,7 @@ type Orchestrator struct {
 	evidence  FindingAnalyzer
 	knowledge FindingAnalyzer
 	synthesis Synthesizer
+	retriever RoleAwareRetriever
 	graph     graphRunner
 	graphErr  error
 	now       func() time.Time
@@ -77,6 +80,11 @@ type Orchestrator struct {
 
 type normalizedInput struct {
 	Input Input
+}
+
+type roleRAGOutput struct {
+	Input   Input
+	Context RoleRAGContext
 }
 
 type triageOutput struct {
@@ -126,6 +134,11 @@ func NewOrchestrator(
 	return orchestrator
 }
 
+func (o *Orchestrator) WithRoleAwareRAG(retriever RoleAwareRetriever) *Orchestrator {
+	o.retriever = retriever
+	return o
+}
+
 func (o *Orchestrator) Execute(
 	ctx context.Context,
 	input Input,
@@ -163,6 +176,10 @@ func compileGraph(
 		{
 			key:  nodeNormalizeInput,
 			node: compose.InvokableLambda(orchestrator.normalizeInput),
+		},
+		{
+			key:  nodeRoleRAG,
+			node: compose.InvokableLambda(orchestrator.buildGlobalPreRAGContext),
 		},
 		{
 			key:  nodeTriage,
@@ -211,7 +228,8 @@ func compileGraph(
 
 	edges := [][2]string{
 		{compose.START, nodeNormalizeInput},
-		{nodeNormalizeInput, nodeTriage},
+		{nodeNormalizeInput, nodeRoleRAG},
+		{nodeRoleRAG, nodeTriage},
 		{nodeTriage, nodeEvidence},
 		{nodeTriage, nodeKnowledge},
 		{nodeEvidence, nodeMergeFindings},
@@ -266,19 +284,87 @@ func (o *Orchestrator) normalizeInput(
 	return normalizedInput{Input: input}, nil
 }
 
-func (o *Orchestrator) runTriage(
+func (o *Orchestrator) buildGlobalPreRAGContext(
 	ctx context.Context,
 	input normalizedInput,
+) (roleRAGOutput, error) {
+	agenteino.EmitStreamEvent(ctx, "role_rag_started", map[string]any{
+		"agent_role": "global",
+	})
+	ctx, span := observability.StartSpan(
+		ctx,
+		"multiagent.role_rag",
+		attribute.String("agent.role", "global"),
+		attribute.Int("query_length", len(input.Input.Message)),
+	)
+	defer span.End()
+	if o.retriever == nil {
+		context := RoleRAGContext{Metadata: map[string]any{
+			"role_rag_used": false,
+			"reason":        "knowledge_retriever_unavailable",
+		}}
+		agenteino.EmitStreamEvent(ctx, "role_rag_failed", map[string]any{
+			"agent_role": "global",
+			"error_code": "ROLE_RAG_UNAVAILABLE",
+		})
+		return roleRAGOutput{Input: input.Input, Context: context}, nil
+	}
+	result, err := o.retriever.HybridRetrieve(
+		ctx,
+		retrievalknowledge.RetrievalRequest{
+			Query: input.Input.Message,
+			TopK:  8,
+		},
+	)
+	if err != nil {
+		observability.MarkError(span, "multi-agent role-aware rag failed")
+		context := RoleRAGContext{Metadata: map[string]any{
+			"role_rag_used": false,
+			"reason":        "hybrid_retrieve_failed",
+		}}
+		agenteino.EmitStreamEvent(ctx, "role_rag_failed", map[string]any{
+			"agent_role": "global",
+			"error_code": "ROLE_RAG_UNAVAILABLE",
+		})
+		return roleRAGOutput{Input: input.Input, Context: context}, nil
+	}
+	context := buildRoleAwareRAGContext(result)
+	context.Metadata["role_rag_used"] = len(result.Chunks) > 0
+	span.SetAttributes(
+		attribute.Bool("role_rag_used", len(result.Chunks) > 0),
+		attribute.Int("role_rag_chunk_count", len(result.Chunks)),
+	)
+	agenteino.EmitStreamEvent(ctx, "role_rag_completed", map[string]any{
+		"agent_role":  "global",
+		"chunk_count": len(result.Chunks),
+		"metadata":    context.Metadata,
+	})
+	return roleRAGOutput{Input: input.Input, Context: context}, nil
+}
+
+func (o *Orchestrator) runTriage(
+	ctx context.Context,
+	input roleRAGOutput,
 ) (triageOutput, error) {
 	started := o.now()
 	ctx, span := observability.StartSpan(ctx, "multiagent.triage")
 	defer span.End()
 	emitAgentStepEvent(ctx, "agent_step_started", AgentRoleTriage, "", 0, 0)
-	plan, err := o.triage.Plan(ctx, input.Input)
+	triageInput := input.Input
+	triageInput.Metadata = cloneMetadata(triageInput.Metadata)
+	triageInput.Metadata["role_rag_context"] = map[string]any{
+		"triage":            roleRAGPromptChunks(input.Context.ChunksByRole[AgentRoleTriage]),
+		"synthesis_summary": input.Context.SynthesisSummary,
+		"metadata":          input.Context.Metadata,
+	}
+	plan, err := o.triage.Plan(ctx, triageInput)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
 		return triageOutput{}, err
 	}
+	plan.RoleRAG = input.Context
+	plan.Metadata = cloneMetadata(plan.Metadata)
+	plan.Metadata["role_rag"] = input.Context.Metadata
 	span.SetAttributes(
 		attribute.String("agent.role", string(AgentRoleTriage)),
 		attribute.String("agent.mode", metadataString(plan.Metadata, "triage_mode")),
@@ -583,6 +669,8 @@ func (o *Orchestrator) buildResponse(
 		"multi_agent_llm_used":       len(llmRoles) > 0,
 		"multi_agent_llm_roles":      llmRoles,
 		"multi_agent_llm_call_count": llmCallCount,
+		"role_rag":                   input.Merged.Triage.Plan.RoleRAG.Metadata,
+		"role_rag_chunk_count":       roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
 	}
 	copyRoleLLMMetadata(metadata, triageMetadata, "triage")
 	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
@@ -645,6 +733,14 @@ func metadataBool(metadata map[string]any, key string) bool {
 func metadataString(metadata map[string]any, key string) string {
 	value, _ := metadata[key].(string)
 	return value
+}
+
+func roleRAGChunkCount(context RoleRAGContext) int {
+	total := 0
+	for _, chunks := range context.ChunksByRole {
+		total += len(chunks)
+	}
+	return total
 }
 
 func cloneMetadata(metadata map[string]any) map[string]any {

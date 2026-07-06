@@ -13,6 +13,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -44,6 +45,18 @@ type fakeSessionStore struct {
 	appended        []session.Message
 	updatedSummary  session.Summary
 	expectedVersion int64
+}
+
+type fakeKnowledgeRetriever struct {
+	result retrievalknowledge.RetrievalResult
+	err    error
+}
+
+func (f fakeKnowledgeRetriever) HybridRetrieve(
+	context.Context,
+	retrievalknowledge.RetrievalRequest,
+) (retrievalknowledge.RetrievalResult, error) {
+	return f.result, f.err
 }
 
 func (f *fakeSessionStore) AppendMessage(
@@ -125,6 +138,66 @@ func TestServicePreservesIDsAndAppendsMessages(t *testing.T) {
 	}
 }
 
+func TestPreRAGNodeInjectsRetrievedKnowledgeIntoAgentInput(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize: 12,
+			SummaryThreshold: 12,
+			KnowledgeRetriever: fakeKnowledgeRetriever{result: retrievalknowledge.RetrievalResult{
+				Chunks: []retrievalknowledge.RetrievedKnowledge{{
+					ID: "chunk-1", ChunkID: "chunk-1", DocumentID: "doc-1",
+					Title: "Checkout runbook", Source: "runbook",
+					Content:         "Inspect payment timeout and retry amplification.",
+					RetrievalMethod: "hybrid", Score: 0.9,
+				}},
+				Metadata: map[string]any{"retrieval_mode": "hybrid"},
+			}},
+			PreRAGTopK: 3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(runner.lastInput.PreRetrievedKnowledge) != 1 ||
+		len(runner.lastInput.RetrievedKnowledge) != 1 ||
+		result.Agent.Metadata["pre_rag_used"] != true {
+		t.Fatalf("pre-rag input=%#v metadata=%#v", runner.lastInput, result.Agent.Metadata)
+	}
+}
+
+func TestPreRAGNodeDoesNotFailChat(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			KnowledgeRetriever: fakeKnowledgeRetriever{err: errors.New("elasticsearch down")},
+			PreRAGTopK:         3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Agent.Metadata["pre_rag_used"] != false ||
+		len(result.Agent.Limitations) == 0 ||
+		result.Agent.Limitations[0].Code != "PRE_RAG_UNAVAILABLE" {
+		t.Fatalf("result = %#v", result.Agent)
+	}
+}
+
 func TestServiceReturnsActiveTraceID(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
@@ -163,6 +236,7 @@ func TestServiceReturnsActiveTraceID(t *testing.T) {
 		"graph.load_long_term_memory",
 		"graph.load_user_profile",
 		"graph.prepare_diagnostic_skills",
+		"chat.pre_rag",
 		"graph.merge_context",
 		"graph.render_prompt_template",
 		"graph.run_react_agent",

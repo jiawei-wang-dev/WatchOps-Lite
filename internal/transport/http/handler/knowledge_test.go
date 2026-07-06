@@ -15,7 +15,7 @@ import (
 
 type knowledgeExecutorStub struct {
 	ingestResult retrievalknowledge.IngestResult
-	results      []retrievalknowledge.SearchResult
+	result       retrievalknowledge.RetrievalResult
 	info         retrievalknowledge.DocumentInfo
 	err          error
 }
@@ -23,8 +23,8 @@ type knowledgeExecutorStub struct {
 func (s knowledgeExecutorStub) Ingest(context.Context, retrievalknowledge.Document) (retrievalknowledge.IngestResult, error) {
 	return s.ingestResult, s.err
 }
-func (s knowledgeExecutorStub) Search(context.Context, retrievalknowledge.SearchQuery) ([]retrievalknowledge.SearchResult, error) {
-	return s.results, s.err
+func (s knowledgeExecutorStub) HybridRetrieve(context.Context, retrievalknowledge.RetrievalRequest) (retrievalknowledge.RetrievalResult, error) {
+	return s.result, s.err
 }
 func (s knowledgeExecutorStub) GetDocument(context.Context, string) (retrievalknowledge.DocumentInfo, error) {
 	return s.info, s.err

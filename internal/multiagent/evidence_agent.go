@@ -71,6 +71,13 @@ func (a *EvidenceAgent) Analyze(
 	}
 	executedSources := []string{}
 	summaries := []string{}
+	if chunks := plan.RoleRAG.ChunksByRole[AgentRoleEvidence]; len(chunks) > 0 {
+		finding.Metadata["role_rag_chunk_count"] = len(chunks)
+		summaries = append(
+			summaries,
+			"pre-rag: "+boundedSummary(chunks[0].Content, 180),
+		)
+	}
 	for _, source := range plan.EvidencePlan {
 		toolName, observationSource := evidenceToolBySource[source]
 		if !observationSource {

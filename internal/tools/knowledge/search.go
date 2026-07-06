@@ -13,7 +13,7 @@ import (
 )
 
 type Searcher interface {
-	Search(context.Context, retrievalknowledge.SearchQuery) ([]retrievalknowledge.SearchResult, error)
+	HybridRetrieve(context.Context, retrievalknowledge.RetrievalRequest) (retrievalknowledge.RetrievalResult, error)
 }
 
 type SearchTool struct {
@@ -66,9 +66,9 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 	if t.searcher == nil {
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
-	results, err := t.searcher.Search(ctx, retrievalknowledge.SearchQuery{
+	result, err := t.searcher.HybridRetrieve(ctx, retrievalknowledge.RetrievalRequest{
 		Query:   input.Query,
-		Limit:   input.TopK,
+		TopK:    input.TopK,
 		Filters: filters,
 	})
 	if err != nil {
@@ -78,47 +78,47 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 		return toolruntime.Result{}, dependencyUnavailable()
 	}
 
-	evidenceItems := make([]evidence.Item, 0, len(results))
+	evidenceItems := make([]evidence.Item, 0, len(result.Chunks))
 	warnings := []toolruntime.Warning{}
-	retrievalMode := "bm25"
-	vectorFallback := false
+	retrievalMode := metadataString(result.Metadata, "retrieval_mode", "bm25")
+	vectorFallback := metadataBool(result.Metadata, "fallback_to_bm25")
 	rerankProvider := ""
 	rerankFallbackReason := ""
-	for _, result := range results {
-		if result.RetrievalMode != "" {
-			retrievalMode = result.RetrievalMode
+	for _, chunk := range result.Chunks {
+		if chunk.RetrievalMethod != "" {
+			retrievalMode = chunk.RetrievalMethod
 		}
-		if fallback, _ := result.Metadata["vector_fallback"].(bool); fallback {
+		if fallback, _ := chunk.Metadata["vector_fallback"].(bool); fallback {
 			vectorFallback = true
 		}
-		if provider, _ := result.Metadata["rerank_provider"].(string); provider != "" {
+		if provider, _ := chunk.Metadata["rerank_provider"].(string); provider != "" {
 			rerankProvider = provider
 		}
-		if reason, _ := result.Metadata["rerank_fallback_reason"].(string); reason != "" {
+		if reason, _ := chunk.Metadata["rerank_fallback_reason"].(string); reason != "" {
 			rerankFallbackReason = reason
 		}
-		score := result.Score
+		score := chunk.Score
 		evidenceItems = append(evidenceItems, evidence.Item{
-			ID:         result.ChunkID,
+			ID:         chunk.ID,
 			Type:       evidence.TypeKnowledgeChunk,
 			Source:     evidence.SourceKnowledge,
-			SourceName: result.Source,
-			Content:    result.Content,
-			ResourceID: result.DocumentID,
+			SourceName: chunk.Source,
+			Content:    chunk.Content,
+			ResourceID: chunk.DocumentID,
 			Score:      &score,
 			Metadata: map[string]any{
-				"title":                  result.Title,
-				"chunk_id":               result.ChunkID,
-				"document_id":            result.DocumentID,
-				"retrieval_mode":         result.RetrievalMode,
-				"bm25_score":             result.BM25Score,
-				"vector_score":           result.VectorScore,
-				"rrf_score":              result.RRFScore,
-				"rerank_provider":        result.Metadata["rerank_provider"],
-				"rerank_score":           result.Metadata["rerank_score"],
-				"rerank_reason":          result.Metadata["rerank_reason"],
-				"rerank_fallback_reason": result.Metadata["rerank_fallback_reason"],
-				"metadata":               result.Metadata,
+				"title":                  chunk.Title,
+				"chunk_id":               chunk.ChunkID,
+				"document_id":            chunk.DocumentID,
+				"retrieval_mode":         chunk.RetrievalMethod,
+				"bm25_score":             chunk.BM25Score,
+				"vector_score":           chunk.VectorScore,
+				"rrf_score":              chunk.FusedScore,
+				"rerank_provider":        chunk.Metadata["rerank_provider"],
+				"rerank_score":           chunk.RerankScore,
+				"rerank_reason":          chunk.Metadata["rerank_reason"],
+				"rerank_fallback_reason": chunk.Metadata["rerank_fallback_reason"],
+				"metadata":               chunk.Metadata,
 			},
 		})
 	}
@@ -146,9 +146,22 @@ func (t *SearchTool) search(ctx context.Context, input Input) (toolruntime.Resul
 			"retrieval_mode":         retrievalMode,
 			"rerank_provider":        rerankProvider,
 			"rerank_fallback_reason": rerankFallbackReason,
+			"retrieval_metadata":     result.Metadata,
 			"fallback_used":          vectorFallback || rerankFallbackReason != "",
 		},
 	}, nil
+}
+
+func metadataString(metadata map[string]any, key string, fallback string) string {
+	if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 func dependencyUnavailable() *toolruntime.ToolError {

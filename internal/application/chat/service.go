@@ -12,6 +12,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -53,6 +54,8 @@ type ServiceConfig struct {
 	LongTermMemory     longterm.Store
 	LongTermMemoryTopK int
 	ProfileLoader      profile.Loader
+	KnowledgeRetriever KnowledgeRetriever
+	PreRAGTopK         int
 }
 
 type Service struct {
@@ -67,6 +70,12 @@ type Service struct {
 	longTermMemory     longterm.Store
 	longTermMemoryTopK int
 	profileLoader      profile.Loader
+	knowledgeRetriever KnowledgeRetriever
+	preRAGTopK         int
+}
+
+type KnowledgeRetriever interface {
+	HybridRetrieve(context.Context, retrievalknowledge.RetrievalRequest) (retrievalknowledge.RetrievalResult, error)
 }
 
 func NewService(
@@ -91,9 +100,14 @@ func NewService(
 		longTermMemory:     config.LongTermMemory,
 		longTermMemoryTopK: config.LongTermMemoryTopK,
 		profileLoader:      config.ProfileLoader,
+		knowledgeRetriever: config.KnowledgeRetriever,
+		preRAGTopK:         config.PreRAGTopK,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+	}
+	if service.preRAGTopK <= 0 {
+		service.preRAGTopK = 5
 	}
 	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
 	return service

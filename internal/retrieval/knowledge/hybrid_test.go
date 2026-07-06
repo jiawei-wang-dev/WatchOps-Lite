@@ -22,11 +22,15 @@ func (s *hybridStoreStub) SearchVector(
 	return s.vectorResults, s.vectorErr
 }
 
-func TestServiceHybridSearchFusesBM25AndVectorResults(t *testing.T) {
+func TestHybridRetrieveFusesBM25AndVectorResults(t *testing.T) {
 	provider, _ := embedding.NewDeterministic(8)
 	store := &hybridStoreStub{
 		storeStub: storeStub{results: []SearchResult{
-			{ChunkID: "shared", Score: 5, Metadata: map[string]any{}},
+			{
+				ChunkID: "shared", DocumentID: "doc-1", Title: "Checkout runbook",
+				Content: "Inspect checkout timeout.", Source: "runbook",
+				Score: 5, Metadata: map[string]any{"category": "runbook"},
+			},
 			{ChunkID: "bm25", Score: 4, Metadata: map[string]any{}},
 		}},
 		vectorResults: []SearchResult{
@@ -47,22 +51,25 @@ func TestServiceHybridSearchFusesBM25AndVectorResults(t *testing.T) {
 		t.Fatalf("NewServiceWithConfig() error = %v", err)
 	}
 
-	results, err := service.Search(context.Background(), SearchQuery{Query: "checkout", Limit: 3})
+	result, err := service.HybridRetrieve(context.Background(), RetrievalRequest{
+		Query: "checkout timeout",
+		TopK:  3,
+	})
 	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+		t.Fatalf("HybridRetrieve() error = %v", err)
 	}
-	if len(results) != 3 ||
-		results[0].ChunkID != "shared" ||
-		results[0].RetrievalMode != "hybrid" ||
-		results[0].RRFScore == nil {
-		t.Fatalf("results = %#v", results)
+	if len(result.Chunks) != 3 ||
+		result.Chunks[0].ChunkID != "shared" ||
+		result.Chunks[0].FusedScore == 0 ||
+		result.Metadata["retrieval_mode"] != "hybrid" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestServiceHybridSearchFallsBackToBM25(t *testing.T) {
+func TestHybridRetrieveFallbackToBM25(t *testing.T) {
 	store := &hybridStoreStub{
 		storeStub: storeStub{results: []SearchResult{{
-			ChunkID: "bm25", Score: 4, Metadata: map[string]any{},
+			ChunkID: "bm25", DocumentID: "doc-bm25", Score: 4, Metadata: map[string]any{},
 		}}},
 		vectorErr: errors.New("vector unavailable"),
 	}
@@ -79,14 +86,17 @@ func TestServiceHybridSearchFallsBackToBM25(t *testing.T) {
 		t.Fatalf("NewServiceWithConfig() error = %v", err)
 	}
 
-	results, err := service.Search(context.Background(), SearchQuery{Query: "checkout"})
+	result, err := service.HybridRetrieve(context.Background(), RetrievalRequest{
+		Query: "checkout",
+		TopK:  3,
+	})
 	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+		t.Fatalf("HybridRetrieve() error = %v", err)
 	}
-	if len(results) != 1 ||
-		results[0].RetrievalMode != "bm25" ||
-		results[0].Metadata["vector_fallback"] != true {
-		t.Fatalf("results = %#v", results)
+	if len(result.Chunks) != 1 ||
+		result.Chunks[0].RetrievalMethod != "bm25" ||
+		result.Metadata["fallback_to_bm25"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -95,9 +105,9 @@ func TestServiceBM25ModeDoesNotRequireEmbedding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-	results, err := service.Search(context.Background(), SearchQuery{Query: "checkout"})
-	if err != nil || len(results) != 1 || results[0].RetrievalMode != "bm25" {
-		t.Fatalf("results=%#v error=%v", results, err)
+	result, err := service.HybridRetrieve(context.Background(), RetrievalRequest{Query: "checkout"})
+	if err != nil || len(result.Chunks) != 1 || result.Chunks[0].RetrievalMethod != "bm25" {
+		t.Fatalf("result=%#v error=%v", result, err)
 	}
 }
 
@@ -157,21 +167,21 @@ func TestServiceReranksCandidateSetBeforeFinalTopK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServiceWithReranker() error = %v", err)
 	}
-	results, err := service.Search(
+	result, err := service.HybridRetrieve(
 		context.Background(),
-		SearchQuery{Query: "checkout timeout runbook", Limit: 1},
+		RetrievalRequest{Query: "checkout timeout runbook", TopK: 1},
 	)
 	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+		t.Fatalf("HybridRetrieve() error = %v", err)
 	}
 	if store.query.Limit != 5 {
 		t.Fatalf("candidate limit = %d, want 5", store.query.Limit)
 	}
-	if len(results) != 1 ||
-		results[0].ChunkID != "checkout" ||
-		results[0].Metadata["rerank_provider"] != "rule_based" ||
-		results[0].Metadata["rerank_score"] == nil ||
-		results[0].Metadata["rerank_reason"] == nil {
-		t.Fatalf("results = %#v", results)
+	if len(result.Chunks) != 1 ||
+		result.Chunks[0].ChunkID != "checkout" ||
+		result.Chunks[0].Metadata["rerank_provider"] != "rule_based" ||
+		result.Chunks[0].Metadata["rerank_score"] == nil ||
+		result.Chunks[0].Metadata["rerank_reason"] == nil {
+		t.Fatalf("result = %#v", result)
 	}
 }

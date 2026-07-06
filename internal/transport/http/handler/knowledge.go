@@ -12,7 +12,7 @@ import (
 
 type KnowledgeExecutor interface {
 	Ingest(context.Context, retrievalknowledge.Document) (retrievalknowledge.IngestResult, error)
-	Search(context.Context, retrievalknowledge.SearchQuery) ([]retrievalknowledge.SearchResult, error)
+	HybridRetrieve(context.Context, retrievalknowledge.RetrievalRequest) (retrievalknowledge.RetrievalResult, error)
 	GetDocument(context.Context, string) (retrievalknowledge.DocumentInfo, error)
 }
 
@@ -58,28 +58,41 @@ func (h *Knowledge) Search(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_ARGUMENT", "request body is invalid", c.GetString("request_id"))
 		return
 	}
-	results, err := h.executor.Search(c.Request.Context(), retrievalknowledge.SearchQuery{
+	result, err := h.executor.HybridRetrieve(c.Request.Context(), retrievalknowledge.RetrievalRequest{
 		Query:   request.Query,
-		Limit:   request.Limit,
+		TopK:    request.Limit,
 		Filters: request.Filters,
 	})
 	if err != nil {
 		writeKnowledgeError(c, err)
 		return
 	}
-	response := dto.SearchKnowledgeResponse{Results: make([]dto.KnowledgeSearchResult, 0, len(results))}
-	for _, result := range results {
+	response := dto.SearchKnowledgeResponse{Results: make([]dto.KnowledgeSearchResult, 0, len(result.Chunks))}
+	for _, chunk := range result.Chunks {
 		response.Results = append(response.Results, dto.KnowledgeSearchResult{
-			ChunkID:    result.ChunkID,
-			DocumentID: result.DocumentID,
-			Title:      result.Title,
-			Content:    result.Content,
-			Source:     result.Source,
-			Score:      result.Score,
-			Metadata:   result.Metadata,
+			ChunkID:    chunk.ChunkID,
+			DocumentID: chunk.DocumentID,
+			Title:      chunk.Title,
+			Content:    chunk.Content,
+			Source:     chunk.Source,
+			Score:      chunk.Score,
+			Metadata:   searchMetadata(chunk),
 		})
 	}
 	c.JSON(http.StatusOK, response)
+}
+
+func searchMetadata(chunk retrievalknowledge.RetrievedKnowledge) map[string]any {
+	metadata := map[string]any{}
+	for key, value := range chunk.Metadata {
+		metadata[key] = value
+	}
+	metadata["retrieval_mode"] = chunk.RetrievalMethod
+	metadata["bm25_score"] = chunk.BM25Score
+	metadata["vector_score"] = chunk.VectorScore
+	metadata["rrf_score"] = chunk.FusedScore
+	metadata["rerank_score"] = chunk.RerankScore
+	return metadata
 }
 
 func (h *Knowledge) GetDocument(c *gin.Context) {

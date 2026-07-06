@@ -368,6 +368,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			LongTermMemory:     longTermMemoryService,
 			LongTermMemoryTopK: cfg.LongTermMemory.TopK,
 			ProfileLoader:      profileLoader,
+			KnowledgeRetriever: knowledgeService,
+			PreRAGTopK:         cfg.Knowledge.FinalTopK,
 		},
 	)
 	evidenceAgent, err := multiagent.NewEvidenceAgent(
@@ -398,13 +400,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if multiAgentLLM != nil {
 		multiAgentSynthesizer = multiagent.NewLLMSynthesizer(multiAgentLLM)
 	}
-	multiAgentService := multiagent.NewService(multiagent.NewOrchestrator(
+	multiAgentOrchestrator := multiagent.NewOrchestrator(
 		context.Background(),
 		multiagent.NewLLMTriageAgent("checkout", multiAgentLLM),
 		evidenceAgent,
 		knowledgeAgent,
 		multiagent.NewSynthesisAgent(multiAgentSynthesizer),
-	))
+	).WithRoleAwareRAG(knowledgeService)
+	multiAgentService := multiagent.NewService(multiAgentOrchestrator)
 	evalService, err := eval.NewServiceWithRunner(
 		evalStore,
 		feedbackService,

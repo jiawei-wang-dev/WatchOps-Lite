@@ -106,6 +106,7 @@ func (l *RoleLLM) planTriage(
 		"available_services":     supportedServices(),
 		"allowed_evidence_types": supportedEvidenceSources,
 		"rule_based_candidate":   boundedPlanForPrompt(rulePlan),
+		"role_rag_context":       input.Metadata["role_rag_context"],
 		"constraints": []string{
 			"Triage must not make final root-cause claims.",
 			"Triage must only produce a bounded investigation plan.",
@@ -626,6 +627,13 @@ func boundedPlanForPrompt(plan TriagePlan) map[string]any {
 		"time_context":  plan.TimeContext,
 		"language":      plan.Language,
 		"limitations":   plan.Limitations,
+		"role_rag": map[string]any{
+			"triage":            roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleTriage]),
+			"evidence":          roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleEvidence]),
+			"knowledge":         roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleKnowledge]),
+			"synthesis_summary": boundedSummary(plan.RoleRAG.SynthesisSummary, 600),
+			"metadata":          boundedPromptMetadata(plan.RoleRAG.Metadata),
+		},
 	}
 }
 
@@ -634,7 +642,8 @@ func boundedPromptMetadata(metadata map[string]any) map[string]any {
 		"timestamp": {}, "service": {}, "level": {}, "trace_id": {},
 		"span_id": {}, "chunk_id": {}, "document_id": {}, "retrieval_mode": {},
 		"bm25_score": {}, "vector_score": {}, "rrf_score": {}, "category": {},
-		"title": {},
+		"title": {}, "role_rag_used": {}, "role_rag_chunk_count": {},
+		"retrieval_latency_ms": {}, "fallback_to_bm25": {}, "vector_enabled": {},
 	}
 	result := map[string]any{}
 	for key, value := range metadata {

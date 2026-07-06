@@ -9,41 +9,45 @@ import (
 )
 
 type searcherStub struct {
-	results []retrievalknowledge.SearchResult
-	err     error
+	result retrievalknowledge.RetrievalResult
+	err    error
 }
 
 type queryCapturingSearcher struct {
-	query retrievalknowledge.SearchQuery
+	request retrievalknowledge.RetrievalRequest
 }
 
-func (s *queryCapturingSearcher) Search(
+func (s *queryCapturingSearcher) HybridRetrieve(
 	_ context.Context,
-	query retrievalknowledge.SearchQuery,
-) ([]retrievalknowledge.SearchResult, error) {
-	s.query = query
-	return []retrievalknowledge.SearchResult{{
-		ChunkID:       "checkout_runbook_zh_chunk_0000",
-		DocumentID:    "checkout_runbook_zh",
-		Title:         "Checkout 服务高错误率排障 Runbook",
-		Content:       "检查 payment 支付依赖延迟、超时和重试放大。",
-		Source:        "watchops-lite-demo",
-		Score:         4.2,
-		RetrievalMode: "bm25",
-	}}, nil
+	request retrievalknowledge.RetrievalRequest,
+) (retrievalknowledge.RetrievalResult, error) {
+	s.request = request
+	return retrievalknowledge.RetrievalResult{Chunks: []retrievalknowledge.RetrievedKnowledge{{
+		ID:              "checkout_runbook_zh_chunk_0000",
+		ChunkID:         "checkout_runbook_zh_chunk_0000",
+		DocumentID:      "checkout_runbook_zh",
+		Title:           "Checkout 服务高错误率排障 Runbook",
+		Content:         "检查 payment 支付依赖延迟、超时和重试放大。",
+		Source:          "watchops-lite-demo",
+		Score:           4.2,
+		RetrievalMethod: "bm25",
+	}}, Metadata: map[string]any{"retrieval_mode": "bm25"}}, nil
 }
 
-func (s searcherStub) Search(context.Context, retrievalknowledge.SearchQuery) ([]retrievalknowledge.SearchResult, error) {
-	return s.results, s.err
+func (s searcherStub) HybridRetrieve(context.Context, retrievalknowledge.RetrievalRequest) (retrievalknowledge.RetrievalResult, error) {
+	return s.result, s.err
 }
 
 func TestSearchToolReturnsElasticsearchEvidence(t *testing.T) {
-	bm25Score := 3.2
-	tool := NewSearchTool(searcherStub{results: []retrievalknowledge.SearchResult{{
-		ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
-		Content: "Inspect saturation.", Source: "manual", Score: 3.2,
-		RetrievalMode: "bm25", BM25Score: &bm25Score,
-	}}}, 0)
+	tool := NewSearchTool(searcherStub{result: retrievalknowledge.RetrievalResult{
+		Chunks: []retrievalknowledge.RetrievedKnowledge{{
+			ID:      "chunk_1",
+			ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
+			Content: "Inspect saturation.", Source: "manual", Score: 3.2,
+			RetrievalMethod: "bm25", BM25Score: 3.2,
+		}},
+		Metadata: map[string]any{"retrieval_mode": "bm25"},
+	}}, 0)
 
 	result, err := tool.Execute(context.Background(), Input{Query: "latency", TopK: 3})
 	if err != nil {
@@ -59,12 +63,16 @@ func TestSearchToolReturnsElasticsearchEvidence(t *testing.T) {
 }
 
 func TestSearchToolReportsVectorFallback(t *testing.T) {
-	tool := NewSearchTool(searcherStub{results: []retrievalknowledge.SearchResult{{
-		ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
-		Content: "Inspect saturation.", Source: "manual", Score: 3.2,
-		RetrievalMode: "bm25",
-		Metadata:      map[string]any{"vector_fallback": true},
-	}}}, 0)
+	tool := NewSearchTool(searcherStub{result: retrievalknowledge.RetrievalResult{
+		Chunks: []retrievalknowledge.RetrievedKnowledge{{
+			ID:      "chunk_1",
+			ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
+			Content: "Inspect saturation.", Source: "manual", Score: 3.2,
+			RetrievalMethod: "bm25",
+			Metadata:        map[string]any{"vector_fallback": true},
+		}},
+		Metadata: map[string]any{"fallback_to_bm25": true, "retrieval_mode": "hybrid"},
+	}}, 0)
 
 	result, err := tool.Execute(context.Background(), Input{Query: "latency", TopK: 3})
 	if err != nil {
@@ -78,17 +86,21 @@ func TestSearchToolReportsVectorFallback(t *testing.T) {
 }
 
 func TestSearchToolMapsRerankMetadataAndFallback(t *testing.T) {
-	tool := NewSearchTool(searcherStub{results: []retrievalknowledge.SearchResult{{
-		ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
-		Content: "Inspect saturation.", Source: "manual", Score: 4.5,
-		RetrievalMode: "bm25",
-		Metadata: map[string]any{
-			"rerank_provider":        "rule_based",
-			"rerank_score":           4.5,
-			"rerank_reason":          "title_overlap",
-			"rerank_fallback_reason": "external_unavailable",
-		},
-	}}}, 0)
+	tool := NewSearchTool(searcherStub{result: retrievalknowledge.RetrievalResult{
+		Chunks: []retrievalknowledge.RetrievedKnowledge{{
+			ID:      "chunk_1",
+			ChunkID: "chunk_1", DocumentID: "doc_1", Title: "Runbook",
+			Content: "Inspect saturation.", Source: "manual", Score: 4.5,
+			RetrievalMethod: "bm25",
+			RerankScore:     4.5,
+			Metadata: map[string]any{
+				"rerank_provider":        "rule_based",
+				"rerank_reason":          "title_overlap",
+				"rerank_fallback_reason": "external_unavailable",
+			},
+		}},
+		Metadata: map[string]any{"retrieval_mode": "bm25"},
+	}}, 0)
 
 	result, err := tool.Execute(context.Background(), Input{Query: "latency", TopK: 3})
 	if err != nil {
@@ -126,8 +138,8 @@ func TestSearchToolPreservesChineseQueryAndRunbookEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if searcher.query.Query != "checkout 支付超时怎么排查" {
-		t.Fatalf("search query = %q", searcher.query.Query)
+	if searcher.request.Query != "checkout 支付超时怎么排查" {
+		t.Fatalf("search query = %q", searcher.request.Query)
 	}
 	if len(result.Evidence) != 1 ||
 		result.Evidence[0].ID != "checkout_runbook_zh_chunk_0000" ||

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -78,6 +79,18 @@ func (a recordingAnalyzer) Analyze(
 			Content:    string(a.role) + " evidence",
 		}},
 	}, nil
+}
+
+type fakeRoleAwareRetriever struct {
+	result retrievalknowledge.RetrievalResult
+	err    error
+}
+
+func (f fakeRoleAwareRetriever) HybridRetrieve(
+	context.Context,
+	retrievalknowledge.RetrievalRequest,
+) (retrievalknowledge.RetrievalResult, error) {
+	return f.result, f.err
 }
 
 type fakeSynthesizer struct{}
@@ -159,6 +172,61 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		result.Metadata["knowledge_fallback_used"] != true ||
 		result.Metadata["synthesis_fallback_used"] != true {
 		t.Fatalf("deterministic LLM metadata = %#v", result.Metadata)
+	}
+}
+
+func TestRoleAwareRAGSelectsChunksByRole(t *testing.T) {
+	context := buildRoleAwareRAGContext(retrievalknowledge.RetrievalResult{
+		Chunks: []retrievalknowledge.RetrievedKnowledge{
+			{ID: "metrics", Title: "Metrics dashboard", Content: "Prometheus latency panel"},
+			{ID: "runbook", Title: "Checkout runbook", Content: "Incident mitigation steps"},
+			{ID: "triage", Title: "Diagnosis rule summary", Content: "Triage high error rate"},
+		},
+		Metadata: map[string]any{"retrieval_mode": "hybrid"},
+	})
+	if len(context.ChunksByRole[AgentRoleEvidence]) != 1 ||
+		len(context.ChunksByRole[AgentRoleKnowledge]) != 1 ||
+		len(context.ChunksByRole[AgentRoleTriage]) != 1 ||
+		context.SynthesisSummary == "" {
+		t.Fatalf("role rag context = %#v", context)
+	}
+}
+
+func TestOrchestratorPassesRoleAwareRAGToRoles(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen []TriagePlan
+	)
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		recordingAnalyzer{role: AgentRoleEvidence, mu: &mu, seen: &seen},
+		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
+		fakeSynthesizer{},
+	).WithRoleAwareRAG(fakeRoleAwareRetriever{result: retrievalknowledge.RetrievalResult{
+		Chunks: []retrievalknowledge.RetrievedKnowledge{{
+			ID: "runbook", ChunkID: "runbook", Title: "Checkout runbook",
+			Content: "Inspect payment timeout.", Source: "runbook",
+		}},
+		Metadata: map[string]any{"retrieval_mode": "hybrid"},
+	}})
+
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-1",
+		SessionID: "session-1",
+		Message:   "Why is checkout failing?",
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(seen) != 2 ||
+		len(seen[0].RoleRAG.ChunksByRole[AgentRoleKnowledge]) != 1 ||
+		result.Metadata["role_rag_chunk_count"] == 0 {
+		t.Fatalf("seen=%#v metadata=%#v", seen, result.Metadata)
 	}
 }
 

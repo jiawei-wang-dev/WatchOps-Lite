@@ -14,6 +14,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/alerts"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/knowledge"
@@ -47,6 +48,10 @@ type AgentInput struct {
 	DiagnosticSkills          []string
 	UserProfileContext        []string
 	RetrievedKnowledge        []string
+	PreRetrievedKnowledge     []retrievalknowledge.RetrievedKnowledge
+	PreRAGAvailable           bool
+	PreRAGMetadata            map[string]any
+	PreRAGLimitations         []string
 	CurrentMessage            string
 	TimeContext               common.TimeRange
 }

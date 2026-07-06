@@ -95,11 +95,11 @@ func TestServiceSkipsDuplicateContentBeforeChunking(t *testing.T) {
 func TestServiceValidatesSearchAndPropagatesUnavailable(t *testing.T) {
 	service, _ := NewService(&storeStub{err: ErrUnavailable}, 100)
 
-	if _, err := service.Search(context.Background(), SearchQuery{}); !errors.Is(err, ErrInvalidArgument) {
-		t.Fatalf("empty search error = %v, want ErrInvalidArgument", err)
+	if _, err := service.HybridRetrieve(context.Background(), RetrievalRequest{}); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("empty retrieval error = %v, want ErrInvalidArgument", err)
 	}
-	if _, err := service.Search(context.Background(), SearchQuery{Query: "timeouts"}); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("search error = %v, want ErrUnavailable", err)
+	if _, err := service.HybridRetrieve(context.Background(), RetrievalRequest{Query: "timeouts"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("retrieval error = %v, want ErrUnavailable", err)
 	}
 }
 
@@ -122,17 +122,17 @@ func TestServiceDeduplicatesHistoricalSearchResults(t *testing.T) {
 		},
 	}}
 	service, _ := NewService(store, 100)
-	results, err := service.Search(context.Background(), SearchQuery{
+	result, err := service.HybridRetrieve(context.Background(), RetrievalRequest{
 		Query: "checkout",
-		Limit: 5,
+		TopK:  5,
 	})
 	if err != nil {
-		t.Fatalf("Search() error = %v", err)
+		t.Fatalf("HybridRetrieve() error = %v", err)
 	}
-	if len(results) != 2 ||
-		results[0].DocumentID != "doc-new" ||
-		results[1].DocumentID != "doc-other" {
-		t.Fatalf("results = %#v", results)
+	if len(result.Chunks) != 2 ||
+		result.Chunks[0].DocumentID != "doc-new" ||
+		result.Chunks[1].DocumentID != "doc-other" {
+		t.Fatalf("result = %#v", result)
 	}
-	assertDuplicateCount(t, results[0], 1)
+	assertDuplicateCount(t, SearchResult{Metadata: result.Chunks[0].Metadata}, 1)
 }

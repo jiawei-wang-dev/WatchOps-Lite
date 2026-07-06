@@ -13,6 +13,8 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
+	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type graphState struct {
@@ -48,6 +50,13 @@ type diagnosticSkillsBranch struct {
 
 type userProfileBranch struct {
 	contextLines []string
+}
+
+type preRAGBranch struct {
+	chunks      []retrievalknowledge.RetrievedKnowledge
+	metadata    map[string]any
+	limitations []string
+	available   bool
 }
 
 func normalizeChatInputGraphNode(
@@ -113,6 +122,72 @@ func prepareDiagnosticSkillsGraphNode(
 	return diagnosticSkillsBranch{cards: diagnosticSkillCards()}, nil
 }
 
+func (s *Service) preRetrieveKnowledgeGraphNode(
+	ctx context.Context,
+	input normalizedChatInput,
+) (preRAGBranch, error) {
+	agenteino.EmitStreamEvent(ctx, "pre_rag_started", map[string]any{
+		"query_length": len(input.command.Message),
+	})
+	ctx, span := observability.StartSpan(
+		ctx,
+		"chat.pre_rag",
+		attribute.Int("query_length", len(input.command.Message)),
+		attribute.Int("top_k", s.preRAGTopK),
+	)
+	defer span.End()
+	if s.knowledgeRetriever == nil {
+		span.SetAttributes(attribute.Bool("pre_rag_used", false))
+		agenteino.EmitStreamEvent(ctx, "pre_rag_failed", map[string]any{
+			"error_code": "PRE_RAG_UNAVAILABLE",
+		})
+		return preRAGBranch{
+			metadata: map[string]any{
+				"pre_rag_used": false,
+				"reason":       "knowledge_retriever_unavailable",
+			},
+			limitations: []string{"PRE_RAG_UNAVAILABLE"},
+		}, nil
+	}
+	result, err := s.knowledgeRetriever.HybridRetrieve(
+		ctx,
+		retrievalknowledge.RetrievalRequest{
+			Query: input.command.Message,
+			TopK:  s.preRAGTopK,
+		},
+	)
+	if err != nil {
+		observability.MarkError(span, "chat pre-rag failed")
+		span.SetAttributes(attribute.Bool("pre_rag_used", false))
+		agenteino.EmitStreamEvent(ctx, "pre_rag_failed", map[string]any{
+			"error_code": "PRE_RAG_UNAVAILABLE",
+		})
+		return preRAGBranch{
+			metadata: map[string]any{
+				"pre_rag_used": false,
+				"reason":       "hybrid_retrieve_failed",
+			},
+			limitations: []string{"PRE_RAG_UNAVAILABLE"},
+		}, nil
+	}
+	metadata := cloneAnyMap(result.Metadata)
+	metadata["pre_rag_used"] = len(result.Chunks) > 0
+	metadata["pre_rag_chunk_count"] = len(result.Chunks)
+	span.SetAttributes(
+		attribute.Bool("pre_rag_used", len(result.Chunks) > 0),
+		attribute.Int("pre_rag_chunk_count", len(result.Chunks)),
+	)
+	agenteino.EmitStreamEvent(ctx, "pre_rag_completed", map[string]any{
+		"chunk_count": len(result.Chunks),
+		"metadata":    metadata,
+	})
+	return preRAGBranch{
+		chunks:    result.Chunks,
+		metadata:  metadata,
+		available: true,
+	}, nil
+}
+
 func mergeContextGraphNode(
 	_ context.Context,
 	input map[string]any,
@@ -133,6 +208,10 @@ func mergeContextGraphNode(
 	if !ok {
 		return graphState{}, fmt.Errorf("%w: user profile branch output is unavailable", ErrExecution)
 	}
+	preRAGBranch, ok := input[nodePreRetrieveKnowledge].(preRAGBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: pre-rag branch output is unavailable", ErrExecution)
+	}
 	return graphState{
 		command:                   sessionBranch.command,
 		snapshot:                  sessionBranch.snapshot,
@@ -147,9 +226,16 @@ func mergeContextGraphNode(
 			),
 			DiagnosticSkills:   skillsBranch.cards,
 			UserProfileContext: profileBranch.contextLines,
-			RetrievedKnowledge: []string{},
-			CurrentMessage:     sessionBranch.command.Message,
-			TimeContext:        sessionBranch.command.TimeContext,
+			RetrievedKnowledge: preRetrievedKnowledgePrompt(preRAGBranch.chunks),
+			PreRetrievedKnowledge: append(
+				[]retrievalknowledge.RetrievedKnowledge{},
+				preRAGBranch.chunks...,
+			),
+			PreRAGAvailable:   preRAGBranch.available,
+			PreRAGMetadata:    preRAGBranch.metadata,
+			PreRAGLimitations: append([]string{}, preRAGBranch.limitations...),
+			CurrentMessage:    sessionBranch.command.Message,
+			TimeContext:       sessionBranch.command.TimeContext,
 		},
 	}, nil
 }
@@ -208,6 +294,19 @@ func collectToolEvidenceGraphNode(
 	ensureAgentMetadata(&state.agentOutput)
 	state.agentOutput.Metadata["session_memory_available"] = state.memoryAvailable
 	state.agentOutput.Metadata["long_term_memory_count"] = len(state.longTermMemories)
+	state.agentOutput.Metadata["pre_rag_used"] = state.agentInput.PreRAGAvailable
+	state.agentOutput.Metadata["pre_rag_chunk_count"] = len(state.agentInput.PreRetrievedKnowledge)
+	state.agentOutput.Metadata["pre_rag"] = state.agentInput.PreRAGMetadata
+	for _, code := range state.agentInput.PreRAGLimitations {
+		state.agentOutput.Limitations = append(
+			state.agentOutput.Limitations,
+			agenteino.Limitation{
+				Code:    code,
+				Message: "Pre-RAG knowledge retrieval was unavailable; the answer may rely on tools and other context only.",
+				Tool:    "search_knowledge",
+			},
+		)
+	}
 	if state.longTermMemoryUnavailable {
 		state.agentOutput.Limitations = append(
 			state.agentOutput.Limitations,
@@ -292,6 +391,35 @@ func confirmedLongTermMemoryPrompt(memories []longterm.Memory) []string {
 			value += " [evidence_ids=" + strings.Join(memory.EvidenceIDs, ",") + "]"
 		}
 		result = append(result, value)
+	}
+	return result
+}
+
+func preRetrievedKnowledgePrompt(
+	chunks []retrievalknowledge.RetrievedKnowledge,
+) []string {
+	result := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		content := truncatePromptText(chunk.Content, 700)
+		if content == "" {
+			continue
+		}
+		value := chunk.Title + ": " + content
+		if chunk.ChunkID != "" {
+			value += " [chunk_id=" + chunk.ChunkID + "]"
+		}
+		if chunk.RetrievalMethod != "" {
+			value += " [retrieval=" + chunk.RetrievalMethod + "]"
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func cloneAnyMap(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
 	}
 	return result
 }

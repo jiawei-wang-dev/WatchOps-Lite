@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -228,70 +229,71 @@ func (s *Service) Ingest(ctx context.Context, document Document) (IngestResult, 
 	}, nil
 }
 
-func (s *Service) Search(ctx context.Context, query SearchQuery) ([]SearchResult, error) {
+func (s *Service) HybridRetrieve(
+	ctx context.Context,
+	request RetrievalRequest,
+) (RetrievalResult, error) {
 	started := time.Now()
 	defer func() {
 		runtimemetrics.ObserveRAGSearch(s.config.RetrievalMode, time.Since(started))
 	}()
 	ctx, span := observability.StartSpan(
 		ctx,
-		"knowledge.search",
-		attribute.Int("query_length", len(query.Query)),
-		attribute.String("retrieval_mode", s.config.RetrievalMode),
+		"knowledge.hybrid_retrieve",
+		attribute.Int("query_length", len(request.Query)),
 	)
 	defer span.End()
 
-	query.Query = strings.TrimSpace(query.Query)
-	if query.Query == "" {
-		observability.MarkError(span, "knowledge search validation failed")
-		return nil, fmt.Errorf("%w: query is required", ErrInvalidArgument)
-	}
-	if query.Limit == 0 {
-		query.Limit = s.config.FinalTopK
-	}
-	if query.Limit < 1 || query.Limit > maxSearchLimit {
-		observability.MarkError(span, "knowledge search validation failed")
-		return nil, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidArgument, maxSearchLimit)
-	}
-	for key, value := range query.Filters {
-		if !validFilterKey(key) || strings.TrimSpace(value) == "" {
-			observability.MarkError(span, "knowledge search validation failed")
-			return nil, fmt.Errorf("%w: filter keys must use letters, numbers, underscores, or hyphens and values must not be empty", ErrInvalidArgument)
-		}
-		query.Filters[key] = strings.TrimSpace(value)
-	}
-	candidateQuery := query
-	candidateQuery.Limit = min(
-		maxSearchLimit,
-		max(query.Limit*4, query.Limit),
-	)
-	if s.reranker != nil {
-		candidateQuery.Limit = max(
-			candidateQuery.Limit,
-			s.config.RerankCandidateK,
-		)
-	}
-	results, err := s.searchByMode(ctx, candidateQuery, span)
+	query, metadata, err := s.normalizeRetrievalRequest(request)
 	if err != nil {
-		observability.MarkError(span, "knowledge search failed")
-		return nil, err
+		observability.MarkError(span, "knowledge hybrid retrieval validation failed")
+		return RetrievalResult{}, err
 	}
+	results, searchErr := s.searchByMode(ctx, query, span)
+	if searchErr != nil {
+		observability.MarkError(span, "knowledge hybrid retrieval failed")
+		return RetrievalResult{}, searchErr
+	}
+	finalTopK := metadataInt(metadata, "top_k")
+	metadata["bm25_count"] = resultCountByMode(results, "bm25")
+	metadata["vector_count"] = resultCountByMode(results, "vector")
+	metadata["fusion_count"] = len(results)
+	metadata["vector_enabled"] = s.embedding != nil
+	metadata["fallback_to_bm25"] = hasVectorFallback(results)
+
 	results = dedupeSearchResults(results)
 	if s.reranker != nil && len(results) > 0 {
-		results, err = s.rerankResults(ctx, query.Query, results, min(query.Limit, s.config.RerankTopK))
-		if err != nil {
+		reranked, rerankErr := s.rerankResults(
+			ctx,
+			query.Query,
+			results,
+			min(finalTopK, effectiveRerankTopK(request.RerankTopK, s.config.RerankTopK, finalTopK)),
+		)
+		if rerankErr != nil {
 			observability.MarkError(span, "knowledge rerank failed")
-			return nil, err
+			return RetrievalResult{}, rerankErr
 		}
+		results = reranked
 	} else {
-		results = trimResults(results, query.Limit)
+		results = scoreBasedRerank(results, query.Query)
+		results = trimResults(results, finalTopK)
 	}
-	results = trimResults(dedupeSearchResults(results), query.Limit)
+	results = trimResults(dedupeSearchResults(results), finalTopK)
+	metadata["rerank_enabled"] = s.reranker != nil
+	metadata["retrieval_latency_ms"] = time.Since(started).Milliseconds()
+	metadata["final_count"] = len(results)
+	chunks := make([]RetrievedKnowledge, 0, len(results))
+	for _, result := range results {
+		chunks = append(chunks, searchResultToRetrievedKnowledge(result))
+	}
 	span.SetAttributes(
-		attribute.Int("result_count", len(results)),
-		attribute.Int("deduped_duplicate_count", dedupedResultCount(results)),
+		attribute.Int("result_count", len(chunks)),
+		attribute.Int("bm25_result_count", metadataInt(metadata, "bm25_count")),
+		attribute.Int("vector_result_count", metadataInt(metadata, "vector_count")),
+		attribute.Bool("vector_enabled", metadataBool(metadata, "vector_enabled")),
+		attribute.Bool("fallback_to_bm25", metadataBool(metadata, "fallback_to_bm25")),
 	)
-	return results, nil
+	return RetrievalResult{Chunks: chunks, Metadata: metadata}, nil
 }
 
 func dedupedResultCount(results []SearchResult) int {
@@ -461,6 +463,201 @@ func optionalScore(value *float64) float64 {
 		return 0
 	}
 	return *value
+}
+
+func (s *Service) normalizeRetrievalRequest(
+	request RetrievalRequest,
+) (SearchQuery, map[string]any, error) {
+	query := strings.TrimSpace(request.Query)
+	if query == "" {
+		return SearchQuery{}, nil, fmt.Errorf("%w: query is required", ErrInvalidArgument)
+	}
+	topK := request.TopK
+	if topK == 0 {
+		topK = s.config.FinalTopK
+	}
+	if topK < 1 || topK > maxSearchLimit {
+		return SearchQuery{}, nil, fmt.Errorf("%w: top_k must be between 1 and %d", ErrInvalidArgument, maxSearchLimit)
+	}
+	bm25TopK := firstPositive(request.BM25TopK, s.config.BM25TopK)
+	vectorTopK := firstPositive(request.VectorTopK, s.config.VectorTopK)
+	filters := cloneStringMap(request.Filters)
+	for key, value := range filters {
+		if !validFilterKey(key) || strings.TrimSpace(value) == "" {
+			return SearchQuery{}, nil, fmt.Errorf("%w: filter keys must use letters, numbers, underscores, or hyphens and values must not be empty", ErrInvalidArgument)
+		}
+		filters[key] = strings.TrimSpace(value)
+	}
+	candidateLimit := min(
+		maxSearchLimit,
+		max(topK*4, max(topK, max(bm25TopK, vectorTopK))),
+	)
+	if s.reranker != nil {
+		candidateLimit = max(candidateLimit, s.config.RerankCandidateK)
+	}
+	return SearchQuery{
+			Query:   query,
+			Limit:   candidateLimit,
+			Filters: filters,
+		}, map[string]any{
+			"retrieval_mode": s.config.RetrievalMode,
+			"top_k":          topK,
+			"bm25_top_k":     bm25TopK,
+			"vector_top_k":   vectorTopK,
+			"rerank_top_k":   effectiveRerankTopK(request.RerankTopK, s.config.RerankTopK, topK),
+		}, nil
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func effectiveRerankTopK(requestTopK int, configTopK int, fallback int) int {
+	if requestTopK > 0 {
+		return requestTopK
+	}
+	if configTopK > 0 {
+		return configTopK
+	}
+	return fallback
+}
+
+func searchResultToRetrievedKnowledge(result SearchResult) RetrievedKnowledge {
+	id := result.ChunkID
+	if id == "" {
+		id = result.DocumentID
+	}
+	return RetrievedKnowledge{
+		ID:              id,
+		ChunkID:         result.ChunkID,
+		DocumentID:      result.DocumentID,
+		Title:           result.Title,
+		Source:          result.Source,
+		Content:         result.Content,
+		Score:           result.Score,
+		BM25Score:       optionalScore(result.BM25Score),
+		VectorScore:     optionalScore(result.VectorScore),
+		FusedScore:      optionalScore(result.RRFScore),
+		RerankScore:     metadataFloatDefault(result.Metadata, "rerank_score"),
+		RetrievalMethod: result.RetrievalMode,
+		Category:        metadataString(result.Metadata, "category"),
+		Tags:            metadataStringSlice(result.Metadata, "tags"),
+		Metadata:        cloneMetadata(result.Metadata),
+	}
+}
+
+func scoreBasedRerank(results []SearchResult, query string) []SearchResult {
+	query = strings.ToLower(query)
+	for index := range results {
+		boost := ruleBoost(results[index], query)
+		if boost == 0 {
+			continue
+		}
+		results[index].Metadata = cloneMetadata(results[index].Metadata)
+		results[index].Metadata["rerank_provider"] = "score_based"
+		results[index].Metadata["rerank_score"] = results[index].Score + boost
+		results[index].Metadata["rerank_reason"] = "keyword_boost"
+		results[index].Score += boost
+	}
+	return sortSearchResults(results)
+}
+
+func ruleBoost(result SearchResult, query string) float64 {
+	text := strings.ToLower(result.Title + " " + result.Source + " " + result.Content)
+	boost := 0.0
+	for _, keyword := range []string{
+		"runbook", "incident", "error", "timeout", "trace", "metrics", "alert",
+	} {
+		if strings.Contains(query, keyword) && strings.Contains(text, keyword) {
+			boost += 0.05
+		}
+	}
+	if service := metadataString(result.Metadata, "service"); service != "" &&
+		strings.Contains(query, strings.ToLower(service)) {
+		boost += 0.05
+	}
+	return boost
+}
+
+func sortSearchResults(results []SearchResult) []SearchResult {
+	sort.SliceStable(results, func(left int, right int) bool {
+		if results[left].Score == results[right].Score {
+			return results[left].ChunkID < results[right].ChunkID
+		}
+		return results[left].Score > results[right].Score
+	})
+	return results
+}
+
+func resultCountByMode(results []SearchResult, mode string) int {
+	count := 0
+	for _, result := range results {
+		switch mode {
+		case "bm25":
+			if result.BM25Score != nil {
+				count++
+			}
+		case "vector":
+			if result.VectorScore != nil {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func hasVectorFallback(results []SearchResult) bool {
+	for _, result := range results {
+		if fallback, _ := result.Metadata["vector_fallback"].(bool); fallback {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataFloatDefault(metadata map[string]any, key string) float64 {
+	value, _ := metadataFloat(metadata, key)
+	return value
+}
+
+func metadataStringSlice(metadata map[string]any, key string) []string {
+	switch value := metadata[key].(type) {
+	case []string:
+		return append([]string{}, value...)
+	case []any:
+		result := make([]string, 0, len(value))
+		for _, item := range value {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result = append(result, strings.TrimSpace(text))
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func metadataInt(metadata map[string]any, key string) int {
+	value, _ := metadata[key].(int)
+	return value
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 func (s *Service) searchByMode(
