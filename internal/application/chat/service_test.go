@@ -15,6 +15,7 @@ import (
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge/queryplan"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -71,6 +72,39 @@ func (f *capturingKnowledgeRetriever) HybridRetrieve(
 ) (retrievalknowledge.RetrievalResult, error) {
 	f.request = request
 	return f.result, nil
+}
+
+type recordingKnowledgeRetriever struct {
+	results  []retrievalknowledge.RetrievalResult
+	errs     []error
+	requests []retrievalknowledge.RetrievalRequest
+}
+
+func (f *recordingKnowledgeRetriever) HybridRetrieve(
+	_ context.Context,
+	request retrievalknowledge.RetrievalRequest,
+) (retrievalknowledge.RetrievalResult, error) {
+	f.requests = append(f.requests, request)
+	index := len(f.requests) - 1
+	if index < len(f.errs) && f.errs[index] != nil {
+		return retrievalknowledge.RetrievalResult{}, f.errs[index]
+	}
+	if index < len(f.results) {
+		return f.results[index], nil
+	}
+	return retrievalknowledge.RetrievalResult{Metadata: map[string]any{}}, nil
+}
+
+type staticQueryPlanner struct {
+	plan queryplan.RAGQueryPlan
+	err  error
+}
+
+func (p staticQueryPlanner) Plan(
+	context.Context,
+	queryplan.QueryPlanInput,
+) (queryplan.RAGQueryPlan, error) {
+	return p.plan, p.err
 }
 
 type fakeIntentRecognizer struct {
@@ -217,6 +251,119 @@ func TestPreRAGNodeDoesNotFailChat(t *testing.T) {
 		len(result.Agent.Limitations) == 0 ||
 		result.Agent.Limitations[0].Code != "PRE_RAG_UNAVAILABLE" {
 		t.Fatalf("result = %#v", result.Agent)
+	}
+}
+
+func TestPreRAGPlannerFailureFallsBackToSingleQuery(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	retriever := &recordingKnowledgeRetriever{
+		results: []retrievalknowledge.RetrievalResult{{
+			Chunks: []retrievalknowledge.RetrievedKnowledge{{
+				ID: "chunk-1", ChunkID: "chunk-1", DocumentID: "doc-1",
+				Content: "checkout fallback runbook", Score: 0.7,
+			}},
+			Metadata: map[string]any{"retrieval_mode": "hybrid"},
+		}},
+	}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			KnowledgeRetriever: retriever,
+			RAGQueryPlanner: staticQueryPlanner{
+				err: errors.New("planner failed"),
+			},
+			PreRAGTopK: 3,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(retriever.requests) != 1 {
+		t.Fatalf("requests = %#v, want single fallback query", retriever.requests)
+	}
+	preRAGMetadata, _ := result.Agent.Metadata["pre_rag"].(map[string]any)
+	if preRAGMetadata["query_plan_fallback_used"] != true ||
+		preRAGMetadata["query_rewrite_applied"] != false {
+		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
+}
+
+func TestPreRAGMultiQueryDedupesAndPublishesMetadata(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	plan := queryplan.RAGQueryPlan{
+		OriginalQuery: validCommand().Message,
+		Source:        "rule",
+		Queries: []queryplan.RAGSubQuery{
+			{Type: queryplan.QueryOriginal, Query: "checkout 500", Weight: 1},
+			{Type: queryplan.QueryCanonical, Query: "checkout-service HTTP 5xx", Weight: 0.8},
+		},
+		Metadata: map[string]any{"query_plan_fallback_used": false},
+	}
+	retriever := &recordingKnowledgeRetriever{
+		results: []retrievalknowledge.RetrievalResult{
+			{
+				Chunks: []retrievalknowledge.RetrievedKnowledge{{
+					ID: "a", ChunkID: "chunk-1", DocumentID: "doc-1",
+					Content: "checkout timeout runbook", Score: 0.7,
+				}},
+				Metadata: map[string]any{"retrieval_mode": "hybrid"},
+			},
+			{
+				Chunks: []retrievalknowledge.RetrievedKnowledge{
+					{
+						ID: "b", ChunkID: "chunk-1", DocumentID: "doc-1",
+						Content: "duplicate checkout runbook", Score: 0.9,
+					},
+					{
+						ID: "c", ChunkID: "chunk-2", DocumentID: "doc-2",
+						Content: "payment dependency runbook", Score: 0.8,
+					},
+				},
+				Metadata: map[string]any{"retrieval_mode": "hybrid"},
+			},
+		},
+	}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			RecentWindowSize:   12,
+			SummaryThreshold:   12,
+			KnowledgeRetriever: retriever,
+			RAGQueryPlanner:    staticQueryPlanner{plan: plan},
+			PreRAGTopK:         5,
+		},
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(retriever.requests) != 2 ||
+		retriever.requests[0].Query != "checkout 500" ||
+		retriever.requests[1].Query != "checkout-service HTTP 5xx" {
+		t.Fatalf("requests = %#v", retriever.requests)
+	}
+	if len(runner.lastInput.PreRetrievedKnowledge) != 2 {
+		t.Fatalf(
+			"pre-retrieved chunks = %#v, want deduped results",
+			runner.lastInput.PreRetrievedKnowledge,
+		)
+	}
+	preRAGMetadata, _ := result.Agent.Metadata["pre_rag"].(map[string]any)
+	if preRAGMetadata["query_rewrite_applied"] != true ||
+		preRAGMetadata["rag_sub_query_count"] != 2 ||
+		preRAGMetadata["selected_chunk_count"] != 2 {
+		t.Fatalf("metadata = %#v", result.Agent.Metadata)
 	}
 }
 

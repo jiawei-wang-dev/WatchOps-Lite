@@ -15,6 +15,7 @@ import (
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge/queryplan"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -218,8 +219,9 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 		return preRAGBranch{}, err
 	}
 	agenteino.EmitStreamEvent(ctx, "pre_rag_started", map[string]any{
-		"query_length": len(branch.command.Message),
-		"intent_type":  string(branch.result.Intent),
+		"query_length":       len(branch.command.Message),
+		"intent_type":        string(branch.result.Intent),
+		"query_plan_enabled": true,
 	})
 	ctx, span := observability.StartSpan(
 		ctx,
@@ -257,14 +259,13 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 			limitations: []string{"PRE_RAG_UNAVAILABLE"},
 		}, nil
 	}
-	request := intent.BuildRetrievalRequest(branch.command.Message, branch.result, s.preRAGTopK)
 	ragContext, ragSpan := observability.StartSpan(
 		ctx,
 		"intent.rag.apply",
 		attribute.String("intent.type", string(branch.result.Intent)),
-		attribute.Int("top_k", request.TopK),
+		attribute.Int("top_k", preRAGTopK(branch.result, s.preRAGTopK)),
 	)
-	result, err := s.knowledgeRetriever.HybridRetrieve(ragContext, request)
+	result, err := s.multiQueryPreRAG(ragContext, branch)
 	ragSpan.SetAttributes(attribute.Bool("rag_hints_applied", true))
 	ragSpan.End()
 	if err != nil {
@@ -291,15 +292,102 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 		attribute.Int("pre_rag_chunk_count", len(result.Chunks)),
 	)
 	agenteino.EmitStreamEvent(ctx, "pre_rag_completed", map[string]any{
-		"chunk_count": len(result.Chunks),
-		"intent_type": string(branch.result.Intent),
-		"metadata":    metadata,
+		"chunk_count":          len(result.Chunks),
+		"intent_type":          string(branch.result.Intent),
+		"sub_query_count":      metadata["rag_sub_query_count"],
+		"selected_chunk_count": metadata["selected_chunk_count"],
+		"metadata":             metadata,
 	})
 	return preRAGBranch{
 		chunks:    result.Chunks,
 		metadata:  metadata,
 		available: true,
 	}, nil
+}
+
+func (s *Service) multiQueryPreRAG(
+	ctx context.Context,
+	branch intentBranch,
+) (retrievalknowledge.RetrievalResult, error) {
+	ctx, span := observability.StartSpan(
+		ctx,
+		"rag.multi_query_retrieve",
+		attribute.String("intent.type", string(branch.result.Intent)),
+	)
+	defer span.End()
+
+	plan, err := s.planPreRAGQueries(ctx, branch)
+	if err != nil {
+		return s.singleQueryPreRAG(ctx, branch, true)
+	}
+	results := make([]queryplan.RAGSubQueryResult, 0, len(plan.Queries))
+	topK := preRAGTopK(branch.result, s.preRAGTopK)
+	for _, subQuery := range plan.Queries {
+		request := intent.BuildRetrievalRequest(subQuery.Query, branch.result, s.preRAGTopK)
+		request.Query = subQuery.Query
+		result, retrieveErr := s.knowledgeRetriever.HybridRetrieve(ctx, request)
+		results = append(results, queryplan.RAGSubQueryResult{
+			Query:  subQuery,
+			Result: result,
+			Error:  retrieveErr,
+		})
+	}
+	_, mergeSpan := observability.StartSpan(
+		ctx,
+		"rag.multi_query_merge",
+		attribute.Int("rag.sub_query_count", len(plan.Queries)),
+	)
+	merged := queryplan.MergeResults(plan, results, topK)
+	mergeSpan.SetAttributes(attribute.Int("selected_chunk_count", len(merged.Chunks)))
+	mergeSpan.End()
+	if len(merged.Chunks) == 0 {
+		return s.singleQueryPreRAG(ctx, branch, true)
+	}
+	span.SetAttributes(
+		attribute.Int("rag.sub_query_count", len(plan.Queries)),
+		attribute.Int("selected_chunk_count", len(merged.Chunks)),
+		attribute.Bool("query_rewrite_applied", len(plan.Queries) > 1),
+	)
+	return merged, nil
+}
+
+func preRAGTopK(result intent.IntentResult, fallback int) int {
+	return intent.BuildRetrievalRequest("", result, fallback).TopK
+}
+
+func (s *Service) planPreRAGQueries(
+	ctx context.Context,
+	branch intentBranch,
+) (queryplan.RAGQueryPlan, error) {
+	if s.ragQueryPlanner == nil {
+		return queryplan.RAGQueryPlan{}, fmt.Errorf("%w: rag query planner unavailable", ErrExecution)
+	}
+	return s.ragQueryPlanner.Plan(ctx, queryplan.QueryPlanInput{
+		UserMessage: branch.command.Message,
+		Intent:      branch.result,
+		Service:     branch.result.Service,
+		Symptom:     branch.result.Symptom,
+		Keywords:    branch.result.Keywords,
+		Now:         s.now(),
+	})
+}
+
+func (s *Service) singleQueryPreRAG(
+	ctx context.Context,
+	branch intentBranch,
+	plannerFallback bool,
+) (retrievalknowledge.RetrievalResult, error) {
+	request := intent.BuildRetrievalRequest(branch.command.Message, branch.result, s.preRAGTopK)
+	result, err := s.knowledgeRetriever.HybridRetrieve(ctx, request)
+	if result.Metadata == nil {
+		result.Metadata = map[string]any{}
+	}
+	result.Metadata["rag_query_plan_source"] = "fallback_single_query"
+	result.Metadata["rag_sub_query_count"] = 1
+	result.Metadata["rag_sub_query_types"] = []string{string(queryplan.QueryOriginal)}
+	result.Metadata["query_rewrite_applied"] = false
+	result.Metadata["query_plan_fallback_used"] = plannerFallback
+	return result, err
 }
 
 func mergeContextGraphNode(

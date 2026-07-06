@@ -14,6 +14,7 @@ import (
 	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge/queryplan"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -58,6 +59,7 @@ type ServiceConfig struct {
 	KnowledgeRetriever KnowledgeRetriever
 	PreRAGTopK         int
 	IntentRecognizer   intent.Recognizer
+	RAGQueryPlanner    queryplan.QueryPlanner
 }
 
 type Service struct {
@@ -75,6 +77,7 @@ type Service struct {
 	knowledgeRetriever KnowledgeRetriever
 	preRAGTopK         int
 	intentRecognizer   intent.Recognizer
+	ragQueryPlanner    queryplan.QueryPlanner
 }
 
 type KnowledgeRetriever interface {
@@ -106,6 +109,7 @@ func NewService(
 		knowledgeRetriever: config.KnowledgeRetriever,
 		preRAGTopK:         config.PreRAGTopK,
 		intentRecognizer:   config.IntentRecognizer,
+		ragQueryPlanner:    config.RAGQueryPlanner,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -115,6 +119,9 @@ func NewService(
 	}
 	if service.intentRecognizer == nil {
 		service.intentRecognizer = intent.NewRuleBasedRecognizer()
+	}
+	if service.ragQueryPlanner == nil {
+		service.ragQueryPlanner = queryplan.NewHybridPlanner(nil, queryplan.NewRuleBasedPlanner())
 	}
 	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
 	return service
