@@ -12,6 +12,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/control"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/multiagent"
 )
 
@@ -124,6 +125,47 @@ func buildMultiAgentRoleLLM(
 	}
 	logger.Info("Multi-Agent role LLM analysis enabled", "model", cfg.LLM.Model)
 	return analyzer
+}
+
+func buildIntentRecognizer(
+	ctx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	factory chatModelFactory,
+) intent.Recognizer {
+	intentConfig := intent.Config{
+		Enabled:          cfg.Intent.Enabled,
+		Mode:             cfg.Intent.Mode,
+		LLMEnabled:       cfg.Intent.LLMEnabled,
+		Timeout:          cfg.Intent.Timeout.Value(),
+		MinLLMConfidence: cfg.Intent.MinLLMConfidence,
+		EmitStreamEvents: cfg.Intent.EmitStreamEvents,
+	}.Normalize()
+	rule := intent.NewRuleBasedRecognizer()
+	if !intentConfig.LLMEnabled || !cfg.LLM.Enabled {
+		return intent.NewHybridRecognizer(intentConfig, nil, rule)
+	}
+	apiKey := strings.TrimSpace(os.Getenv(cfg.LLM.APIKeyEnv))
+	if strings.TrimSpace(cfg.LLM.Model) == "" || apiKey == "" {
+		logger.Warn(
+			"Intent LLM configuration is incomplete; rule-based intent fallback selected",
+			"model_configured", strings.TrimSpace(cfg.LLM.Model) != "",
+			"api_key_configured", apiKey != "",
+		)
+		return intent.NewHybridRecognizer(intentConfig, nil, rule)
+	}
+	chatModel, err := factory(ctx, cfg.LLM, apiKey)
+	if err != nil {
+		logger.Warn("Intent LLM initialization failed; rule-based intent fallback selected", "error", err)
+		return intent.NewHybridRecognizer(intentConfig, nil, rule)
+	}
+	llm, err := intent.NewLLMRecognizer(chatModel, intentConfig.Timeout)
+	if err != nil {
+		logger.Warn("Intent LLM recognizer configuration failed; rule-based intent fallback selected", "error", err)
+		return intent.NewHybridRecognizer(intentConfig, nil, rule)
+	}
+	logger.Info("Hybrid intent recognition enabled", "mode", intentConfig.Mode, "llm_enabled", true)
+	return intent.NewHybridRecognizer(intentConfig, llm, rule)
 }
 
 func agentControlConfig(cfg config.AgentConfig) control.Config {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
@@ -57,6 +58,27 @@ func (f fakeKnowledgeRetriever) HybridRetrieve(
 	retrievalknowledge.RetrievalRequest,
 ) (retrievalknowledge.RetrievalResult, error) {
 	return f.result, f.err
+}
+
+type capturingKnowledgeRetriever struct {
+	result  retrievalknowledge.RetrievalResult
+	request retrievalknowledge.RetrievalRequest
+}
+
+func (f *capturingKnowledgeRetriever) HybridRetrieve(
+	_ context.Context,
+	request retrievalknowledge.RetrievalRequest,
+) (retrievalknowledge.RetrievalResult, error) {
+	f.request = request
+	return f.result, nil
+}
+
+type fakeIntentRecognizer struct {
+	result intent.IntentResult
+}
+
+func (f fakeIntentRecognizer) Recognize(context.Context, intent.RecognitionInput) (intent.IntentResult, error) {
+	return f.result, nil
 }
 
 func (f *fakeSessionStore) AppendMessage(
@@ -364,6 +386,93 @@ func TestNativeEinoGraphRunsIndependentContextBranchesConcurrently(t *testing.T)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Execute() did not finish after releasing context branches")
+	}
+}
+
+func TestRecognizeIntentNodeAddsIntentToAgentInput(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			IntentRecognizer: fakeIntentRecognizer{result: intent.IntentResult{
+				Intent:     intent.IntentKnowledgeQuery,
+				Confidence: 0.9,
+				Source:     "llm",
+			}},
+		},
+	)
+	if _, err := service.Execute(context.Background(), validCommand()); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if runner.lastInput.Intent.Intent != intent.IntentKnowledgeQuery ||
+		runner.lastInput.Intent.Source != "llm" {
+		t.Fatalf("intent = %#v", runner.lastInput.Intent)
+	}
+}
+
+func TestPrepareDiagnosticSkillsFiltersByIntent(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			IntentRecognizer: fakeIntentRecognizer{result: intent.IntentResult{
+				Intent:         intent.IntentKnowledgeQuery,
+				Confidence:     0.9,
+				SuggestedTools: []intent.ToolName{intent.ToolSearchKnowledge},
+				Source:         "rule",
+			}},
+		},
+	)
+	if _, err := service.Execute(context.Background(), validCommand()); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	joined := strings.Join(runner.lastInput.DiagnosticSkills, "\n")
+	if !strings.Contains(joined, "runbook_lookup") ||
+		strings.Contains(joined, "metric_inspection") {
+		t.Fatalf("skills = %#v", runner.lastInput.DiagnosticSkills)
+	}
+}
+
+func TestPreRAGUsesIntentRAGHints(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	retriever := &capturingKnowledgeRetriever{result: retrievalknowledge.RetrievalResult{
+		Metadata: map[string]any{"retrieval_mode": "hybrid"},
+	}}
+	service := NewService(
+		runner,
+		store,
+		sessionSummary.NewDeterministic(),
+		ServiceConfig{
+			KnowledgeRetriever: retriever,
+			PreRAGTopK:         3,
+			IntentRecognizer: fakeIntentRecognizer{result: intent.IntentResult{
+				Intent:     intent.IntentKnowledgeQuery,
+				Confidence: 0.9,
+				Symptom:    "payment timeout",
+				RAGHints: intent.RAGHints{
+					QueryBoosts:    []string{"retry amplification"},
+					Categories:     []string{"runbook"},
+					TopKOverride:   8,
+					PreferRunbooks: true,
+				},
+				Source: "rule",
+			}},
+		},
+	)
+	if _, err := service.Execute(context.Background(), validCommand()); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if retriever.request.TopK != 8 ||
+		retriever.request.Filters["category"] != "runbook" ||
+		!strings.Contains(retriever.request.Query, "retry amplification") {
+		t.Fatalf("request = %#v", retriever.request)
 	}
 }
 

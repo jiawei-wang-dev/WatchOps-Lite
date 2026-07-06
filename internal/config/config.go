@@ -54,6 +54,7 @@ type Config struct {
 	MySQL          MySQLConfig          `json:"mysql"`
 	LongTermMemory LongTermMemoryConfig `json:"long_term_memory"`
 	Agent          AgentConfig          `json:"agent"`
+	Intent         IntentConfig         `json:"intent"`
 	LLM            LLMConfig            `json:"llm"`
 	Telemetry      TelemetryConfig      `json:"telemetry"`
 	RuntimeMetrics RuntimeMetricsConfig `json:"runtime_metrics"`
@@ -183,6 +184,15 @@ type AgentConfig struct {
 	EnableJSONRepairOnce        bool     `json:"enable_json_repair_once"`
 	EnableRepeatedToolDetection bool     `json:"enable_repeated_tool_detection"`
 	PromptVersion               string   `json:"prompt_version"`
+}
+
+type IntentConfig struct {
+	Enabled          bool     `json:"enabled"`
+	Mode             string   `json:"mode"`
+	LLMEnabled       bool     `json:"llm_enabled"`
+	Timeout          Duration `json:"timeout"`
+	MinLLMConfidence float64  `json:"min_llm_confidence"`
+	EmitStreamEvents bool     `json:"emit_stream_events"`
 }
 
 type LLMConfig struct {
@@ -319,6 +329,14 @@ func Default() Config {
 			EnableRepeatedToolDetection: true,
 			PromptVersion:               "watchops_agent_v1",
 		},
+		Intent: IntentConfig{
+			Enabled:          true,
+			Mode:             "hybrid",
+			LLMEnabled:       false,
+			Timeout:          Duration(3 * time.Second),
+			MinLLMConfidence: 0.55,
+			EmitStreamEvents: true,
+		},
 		LLM: LLMConfig{
 			Enabled:        false,
 			Provider:       "openai_compatible",
@@ -412,6 +430,7 @@ func applyEnvironment(cfg *Config) error {
 	setString("MYSQL_DSN", &cfg.MySQL.DSN)
 	setString("AGENT_MODE", &cfg.Agent.Mode)
 	setString("AGENT_PROMPT_VERSION", &cfg.Agent.PromptVersion)
+	setString("INTENT_MODE", &cfg.Intent.Mode)
 	setString("LLM_PROVIDER", &cfg.LLM.Provider)
 	setString("LLM_BASE_URL", &cfg.LLM.BaseURL)
 	setString("LLM_API_KEY_ENV", &cfg.LLM.APIKeyEnv)
@@ -444,6 +463,7 @@ func applyEnvironment(cfg *Config) error {
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
 		{"AGENT_TOTAL_EXECUTION_TIMEOUT", &cfg.Agent.TotalExecutionTimeout},
+		{"INTENT_TIMEOUT", &cfg.Intent.Timeout},
 		{"LLM_REQUEST_TIMEOUT", &cfg.LLM.RequestTimeout},
 		{"TELEMETRY_EXPORT_TIMEOUT", &cfg.Telemetry.ExportTimeout},
 	}
@@ -574,6 +594,27 @@ func applyEnvironment(cfg *Config) error {
 		}
 		cfg.LLM.Enabled = parsed
 	}
+	if value, ok := lookup("INTENT_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sINTENT_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Intent.Enabled = parsed
+	}
+	if value, ok := lookup("INTENT_LLM_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sINTENT_LLM_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Intent.LLMEnabled = parsed
+	}
+	if value, ok := lookup("INTENT_EMIT_STREAM_EVENTS"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sINTENT_EMIT_STREAM_EVENTS must be a boolean: %w", envPrefix, err)
+		}
+		cfg.Intent.EmitStreamEvents = parsed
+	}
 	if value, ok := lookup("AGENT_ENABLE_JSON_REPAIR_ONCE"); ok {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {
@@ -601,6 +642,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sLLM_TEMPERATURE must be a number: %w", envPrefix, err)
 		}
 		cfg.LLM.Temperature = parsed
+	}
+	if value, ok := lookup("INTENT_MIN_LLM_CONFIDENCE"); ok {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("%sINTENT_MIN_LLM_CONFIDENCE must be a number: %w", envPrefix, err)
+		}
+		cfg.Intent.MinLLMConfidence = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_ENABLED"); ok {
@@ -921,6 +969,17 @@ func (cfg Config) Validate() error {
 	}
 	if strings.TrimSpace(cfg.Agent.PromptVersion) == "" {
 		return errors.New("agent.prompt_version is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Intent.Mode)) {
+	case "hybrid", "rule", "llm":
+	default:
+		return errors.New("intent.mode must be hybrid, rule, or llm")
+	}
+	if cfg.Intent.Timeout <= 0 {
+		return errors.New("intent.timeout must be greater than zero")
+	}
+	if cfg.Intent.MinLLMConfidence < 0 || cfg.Intent.MinLLMConfidence > 1 {
+		return errors.New("intent.min_llm_confidence must be between 0 and 1")
 	}
 	if strings.ToLower(strings.TrimSpace(cfg.LLM.Provider)) != "openai_compatible" {
 		return errors.New("llm.provider must be openai_compatible")

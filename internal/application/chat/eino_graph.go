@@ -10,6 +10,7 @@ import (
 const (
 	graphName                = "watchops_chat"
 	nodeNormalizeChatInput   = "normalize_chat_input"
+	nodeRecognizeIntent      = "recognize_intent"
 	nodeLoadSessionContext   = "load_session_context"
 	nodeLoadLongTermMemory   = "load_long_term_memory"
 	nodeLoadUserProfile      = "load_user_profile"
@@ -43,6 +44,10 @@ func compileChatGraph(
 		{
 			key:  nodeNormalizeChatInput,
 			node: compose.InvokableLambda(normalizeChatInputGraphNode),
+		},
+		{
+			key:  nodeRecognizeIntent,
+			node: compose.InvokableLambda(service.recognizeIntentGraphNode),
 		},
 		{
 			key: nodeLoadSessionContext,
@@ -100,6 +105,8 @@ func compileChatGraph(
 	for _, current := range nodes {
 		options := []compose.GraphAddNodeOpt{compose.WithNodeName(current.key)}
 		switch current.key {
+		case nodeRecognizeIntent:
+			options = append(options, compose.WithOutputKey(nodeRecognizeIntent))
 		case nodeLoadSessionContext:
 			options = append(options, compose.WithOutputKey(nodeLoadSessionContext))
 		case nodeLoadLongTermMemory:
@@ -118,11 +125,13 @@ func compileChatGraph(
 
 	edges := [][2]string{
 		{compose.START, nodeNormalizeChatInput},
-		{nodeNormalizeChatInput, nodeLoadSessionContext},
-		{nodeNormalizeChatInput, nodeLoadLongTermMemory},
-		{nodeNormalizeChatInput, nodePrepareSkills},
-		{nodeNormalizeChatInput, nodeLoadUserProfile},
-		{nodeNormalizeChatInput, nodePreRetrieveKnowledge},
+		{nodeNormalizeChatInput, nodeRecognizeIntent},
+		{nodeRecognizeIntent, nodeLoadSessionContext},
+		{nodeRecognizeIntent, nodeLoadLongTermMemory},
+		{nodeRecognizeIntent, nodePrepareSkills},
+		{nodeRecognizeIntent, nodeLoadUserProfile},
+		{nodeRecognizeIntent, nodePreRetrieveKnowledge},
+		{nodeRecognizeIntent, nodeMergeContext},
 		{nodeLoadSessionContext, nodeMergeContext},
 		{nodeLoadLongTermMemory, nodeMergeContext},
 		{nodePrepareSkills, nodeMergeContext},

@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -309,6 +310,14 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 	}}
 	input.ConfirmedLongTermMemories = []string{"Checkout is owned by the payments team."}
 	input.DiagnosticSkills = []string{"metric_inspection: inspect service signals"}
+	input.Intent = intent.IntentResult{
+		Intent:         intent.IntentIncidentTriage,
+		Confidence:     0.86,
+		Service:        "checkout-service",
+		Symptom:        "timeout",
+		SuggestedTools: []intent.ToolName{intent.ToolQueryMetrics, intent.ToolQueryLogs},
+		Source:         "rule",
+	}
 	input.UserProfileContext = []string{
 		"default_service=checkout",
 		"timezone=Australia/Melbourne",
@@ -332,6 +341,9 @@ func TestPromptBuilderIncludesAgentContext(t *testing.T) {
 		"Checkout is owned by the payments team.",
 		"Available diagnostic skills:",
 		"metric_inspection: inspect service signals",
+		"Detected intent:",
+		"incident_triage",
+		"checkout-service",
 		"User profile context:",
 		"default_service=checkout",
 		"timezone=Australia/Melbourne",

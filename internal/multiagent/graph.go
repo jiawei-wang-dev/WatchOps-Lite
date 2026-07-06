@@ -9,8 +9,8 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
-	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -36,6 +36,7 @@ type Input struct {
 	Message     string
 	TimeContext common.TimeRange
 	Metadata    map[string]any
+	Intent      intent.IntentResult
 }
 
 type TriagePlanner interface {
@@ -68,18 +69,20 @@ type graphRunner interface {
 }
 
 type Orchestrator struct {
-	triage    TriagePlanner
-	evidence  FindingAnalyzer
-	knowledge FindingAnalyzer
-	synthesis Synthesizer
-	retriever RoleAwareRetriever
-	graph     graphRunner
-	graphErr  error
-	now       func() time.Time
+	triage     TriagePlanner
+	evidence   FindingAnalyzer
+	knowledge  FindingAnalyzer
+	synthesis  Synthesizer
+	retriever  RoleAwareRetriever
+	recognizer intent.Recognizer
+	graph      graphRunner
+	graphErr   error
+	now        func() time.Time
 }
 
 type normalizedInput struct {
-	Input Input
+	Input  Input
+	Intent intent.IntentResult
 }
 
 type roleRAGOutput struct {
@@ -119,10 +122,11 @@ func NewOrchestrator(
 	synthesis Synthesizer,
 ) *Orchestrator {
 	orchestrator := &Orchestrator{
-		triage:    triage,
-		evidence:  evidence,
-		knowledge: knowledge,
-		synthesis: synthesis,
+		triage:     triage,
+		evidence:   evidence,
+		knowledge:  knowledge,
+		synthesis:  synthesis,
+		recognizer: intent.NewRuleBasedRecognizer(),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -136,6 +140,11 @@ func NewOrchestrator(
 
 func (o *Orchestrator) WithRoleAwareRAG(retriever RoleAwareRetriever) *Orchestrator {
 	o.retriever = retriever
+	return o
+}
+
+func (o *Orchestrator) WithIntentRecognizer(recognizer intent.Recognizer) *Orchestrator {
+	o.recognizer = recognizer
 	return o
 }
 
@@ -281,7 +290,44 @@ func (o *Orchestrator) normalizeInput(
 		observability.MarkError(span, "multi-agent time context is invalid")
 		return normalizedInput{}, err
 	}
-	return normalizedInput{Input: input}, nil
+	result := input.Intent
+	if result.Intent == "" {
+		if o.recognizer != nil {
+			recognized, err := o.recognizer.Recognize(ctx, intent.RecognitionInput{
+				Message:        input.Message,
+				SessionID:      input.SessionID,
+				UserID:         input.UserID,
+				Now:            o.now(),
+				AvailableTools: []string{"query_metrics", "query_logs", "query_traces", "search_knowledge"},
+				AvailableSkills: []string{
+					"metric_inspection",
+					"log_investigation",
+					"trace_inspection",
+					"runbook_lookup",
+					"checkout_incident_diagnosis",
+				},
+			})
+			if err == nil {
+				result = recognized
+			}
+		}
+	}
+	if result.Intent == "" {
+		result = intent.SafeDefault(input.Message)
+	}
+	result = intent.Normalize(result)
+	agenteino.EmitStreamEvent(ctx, "intent_recognized", map[string]any{
+		"intent":           result.Intent,
+		"confidence":       result.Confidence,
+		"source":           result.Source,
+		"suggested_tools":  result.SuggestedTools,
+		"suggested_agents": result.SuggestedAgents,
+		"fallback_used":    result.Metadata["fallback_used"],
+	})
+	input.Intent = result
+	input.Metadata["intent"] = result
+	input.Metadata["intent_type"] = string(result.Intent)
+	return normalizedInput{Input: input, Intent: result}, nil
 }
 
 func (o *Orchestrator) buildGlobalPreRAGContext(
@@ -289,7 +335,8 @@ func (o *Orchestrator) buildGlobalPreRAGContext(
 	input normalizedInput,
 ) (roleRAGOutput, error) {
 	agenteino.EmitStreamEvent(ctx, "role_rag_started", map[string]any{
-		"agent_role": "global",
+		"agent_role":  "global",
+		"intent_type": string(input.Intent.Intent),
 	})
 	ctx, span := observability.StartSpan(
 		ctx,
@@ -309,13 +356,8 @@ func (o *Orchestrator) buildGlobalPreRAGContext(
 		})
 		return roleRAGOutput{Input: input.Input, Context: context}, nil
 	}
-	result, err := o.retriever.HybridRetrieve(
-		ctx,
-		retrievalknowledge.RetrievalRequest{
-			Query: input.Input.Message,
-			TopK:  8,
-		},
-	)
+	request := intent.BuildRetrievalRequest(input.Input.Message, input.Intent, 8)
+	result, err := o.retriever.HybridRetrieve(ctx, request)
 	if err != nil {
 		observability.MarkError(span, "multi-agent role-aware rag failed")
 		context := RoleRAGContext{Metadata: map[string]any{
@@ -330,6 +372,8 @@ func (o *Orchestrator) buildGlobalPreRAGContext(
 	}
 	context := buildRoleAwareRAGContext(result)
 	context.Metadata["role_rag_used"] = len(result.Chunks) > 0
+	context.Metadata["intent_type"] = string(input.Intent.Intent)
+	context.Metadata["rag_hints_applied"] = true
 	span.SetAttributes(
 		attribute.Bool("role_rag_used", len(result.Chunks) > 0),
 		attribute.Int("role_rag_chunk_count", len(result.Chunks)),
@@ -337,6 +381,7 @@ func (o *Orchestrator) buildGlobalPreRAGContext(
 	agenteino.EmitStreamEvent(ctx, "role_rag_completed", map[string]any{
 		"agent_role":  "global",
 		"chunk_count": len(result.Chunks),
+		"intent_type": string(input.Intent.Intent),
 		"metadata":    context.Metadata,
 	})
 	return roleRAGOutput{Input: input.Input, Context: context}, nil
@@ -357,14 +402,18 @@ func (o *Orchestrator) runTriage(
 		"synthesis_summary": input.Context.SynthesisSummary,
 		"metadata":          input.Context.Metadata,
 	}
+	triageInput.Metadata["intent"] = input.Input.Intent
 	plan, err := o.triage.Plan(ctx, triageInput)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
 		return triageOutput{}, err
 	}
+	plan.Intent = input.Input.Intent
 	plan.RoleRAG = input.Context
 	plan.Metadata = cloneMetadata(plan.Metadata)
 	plan.Metadata["role_rag"] = input.Context.Metadata
+	plan.Metadata["intent_type"] = string(input.Input.Intent.Intent)
+	plan.Metadata["selected_agents"] = intentAgentStrings(input.Input.Intent)
 	span.SetAttributes(
 		attribute.String("agent.role", string(AgentRoleTriage)),
 		attribute.String("agent.mode", metadataString(plan.Metadata, "triage_mode")),
@@ -450,6 +499,31 @@ func (o *Orchestrator) runFinding(
 		attribute.String("agent.role", string(role)),
 	)
 	defer span.End()
+	if !multiAgentRoleSelected(input.Plan.Intent, role) {
+		completed := o.now()
+		finding := skippedFinding(role)
+		step := completedStep(
+			role,
+			name,
+			input.Plan.Query,
+			finding.Summary,
+			nil,
+			nil,
+			nil,
+			started,
+			completed,
+		)
+		step.Status = AgentStepSkipped
+		step.Metadata = map[string]any{
+			"skipped_by_intent": true,
+			"intent_type":       string(input.Plan.Intent.Intent),
+		}
+		return findingOutput{
+			Triage:  input,
+			Finding: finding,
+			Step:    step,
+		}, nil
+	}
 	emitAgentStepEvent(ctx, "agent_step_started", role, "", 0, 0)
 	finding, err := analyzer.Analyze(ctx, input.Plan)
 	if err != nil {
@@ -664,6 +738,10 @@ func (o *Orchestrator) buildResponse(
 		"agent_mode":                 "multi_agent",
 		"orchestrator":               "eino_graph",
 		"roles":                      RoleOrder(),
+		"selected_agents":            intentAgentStrings(input.Merged.Triage.Plan.Intent),
+		"skipped_agents":             skippedAgentStrings(input.Merged.Triage.Plan.Intent),
+		"intent_type":                string(input.Merged.Triage.Plan.Intent.Intent),
+		"intent_source":              input.Merged.Triage.Plan.Intent.Source,
 		"fallback_used":              fallbackUsed,
 		"synthesis_mode":             synthesisMode,
 		"multi_agent_llm_used":       len(llmRoles) > 0,
@@ -703,6 +781,83 @@ func ensureRoleLLMMetadata(metadata map[string]any, role string) {
 			metadata[key] = value
 		}
 	}
+}
+
+func multiAgentRoleSelected(result intent.IntentResult, role AgentRole) bool {
+	if result.Intent == "" || result.Intent == intent.IntentGeneralChat || result.Confidence < 0.55 {
+		return true
+	}
+	switch role {
+	case AgentRoleTriage:
+		return result.Intent != intent.IntentKnowledgeQuery
+	case AgentRoleSynthesis:
+		return true
+	case AgentRoleEvidence:
+		return intent.RoleSelected(result, intent.RoleEvidence)
+	case AgentRoleKnowledge:
+		return intent.RoleSelected(result, intent.RoleKnowledge)
+	default:
+		return true
+	}
+}
+
+func skippedFinding(role AgentRole) AgentFinding {
+	return AgentFinding{
+		Role:        role,
+		Summary:     string(role) + " agent skipped by recognized intent.",
+		Evidence:    []common.EvidenceItem{},
+		EvidenceIDs: []string{},
+		ToolRuns:    []agenteino.ToolRun{},
+		Limitations: []agenteino.Limitation{},
+		Metadata: map[string]any{
+			"skipped_by_intent": true,
+		},
+	}
+}
+
+func intentAgentStrings(result intent.IntentResult) []string {
+	roles := intent.SelectAgentsForIntent(result)
+	values := make([]string, 0, len(roles))
+	for _, role := range roles {
+		values = append(values, string(role))
+	}
+	return values
+}
+
+func skippedAgentStrings(result intent.IntentResult) []string {
+	if result.Intent == "" || result.Intent == intent.IntentGeneralChat || result.Confidence < 0.55 {
+		return []string{}
+	}
+	selected := map[string]struct{}{}
+	for _, role := range intentAgentStrings(result) {
+		selected[role] = struct{}{}
+	}
+	values := []string{}
+	for _, role := range []AgentRole{AgentRoleTriage, AgentRoleEvidence, AgentRoleKnowledge, AgentRoleSynthesis} {
+		if _, exists := selected[string(role)]; !exists {
+			values = append(values, string(role))
+		}
+	}
+	if result.Intent == intent.IntentKnowledgeQuery {
+		values = append(values, string(AgentRoleTriage))
+	}
+	return dedupeStringValues(values)
+}
+
+func dedupeStringValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func copyRoleLLMMetadata(

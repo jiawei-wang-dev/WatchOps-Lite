@@ -4,6 +4,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -50,6 +51,7 @@ type TriagePlan struct {
 	Summary      string                 `json:"summary"`
 	TimeContext  common.TimeRange       `json:"time_context"`
 	Language     string                 `json:"language"`
+	Intent       intent.IntentResult    `json:"intent,omitempty"`
 	RoleRAG      RoleRAGContext         `json:"role_rag,omitempty"`
 	Limitations  []agenteino.Limitation `json:"limitations,omitempty"`
 	Metadata     map[string]any         `json:"metadata,omitempty"`

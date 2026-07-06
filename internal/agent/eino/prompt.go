@@ -55,6 +55,9 @@ Confirmed long-term memories:
 Available diagnostic skills:
 {{.diagnostic_skills}}
 
+Detected intent:
+{{.detected_intent}}
+
 User profile context:
 {{.user_profile_context}}
 
@@ -139,6 +142,11 @@ func (b *PromptBuilder) Build(ctx context.Context, input AgentInput) ([]*schema.
 		observability.MarkError(span, "Agent prompt rendering failed")
 		return nil, fmt.Errorf("encode diagnostic skills: %w", err)
 	}
+	detectedIntent, err := json.Marshal(input.Intent)
+	if err != nil {
+		observability.MarkError(span, "Agent prompt rendering failed")
+		return nil, fmt.Errorf("encode detected intent: %w", err)
+	}
 	userProfileContext, err := json.Marshal(input.UserProfileContext)
 	if err != nil {
 		observability.MarkError(span, "Agent prompt rendering failed")
@@ -160,6 +168,7 @@ func (b *PromptBuilder) Build(ctx context.Context, input AgentInput) ([]*schema.
 		"recent_messages":              string(recentMessages),
 		"confirmed_long_term_memories": string(longTermMemories),
 		"diagnostic_skills":            string(diagnosticSkills),
+		"detected_intent":              string(detectedIntent),
 		"user_profile_context":         string(userProfileContext),
 		"retrieved_knowledge":          string(retrievedKnowledge),
 		"pre_rag_metadata":             string(preRAGMetadata),

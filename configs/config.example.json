@@ -110,6 +110,14 @@
     "timeout": "30s",
     "prompt_version": "watchops_agent_v1"
   },
+  "intent": {
+    "enabled": true,
+    "mode": "hybrid",
+    "llm_enabled": false,
+    "timeout": "3s",
+    "min_llm_confidence": 0.55,
+    "emit_stream_events": true
+  },
   "llm": {
     "enabled": false,
     "provider": "openai_compatible",

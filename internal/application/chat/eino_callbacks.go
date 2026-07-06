@@ -69,6 +69,7 @@ func chatGraphSpanName(info *callbacks.RunInfo) string {
 	}
 	switch info.Name {
 	case nodeNormalizeChatInput,
+		nodeRecognizeIntent,
 		nodeLoadSessionContext,
 		nodeLoadLongTermMemory,
 		nodeLoadUserProfile,

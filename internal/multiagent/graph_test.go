@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -172,6 +173,83 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		result.Metadata["knowledge_fallback_used"] != true ||
 		result.Metadata["synthesis_fallback_used"] != true {
 		t.Fatalf("deterministic LLM metadata = %#v", result.Metadata)
+	}
+}
+
+func TestOrchestratorSelectsKnowledgeAndSynthesisForKnowledgeIntent(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen []TriagePlan
+	)
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		recordingAnalyzer{role: AgentRoleEvidence, mu: &mu, seen: &seen},
+		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
+		fakeSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-knowledge",
+		SessionID: "session-knowledge",
+		Message:   "find checkout runbook",
+		Intent: intent.IntentResult{
+			Intent:          intent.IntentKnowledgeQuery,
+			Confidence:      0.9,
+			SuggestedAgents: []intent.AgentRole{intent.RoleKnowledge, intent.RoleSynthesis},
+			Source:          "rule",
+		},
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(seen) != 1 || seen[0].Intent.Intent != intent.IntentKnowledgeQuery {
+		t.Fatalf("seen = %#v", seen)
+	}
+	if result.Steps[1].Status != AgentStepSkipped ||
+		result.Steps[2].Status != AgentStepCompleted ||
+		result.Metadata["intent_type"] != string(intent.IntentKnowledgeQuery) {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOrchestratorSelectsEvidenceTriageSynthesisForTraceIntent(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen []TriagePlan
+	)
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		recordingAnalyzer{role: AgentRoleEvidence, mu: &mu, seen: &seen},
+		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
+		fakeSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-trace",
+		SessionID: "session-trace",
+		Message:   "analyze trace",
+		Intent: intent.IntentResult{
+			Intent:          intent.IntentTraceAnalysis,
+			Confidence:      0.9,
+			SuggestedAgents: []intent.AgentRole{intent.RoleEvidence, intent.RoleTriage, intent.RoleSynthesis},
+			Source:          "rule",
+		},
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(seen) != 1 ||
+		seen[0].Intent.Intent != intent.IntentTraceAnalysis ||
+		result.Steps[2].Status != AgentStepSkipped {
+		t.Fatalf("seen=%#v steps=%#v", seen, result.Steps)
 	}
 }
 

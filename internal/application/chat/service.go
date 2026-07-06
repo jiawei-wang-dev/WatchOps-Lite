@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
@@ -56,6 +57,7 @@ type ServiceConfig struct {
 	ProfileLoader      profile.Loader
 	KnowledgeRetriever KnowledgeRetriever
 	PreRAGTopK         int
+	IntentRecognizer   intent.Recognizer
 }
 
 type Service struct {
@@ -72,6 +74,7 @@ type Service struct {
 	profileLoader      profile.Loader
 	knowledgeRetriever KnowledgeRetriever
 	preRAGTopK         int
+	intentRecognizer   intent.Recognizer
 }
 
 type KnowledgeRetriever interface {
@@ -102,12 +105,16 @@ func NewService(
 		profileLoader:      config.ProfileLoader,
 		knowledgeRetriever: config.KnowledgeRetriever,
 		preRAGTopK:         config.PreRAGTopK,
+		intentRecognizer:   config.IntentRecognizer,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
 	}
 	if service.preRAGTopK <= 0 {
 		service.preRAGTopK = 5
+	}
+	if service.intentRecognizer == nil {
+		service.intentRecognizer = intent.NewRuleBasedRecognizer()
 	}
 	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
 	return service

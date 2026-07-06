@@ -12,6 +12,7 @@ import (
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
@@ -46,6 +47,7 @@ type AgentInput struct {
 	RecentMessages            []session.Message
 	ConfirmedLongTermMemories []string
 	DiagnosticSkills          []string
+	Intent                    intent.IntentResult
 	UserProfileContext        []string
 	RetrievedKnowledge        []string
 	PreRetrievedKnowledge     []retrievalknowledge.RetrievedKnowledge

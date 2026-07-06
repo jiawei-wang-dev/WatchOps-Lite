@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/skills"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
@@ -27,10 +28,16 @@ type graphState struct {
 	renderedMessages          []*schema.Message
 	promptRenderFailed        bool
 	agentOutput               agenteino.AgentOutput
+	intentResult              intent.IntentResult
 }
 
 type normalizedChatInput struct {
 	command Command
+}
+
+type intentBranch struct {
+	command Command
+	result  intent.IntentResult
 }
 
 type sessionContextBranch struct {
@@ -45,7 +52,8 @@ type longTermMemoryBranch struct {
 }
 
 type diagnosticSkillsBranch struct {
-	cards []string
+	cards    []string
+	metadata map[string]any
 }
 
 type userProfileBranch struct {
@@ -69,14 +77,63 @@ func normalizeChatInputGraphNode(
 	return normalizedChatInput{command: command}, nil
 }
 
-func (s *Service) loadUserProfileGraphNode(
+func (s *Service) recognizeIntentGraphNode(
 	ctx context.Context,
 	input normalizedChatInput,
+) (intentBranch, error) {
+	if s.intentRecognizer == nil {
+		return intentBranch{
+			command: input.command,
+			result: intent.SafeDefault(input.command.Message, intent.IntentLimitation{
+				Code:    "INTENT_RECOGNIZER_UNAVAILABLE",
+				Message: "Intent recognizer is unavailable; safe default intent was used.",
+			}),
+		}, nil
+	}
+	result, err := s.intentRecognizer.Recognize(ctx, intent.RecognitionInput{
+		Message:        input.command.Message,
+		SessionID:      input.command.SessionID,
+		UserID:         input.command.UserID,
+		Now:            s.now(),
+		AvailableTools: []string{"query_metrics", "query_logs", "query_traces", "search_knowledge"},
+		AvailableSkills: []string{
+			"metric_inspection",
+			"log_investigation",
+			"trace_inspection",
+			"runbook_lookup",
+			"checkout_incident_diagnosis",
+		},
+	})
+	if err != nil {
+		result = intent.SafeDefault(input.command.Message, intent.IntentLimitation{
+			Code:    "INTENT_RECOGNITION_FAILED",
+			Message: "Intent recognition failed; safe default intent was used.",
+		})
+	}
+	result = intent.Normalize(result)
+	agenteino.EmitStreamEvent(ctx, "intent_recognized", map[string]any{
+		"intent":           result.Intent,
+		"confidence":       result.Confidence,
+		"source":           result.Source,
+		"suggested_tools":  result.SuggestedTools,
+		"suggested_agents": result.SuggestedAgents,
+		"fallback_used":    result.Metadata["fallback_used"],
+	})
+	return intentBranch{command: input.command, result: result}, nil
+}
+
+func (s *Service) loadUserProfileGraphNode(
+	ctx context.Context,
+	input map[string]any,
 ) (userProfileBranch, error) {
-	if input.command.UserID == "" || s.profileLoader == nil {
+	branch, err := intentBranchFromInput(input)
+	if err != nil {
+		return userProfileBranch{}, err
+	}
+	if branch.command.UserID == "" || s.profileLoader == nil {
 		return userProfileBranch{contextLines: []string{}}, nil
 	}
-	value, err := s.profileLoader.LoadProfile(ctx, input.command.UserID)
+	value, err := s.profileLoader.LoadProfile(ctx, branch.command.UserID)
 	if err != nil {
 		return userProfileBranch{contextLines: []string{}}, nil
 	}
@@ -85,11 +142,15 @@ func (s *Service) loadUserProfileGraphNode(
 
 func (s *Service) loadSessionContextGraphNode(
 	ctx context.Context,
-	input normalizedChatInput,
+	input map[string]any,
 ) (sessionContextBranch, error) {
-	snapshot, available := s.loadContext(ctx, input.command.SessionID)
+	branch, err := intentBranchFromInput(input)
+	if err != nil {
+		return sessionContextBranch{}, err
+	}
+	snapshot, available := s.loadContext(ctx, branch.command.SessionID)
 	return sessionContextBranch{
-		command:         input.command,
+		command:         branch.command,
 		snapshot:        snapshot,
 		memoryAvailable: available,
 	}, nil
@@ -97,13 +158,17 @@ func (s *Service) loadSessionContextGraphNode(
 
 func (s *Service) loadLongTermMemoryGraphNode(
 	ctx context.Context,
-	input normalizedChatInput,
+	input map[string]any,
 ) (longTermMemoryBranch, error) {
+	branch, err := intentBranchFromInput(input)
+	if err != nil {
+		return longTermMemoryBranch{}, err
+	}
 	if s.longTermMemory == nil {
 		return longTermMemoryBranch{memories: []longterm.Memory{}}, nil
 	}
 	memories, err := s.longTermMemory.Search(ctx, longterm.SearchQuery{
-		Query: input.command.Message,
+		Query: branch.command.Message,
 		Limit: s.longTermMemoryTopK,
 	})
 	if err != nil {
@@ -116,26 +181,69 @@ func (s *Service) loadLongTermMemoryGraphNode(
 }
 
 func prepareDiagnosticSkillsGraphNode(
-	_ context.Context,
-	_ normalizedChatInput,
+	ctx context.Context,
+	input map[string]any,
 ) (diagnosticSkillsBranch, error) {
-	return diagnosticSkillsBranch{cards: diagnosticSkillCards()}, nil
+	branch, err := intentBranchFromInput(input)
+	if err != nil {
+		return diagnosticSkillsBranch{}, err
+	}
+	ctx, span := observability.StartSpan(
+		ctx,
+		"intent.skills.select",
+		attribute.String("intent.type", string(branch.result.Intent)),
+	)
+	defer span.End()
+	all := diagnosticSkillDefinitions()
+	selected := intent.SelectSkillsForIntent(all, branch.result)
+	cards := formatDiagnosticSkillCards(selected)
+	metadata := map[string]any{
+		"selected_skill_count": len(cards),
+		"filtered_by_intent":   len(cards) != len(all),
+		"intent_type":          string(branch.result.Intent),
+	}
+	span.SetAttributes(
+		attribute.Int("selected_skills_count", len(cards)),
+		attribute.Bool("filtered_by_intent", len(cards) != len(all)),
+	)
+	return diagnosticSkillsBranch{cards: cards, metadata: metadata}, nil
 }
 
 func (s *Service) preRetrieveKnowledgeGraphNode(
 	ctx context.Context,
-	input normalizedChatInput,
+	input map[string]any,
 ) (preRAGBranch, error) {
+	branch, err := intentBranchFromInput(input)
+	if err != nil {
+		return preRAGBranch{}, err
+	}
 	agenteino.EmitStreamEvent(ctx, "pre_rag_started", map[string]any{
-		"query_length": len(input.command.Message),
+		"query_length": len(branch.command.Message),
+		"intent_type":  string(branch.result.Intent),
 	})
 	ctx, span := observability.StartSpan(
 		ctx,
 		"chat.pre_rag",
-		attribute.Int("query_length", len(input.command.Message)),
+		attribute.Int("query_length", len(branch.command.Message)),
 		attribute.Int("top_k", s.preRAGTopK),
+		attribute.String("intent.type", string(branch.result.Intent)),
 	)
 	defer span.End()
+	if !intent.ShouldRunPreRAG(branch.result) {
+		metadata := map[string]any{
+			"pre_rag_used":        false,
+			"reason":              "skipped_by_intent",
+			"pre_rag_intent_type": string(branch.result.Intent),
+			"rag_hints_applied":   false,
+		}
+		span.SetAttributes(attribute.Bool("pre_rag_used", false))
+		agenteino.EmitStreamEvent(ctx, "pre_rag_completed", map[string]any{
+			"chunk_count": 0,
+			"intent_type": string(branch.result.Intent),
+			"metadata":    metadata,
+		})
+		return preRAGBranch{metadata: metadata}, nil
+	}
 	if s.knowledgeRetriever == nil {
 		span.SetAttributes(attribute.Bool("pre_rag_used", false))
 		agenteino.EmitStreamEvent(ctx, "pre_rag_failed", map[string]any{
@@ -149,13 +257,16 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 			limitations: []string{"PRE_RAG_UNAVAILABLE"},
 		}, nil
 	}
-	result, err := s.knowledgeRetriever.HybridRetrieve(
+	request := intent.BuildRetrievalRequest(branch.command.Message, branch.result, s.preRAGTopK)
+	ragContext, ragSpan := observability.StartSpan(
 		ctx,
-		retrievalknowledge.RetrievalRequest{
-			Query: input.command.Message,
-			TopK:  s.preRAGTopK,
-		},
+		"intent.rag.apply",
+		attribute.String("intent.type", string(branch.result.Intent)),
+		attribute.Int("top_k", request.TopK),
 	)
+	result, err := s.knowledgeRetriever.HybridRetrieve(ragContext, request)
+	ragSpan.SetAttributes(attribute.Bool("rag_hints_applied", true))
+	ragSpan.End()
 	if err != nil {
 		observability.MarkError(span, "chat pre-rag failed")
 		span.SetAttributes(attribute.Bool("pre_rag_used", false))
@@ -173,12 +284,15 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 	metadata := cloneAnyMap(result.Metadata)
 	metadata["pre_rag_used"] = len(result.Chunks) > 0
 	metadata["pre_rag_chunk_count"] = len(result.Chunks)
+	metadata["pre_rag_intent_type"] = string(branch.result.Intent)
+	metadata["rag_hints_applied"] = true
 	span.SetAttributes(
 		attribute.Bool("pre_rag_used", len(result.Chunks) > 0),
 		attribute.Int("pre_rag_chunk_count", len(result.Chunks)),
 	)
 	agenteino.EmitStreamEvent(ctx, "pre_rag_completed", map[string]any{
 		"chunk_count": len(result.Chunks),
+		"intent_type": string(branch.result.Intent),
 		"metadata":    metadata,
 	})
 	return preRAGBranch{
@@ -212,12 +326,17 @@ func mergeContextGraphNode(
 	if !ok {
 		return graphState{}, fmt.Errorf("%w: pre-rag branch output is unavailable", ErrExecution)
 	}
+	intentBranch, ok := input[nodeRecognizeIntent].(intentBranch)
+	if !ok {
+		return graphState{}, fmt.Errorf("%w: intent branch output is unavailable", ErrExecution)
+	}
 	return graphState{
 		command:                   sessionBranch.command,
 		snapshot:                  sessionBranch.snapshot,
 		memoryAvailable:           sessionBranch.memoryAvailable,
 		longTermMemories:          memoryBranch.memories,
 		longTermMemoryUnavailable: memoryBranch.unavailable,
+		intentResult:              intentBranch.result,
 		agentInput: agenteino.AgentInput{
 			SessionSummary: sessionBranch.snapshot.Summary,
 			RecentMessages: sessionBranch.snapshot.RecentMessages,
@@ -225,6 +344,7 @@ func mergeContextGraphNode(
 				memoryBranch.memories,
 			),
 			DiagnosticSkills:   skillsBranch.cards,
+			Intent:             intentBranch.result,
 			UserProfileContext: profileBranch.contextLines,
 			RetrievedKnowledge: preRetrievedKnowledgePrompt(preRAGBranch.chunks),
 			PreRetrievedKnowledge: append(
@@ -238,6 +358,14 @@ func mergeContextGraphNode(
 			TimeContext:       sessionBranch.command.TimeContext,
 		},
 	}, nil
+}
+
+func intentBranchFromInput(input map[string]any) (intentBranch, error) {
+	branch, ok := input[nodeRecognizeIntent].(intentBranch)
+	if !ok {
+		return intentBranch{}, fmt.Errorf("%w: intent branch output is unavailable", ErrExecution)
+	}
+	return branch, nil
 }
 
 func (s *Service) renderPromptTemplateGraphNode(
@@ -297,6 +425,9 @@ func collectToolEvidenceGraphNode(
 	state.agentOutput.Metadata["pre_rag_used"] = state.agentInput.PreRAGAvailable
 	state.agentOutput.Metadata["pre_rag_chunk_count"] = len(state.agentInput.PreRetrievedKnowledge)
 	state.agentOutput.Metadata["pre_rag"] = state.agentInput.PreRAGMetadata
+	state.agentOutput.Metadata["intent"] = state.intentResult
+	state.agentOutput.Metadata["intent_type"] = string(state.intentResult.Intent)
+	state.agentOutput.Metadata["intent_source"] = state.intentResult.Source
 	for _, code := range state.agentInput.PreRAGLimitations {
 		state.agentOutput.Limitations = append(
 			state.agentOutput.Limitations,
@@ -358,6 +489,10 @@ func buildChatResponseGraphNode(
 }
 
 func diagnosticSkillCards() []string {
+	return formatDiagnosticSkillCards(diagnosticSkillDefinitions())
+}
+
+func diagnosticSkillDefinitions() []intent.SkillCard {
 	definitions := []skills.Skill{
 		skills.MetricInspectionSkill(),
 		skills.LogInvestigationSkill(),
@@ -365,12 +500,24 @@ func diagnosticSkillCards() []string {
 		skills.RunbookLookupSkill(),
 		skills.CheckoutIncidentDiagnosisSkill(),
 	}
+	cards := make([]intent.SkillCard, 0, len(definitions))
+	for _, definition := range definitions {
+		cards = append(cards, intent.SkillCard{
+			Name:        definition.Name(),
+			Description: definition.Description(),
+			ToolNames:   definition.ToolNames(),
+		})
+	}
+	return cards
+}
+
+func formatDiagnosticSkillCards(definitions []intent.SkillCard) []string {
 	cards := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		cards = append(cards, fmt.Sprintf(
 			"%s: %s",
-			definition.Name(),
-			definition.Description(),
+			definition.Name,
+			definition.Description,
 		))
 	}
 	return cards
