@@ -55,6 +55,20 @@ func TestRuleBasedRecognizesKnowledgeQuery(t *testing.T) {
 	}
 }
 
+func TestRuleBasedTreatsRunbookPlusEvidenceSignalsAsIncident(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "Why did checkout error rate increase? Include metrics, logs, alerts, and runbook evidence.",
+	})
+	if err != nil {
+		t.Fatalf("Recognize() error = %v", err)
+	}
+	if result.Intent != IntentIncidentTriage ||
+		!hasAgent(result, RoleEvidence) ||
+		!hasAgent(result, RoleKnowledge) {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestRuleBasedRecognizesMetricsSignal(t *testing.T) {
 	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
 		Message: "show checkout p95 latency metric",

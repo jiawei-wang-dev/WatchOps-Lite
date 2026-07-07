@@ -103,6 +103,10 @@ func classifyIntentByKeywords(message string, traceID string) (IntentType, float
 	if traceID != "" || containsAny(lower, "trace", "span", "链路", "慢调用") {
 		return IntentTraceAnalysis, 0.9, "trace signal detected"
 	}
+	if containsAny(lower, "runbook", "文档", "知识库", "怎么处理", "处理手册", "历史故障", "playbook") &&
+		containsAny(lower, "metric", "metrics", "log", "logs", "alert", "error rate", "error", "5xx", "500", "失败", "故障", "incident", "告警") {
+		return IntentIncidentTriage, 0.86, "knowledge request with incident evidence signals detected"
+	}
 	if containsAny(lower, "runbook", "文档", "知识库", "怎么处理", "处理手册", "历史故障", "playbook") {
 		return IntentKnowledgeQuery, 0.85, "knowledge or runbook signal detected"
 	}

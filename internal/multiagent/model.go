@@ -52,6 +52,7 @@ type TriagePlan struct {
 	TimeContext  common.TimeRange       `json:"time_context"`
 	Language     string                 `json:"language"`
 	Intent       intent.IntentResult    `json:"intent,omitempty"`
+	AgentPlan    AgentPlan              `json:"agent_plan,omitempty"`
 	RoleRAG      RoleRAGContext         `json:"role_rag,omitempty"`
 	Limitations  []agenteino.Limitation `json:"limitations,omitempty"`
 	Metadata     map[string]any         `json:"metadata,omitempty"`

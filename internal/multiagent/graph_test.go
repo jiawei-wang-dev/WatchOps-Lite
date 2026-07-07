@@ -211,8 +211,50 @@ func TestOrchestratorSelectsKnowledgeAndSynthesisForKnowledgeIntent(t *testing.T
 	}
 	if result.Steps[1].Status != AgentStepSkipped ||
 		result.Steps[2].Status != AgentStepCompleted ||
-		result.Metadata["intent_type"] != string(intent.IntentKnowledgeQuery) {
+		result.Metadata["intent_type"] != string(intent.IntentKnowledgeQuery) ||
+		result.Metadata["dynamic_routing_enabled"] != true {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestOrchestratorStatusSummarySkipsFindingsWithoutMergePanic(t *testing.T) {
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		recordingAnalyzer{},
+		recordingAnalyzer{},
+		fakeSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-status",
+		SessionID: "session-status",
+		Message:   "summarize current status",
+		Intent: intent.IntentResult{
+			Intent:     intent.IntentStatusSummary,
+			Confidence: 0.9,
+			Source:     "rule",
+		},
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for index, role := range []AgentRole{
+		AgentRoleTriage,
+		AgentRoleEvidence,
+		AgentRoleKnowledge,
+	} {
+		if result.Steps[index].Role != role ||
+			result.Steps[index].Status != AgentStepSkipped {
+			t.Fatalf("steps = %#v, want first three roles skipped", result.Steps)
+		}
+	}
+	if result.Steps[3].Role != AgentRoleSynthesis ||
+		result.Steps[3].Status != AgentStepCompleted {
+		t.Fatalf("steps = %#v, want synthesis completed", result.Steps)
 	}
 }
 
