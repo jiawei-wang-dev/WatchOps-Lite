@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	evidenceprocessor "github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence/processor"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
@@ -60,6 +61,7 @@ type ServiceConfig struct {
 	PreRAGTopK         int
 	IntentRecognizer   intent.Recognizer
 	RAGQueryPlanner    queryplan.QueryPlanner
+	EvidenceProcessor  *evidenceprocessor.Processor
 }
 
 type Service struct {
@@ -78,6 +80,7 @@ type Service struct {
 	preRAGTopK         int
 	intentRecognizer   intent.Recognizer
 	ragQueryPlanner    queryplan.QueryPlanner
+	evidenceProcessor  *evidenceprocessor.Processor
 }
 
 type KnowledgeRetriever interface {
@@ -110,6 +113,7 @@ func NewService(
 		preRAGTopK:         config.PreRAGTopK,
 		intentRecognizer:   config.IntentRecognizer,
 		ragQueryPlanner:    config.RAGQueryPlanner,
+		evidenceProcessor:  config.EvidenceProcessor,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -122,6 +126,9 @@ func NewService(
 	}
 	if service.ragQueryPlanner == nil {
 		service.ragQueryPlanner = queryplan.NewHybridPlanner(nil, queryplan.NewRuleBasedPlanner())
+	}
+	if service.evidenceProcessor == nil {
+		service.evidenceProcessor = evidenceprocessor.NewDefault()
 	}
 	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
 	return service

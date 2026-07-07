@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence/processor"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
@@ -364,6 +365,65 @@ func TestPreRAGMultiQueryDedupesAndPublishesMetadata(t *testing.T) {
 		preRAGMetadata["rag_sub_query_count"] != 2 ||
 		preRAGMetadata["selected_chunk_count"] != 2 {
 		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
+}
+
+func TestCollectToolEvidenceProcessesCitationsAndGroups(t *testing.T) {
+	metricScore := 0.8
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	runner.output.Evidence = []common.EvidenceItem{
+		{
+			ID:         "metric-1",
+			SourceType: "metrics",
+			SourceName: "prometheus",
+			Content:    "checkout error rate is elevated",
+			ResourceID: "checkout",
+			Score:      &metricScore,
+			Metadata: map[string]any{
+				"metric_name": "watchops_checkout_error_rate",
+				"value":       0.08,
+			},
+		},
+		{
+			ID:         "log-1",
+			SourceType: "logs",
+			SourceName: "elasticsearch-logs",
+			Content:    "checkout upstream timeout",
+			ResourceID: "checkout",
+			Metadata: map[string]any{
+				"log_id": "log-1",
+				"level":  "error",
+			},
+		},
+	}
+	service := newTestService(
+		runner,
+		&fakeSessionStore{snapshot: emptySessionSnapshot()},
+		12,
+		12,
+	)
+
+	result, err := service.Execute(context.Background(), validCommand())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	citations := map[string]any{}
+	for _, item := range result.Agent.Evidence {
+		citations[item.ID] = item.Metadata["citation_id"]
+	}
+	if citations["metric-1"] == "" ||
+		citations["log-1"] == "" ||
+		citations["metric-1"] == citations["log-1"] {
+		t.Fatalf("evidence = %#v, want citation metadata", result.Agent.Evidence)
+	}
+	if result.Agent.Metadata["citation_enabled"] != true ||
+		result.Agent.Metadata["evidence_original_count"] != 2 ||
+		result.Agent.Metadata["evidence_deduped_count"] != 2 {
+		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
+	if groups, ok := result.Agent.Metadata["processed_evidence_groups"].([]processor.EvidenceGroup); !ok ||
+		len(groups) != 2 {
+		t.Fatalf("processed evidence groups = %#v", result.Agent.Metadata["processed_evidence_groups"])
 	}
 }
 

@@ -20,6 +20,7 @@ Evidence rules:
 - Use query_logs, query_metrics, query_traces, or search_knowledge when external evidence is needed.
 - Use query_alerts and get_service_topology only as auxiliary on-call context for alert state and dependency context.
 - Never invent evidence IDs. Reference only IDs present in tool results.
+- When making claims, cite returned evidence IDs; WatchOps-Lite maps them to stable citation labels such as [E1] after execution.
 - Treat recommendations as proposed next steps, not observed facts.
 - If evidence is missing or a tool fails, state that clearly in limitations.
 

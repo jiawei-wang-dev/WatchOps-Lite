@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/skills"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
@@ -16,6 +17,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/profile"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge/queryplan"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -500,14 +502,15 @@ func (s *Service) runReActAgentGraphNode(
 	return state, nil
 }
 
-func collectToolEvidenceGraphNode(
-	_ context.Context,
+func (s *Service) collectToolEvidenceGraphNode(
+	ctx context.Context,
 	state graphState,
 ) (graphState, error) {
 	// Eino and deterministic runners already normalize evidence through the
 	// unified Evidence model. This node marks the graph boundary and attaches
 	// only application-level memory availability metadata.
 	ensureAgentMetadata(&state.agentOutput)
+	s.processAgentEvidence(ctx, &state.agentOutput)
 	state.agentOutput.Metadata["session_memory_available"] = state.memoryAvailable
 	state.agentOutput.Metadata["long_term_memory_count"] = len(state.longTermMemories)
 	state.agentOutput.Metadata["pre_rag_used"] = state.agentInput.PreRAGAvailable
@@ -536,6 +539,41 @@ func collectToolEvidenceGraphNode(
 		)
 	}
 	return state, nil
+}
+
+func (s *Service) processAgentEvidence(
+	ctx context.Context,
+	output *agenteino.AgentOutput,
+) {
+	if s.evidenceProcessor == nil {
+		return
+	}
+	items := make([]evidence.Item, 0, len(output.Evidence))
+	for _, item := range output.Evidence {
+		items = append(items, common.ToEvidenceItem(item))
+	}
+	report := s.evidenceProcessor.Process(ctx, items)
+	citationByID := make(map[string]string, len(report.Items))
+	for _, item := range report.Items {
+		citationByID[item.ID] = item.CitationID
+	}
+	for index := range output.Evidence {
+		citationID := citationByID[output.Evidence[index].ID]
+		if citationID == "" {
+			continue
+		}
+		if output.Evidence[index].Metadata == nil {
+			output.Evidence[index].Metadata = map[string]any{}
+		}
+		output.Evidence[index].Metadata["citation_id"] = citationID
+	}
+	output.Metadata["processed_evidence"] = report.Items
+	output.Metadata["processed_evidence_groups"] = report.Groups
+	output.Metadata["evidence_processor"] = report.Metadata
+	output.Metadata["evidence_original_count"] = report.Metadata["evidence_original_count"]
+	output.Metadata["evidence_deduped_count"] = report.Metadata["evidence_deduped_count"]
+	output.Metadata["evidence_group_count"] = report.Metadata["evidence_group_count"]
+	output.Metadata["citation_enabled"] = report.Metadata["citation_enabled"]
 }
 
 func (s *Service) persistSessionMemoryGraphNode(

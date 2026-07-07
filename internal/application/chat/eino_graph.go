@@ -89,7 +89,7 @@ func compileChatGraph(
 		},
 		{
 			key:  nodeCollectToolEvidence,
-			node: compose.InvokableLambda(collectToolEvidenceGraphNode),
+			node: compose.InvokableLambda(service.collectToolEvidenceGraphNode),
 		},
 		{
 			key: nodePersistSessionMemory,
