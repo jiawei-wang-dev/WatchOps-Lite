@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/diagnosis"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
@@ -84,7 +85,10 @@ func (DeterministicSynthesizer) Synthesize(
 		Limitations:     append([]agenteino.Limitation{}, input.Limitations...),
 		ToolRuns:        append([]agenteino.ToolRun{}, input.ToolRuns...),
 		Metadata: map[string]any{
-			"synthesis_mode": "deterministic",
+			"synthesis_mode":     "deterministic",
+			"hypotheses":         input.Hypotheses,
+			"hypothesis_count":   len(input.Hypotheses.Items),
+			"hypothesis_enabled": len(input.Hypotheses.Items) > 0,
 		},
 	}
 	if len(input.Evidence) == 0 {
@@ -176,7 +180,77 @@ func (DeterministicSynthesizer) Synthesize(
 			},
 		)
 	}
+	if supported := supportedHypotheses(input.Hypotheses); len(supported) > 0 {
+		best := supported[0]
+		output.Inferences = append(output.Inferences, agenteino.Inference{
+			Text: localizedTriageText(
+				input.Plan.Language,
+				"假设评估显示最可能的根因方向是 "+best.Title+"；该判断仍必须以引用证据为边界。",
+				"Hypothesis evaluation indicates the most likely root-cause direction is "+best.Title+"; this remains bounded by the cited evidence.",
+			),
+			EvidenceIDs: citationBackedEvidenceIDs(best.SupportingEvidence, input.Evidence),
+		})
+	}
+	if missing := missingHypothesisEvidence(input.Hypotheses); len(missing) > 0 {
+		output.Metadata["hypothesis_missing_evidence"] = missing
+	}
 	return output, nil
+}
+
+func supportedHypotheses(set diagnosis.HypothesisSet) []diagnosis.Hypothesis {
+	result := []diagnosis.Hypothesis{}
+	for _, item := range set.Items {
+		if item.Status == diagnosis.StatusSupported {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func missingHypothesisEvidence(set diagnosis.HypothesisSet) []string {
+	result := []string{}
+	for _, item := range set.Items {
+		for _, missing := range item.MissingEvidence {
+			result = appendUniqueString(result, item.ID+":"+missing)
+		}
+	}
+	return result
+}
+
+func citationBackedEvidenceIDs(
+	citations []string,
+	evidence []common.EvidenceItem,
+) []string {
+	if len(citations) == 0 {
+		return []string{}
+	}
+	result := []string{}
+	for _, citation := range citations {
+		for _, item := range evidence {
+			if item.Metadata != nil && item.Metadata["citation_id"] == citation {
+				result = appendUniqueString(result, item.ID)
+			}
+		}
+	}
+	if len(result) > 0 {
+		return result
+	}
+	for _, item := range evidence {
+		result = append(result, item.ID)
+		if len(result) == 2 {
+			break
+		}
+	}
+	return result
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, current := range values {
+		if current == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func validateSynthesisOutput(

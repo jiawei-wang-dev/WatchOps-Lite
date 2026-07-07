@@ -264,6 +264,7 @@ func (l *RoleLLM) synthesize(
 			"limitations":  input.KnowledgeFinding.Limitations,
 		},
 		"evidence":    boundedEvidenceForPrompt(input.Evidence),
+		"hypotheses":  input.Hypotheses,
 		"limitations": input.Limitations,
 		"language":    input.Plan.Language,
 	}

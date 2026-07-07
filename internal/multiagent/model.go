@@ -4,6 +4,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/diagnosis"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -44,18 +45,19 @@ type AgentStep struct {
 }
 
 type TriagePlan struct {
-	Service      string                 `json:"service"`
-	IncidentType string                 `json:"incident_type"`
-	EvidencePlan []string               `json:"evidence_plan"`
-	Query        string                 `json:"query"`
-	Summary      string                 `json:"summary"`
-	TimeContext  common.TimeRange       `json:"time_context"`
-	Language     string                 `json:"language"`
-	Intent       intent.IntentResult    `json:"intent,omitempty"`
-	AgentPlan    AgentPlan              `json:"agent_plan,omitempty"`
-	RoleRAG      RoleRAGContext         `json:"role_rag,omitempty"`
-	Limitations  []agenteino.Limitation `json:"limitations,omitempty"`
-	Metadata     map[string]any         `json:"metadata,omitempty"`
+	Service      string                  `json:"service"`
+	IncidentType string                  `json:"incident_type"`
+	EvidencePlan []string                `json:"evidence_plan"`
+	Query        string                  `json:"query"`
+	Summary      string                  `json:"summary"`
+	TimeContext  common.TimeRange        `json:"time_context"`
+	Language     string                  `json:"language"`
+	Intent       intent.IntentResult     `json:"intent,omitempty"`
+	AgentPlan    AgentPlan               `json:"agent_plan,omitempty"`
+	Hypotheses   diagnosis.HypothesisSet `json:"hypotheses,omitempty"`
+	RoleRAG      RoleRAGContext          `json:"role_rag,omitempty"`
+	Limitations  []agenteino.Limitation  `json:"limitations,omitempty"`
+	Metadata     map[string]any          `json:"metadata,omitempty"`
 }
 
 type RoleRAGContext struct {

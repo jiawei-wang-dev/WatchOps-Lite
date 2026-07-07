@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/diagnosis"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	retrievalknowledge "github.com/jiawei-wang-dev/WatchOps-Lite/internal/retrieval/knowledge"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -80,6 +81,17 @@ func (a recordingAnalyzer) Analyze(
 			Content:    string(a.role) + " evidence",
 		}},
 	}, nil
+}
+
+type staticAnalyzer struct {
+	finding AgentFinding
+}
+
+func (a staticAnalyzer) Analyze(
+	context.Context,
+	TriagePlan,
+) (AgentFinding, error) {
+	return a.finding, nil
 }
 
 type fakeRoleAwareRetriever struct {
@@ -255,6 +267,68 @@ func TestOrchestratorStatusSummarySkipsFindingsWithoutMergePanic(t *testing.T) {
 	if result.Steps[3].Role != AgentRoleSynthesis ||
 		result.Steps[3].Status != AgentStepCompleted {
 		t.Fatalf("steps = %#v, want synthesis completed", result.Steps)
+	}
+}
+
+func TestOrchestratorEvaluatesHypothesesForIncidentTriage(t *testing.T) {
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		staticAnalyzer{finding: AgentFinding{
+			Role:        AgentRoleEvidence,
+			Summary:     "upstream timeout evidence",
+			EvidenceIDs: []string{"log-1", "metric-1"},
+			Evidence: []common.EvidenceItem{
+				{
+					ID:         "log-1",
+					SourceType: "logs",
+					SourceName: "elasticsearch-logs",
+					Content:    "checkout upstream dependency timeout with retry amplification",
+					Metadata: map[string]any{
+						"log_id": "log-1",
+						"level":  "error",
+					},
+				},
+				{
+					ID:         "metric-1",
+					SourceType: "metrics",
+					SourceName: "prometheus",
+					Content:    "dependency error rate increased for checkout",
+					Metadata: map[string]any{
+						"metric_name": "dependency_error_rate",
+						"value":       0.08,
+					},
+				},
+			},
+		}},
+		staticAnalyzer{finding: AgentFinding{Role: AgentRoleKnowledge}},
+		fakeSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-hypothesis",
+		SessionID: "session-hypothesis",
+		Message:   "Why did checkout 5xx error rate increase?",
+		Intent: intent.IntentResult{
+			Intent:     intent.IntentIncidentTriage,
+			Confidence: 0.9,
+			Symptom:    "error",
+			Source:     "rule",
+		},
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	set, ok := result.Metadata["hypotheses"].(diagnosis.HypothesisSet)
+	if !ok || len(set.Items) == 0 {
+		t.Fatalf("metadata = %#v, want evaluated hypotheses", result.Metadata)
+	}
+	if set.Items[0].Status != diagnosis.StatusSupported ||
+		len(set.Items[0].SupportingEvidence) == 0 {
+		t.Fatalf("hypotheses = %#v", set.Items)
 	}
 }
 

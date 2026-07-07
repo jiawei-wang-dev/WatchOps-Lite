@@ -9,6 +9,9 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/diagnosis"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
+	evidenceprocessor "github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence/processor"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
@@ -54,6 +57,7 @@ type SynthesisInput struct {
 	Evidence         []common.EvidenceItem
 	ToolRuns         []agenteino.ToolRun
 	Limitations      []agenteino.Limitation
+	Hypotheses       diagnosis.HypothesisSet
 }
 
 type Synthesizer interface {
@@ -75,6 +79,9 @@ type Orchestrator struct {
 	synthesis  Synthesizer
 	retriever  RoleAwareRetriever
 	recognizer intent.Recognizer
+	hypotheses diagnosis.Generator
+	evaluator  *diagnosis.Evaluator
+	processor  *evidenceprocessor.Processor
 	graph      graphRunner
 	graphErr   error
 	now        func() time.Time
@@ -128,6 +135,9 @@ func NewOrchestrator(
 		knowledge:  knowledge,
 		synthesis:  synthesis,
 		recognizer: intent.NewRuleBasedRecognizer(),
+		hypotheses: diagnosis.NewRuleBasedHypothesisGenerator(),
+		evaluator:  diagnosis.NewEvaluator(),
+		processor:  evidenceprocessor.NewDefault(),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -454,6 +464,9 @@ func (o *Orchestrator) runTriage(
 	plan.Metadata["skipped_agents"] = agentRoleStrings(input.Plan.SkippedAgents)
 	plan.Metadata["dynamic_routing_enabled"] = input.Plan.DynamicRoutingEnabled
 	plan.Metadata["role_tools"] = input.Plan.RoleTools
+	plan.Hypotheses = o.generateHypotheses(ctx, input.Input, plan)
+	plan.Metadata["hypothesis_count"] = len(plan.Hypotheses.Items)
+	plan.Metadata["hypothesis_enabled"] = len(plan.Hypotheses.Items) > 0
 	span.SetAttributes(
 		attribute.String("agent.role", string(AgentRoleTriage)),
 		attribute.String("agent.mode", metadataString(plan.Metadata, "triage_mode")),
@@ -494,6 +507,46 @@ func (o *Orchestrator) runTriage(
 		Plan:  plan,
 		Step:  step,
 	}, nil
+}
+
+func (o *Orchestrator) generateHypotheses(
+	ctx context.Context,
+	input Input,
+	plan TriagePlan,
+) diagnosis.HypothesisSet {
+	if o.hypotheses == nil || !hypothesisEnabledForIntent(plan.Intent) {
+		return diagnosis.HypothesisSet{
+			Items:  []diagnosis.Hypothesis{},
+			Source: "disabled",
+			Metadata: map[string]any{
+				"hypothesis_enabled": false,
+				"reason":             "intent_not_supported",
+			},
+		}
+	}
+	set, err := o.hypotheses.Generate(ctx, diagnosis.GenerateInput{
+		Intent:   plan.Intent,
+		Message:  input.Message,
+		Service:  plan.Service,
+		Symptom:  plan.Intent.Symptom,
+		Keywords: plan.Intent.Keywords,
+	})
+	if err != nil {
+		return diagnosis.HypothesisSet{
+			Items:  []diagnosis.Hypothesis{},
+			Source: "fallback_disabled",
+			Metadata: map[string]any{
+				"hypothesis_enabled": false,
+				"fallback_used":      true,
+			},
+		}
+	}
+	return set
+}
+
+func hypothesisEnabledForIntent(result intent.IntentResult) bool {
+	return result.Intent == intent.IntentIncidentTriage ||
+		result.Intent == intent.IntentTraceAnalysis
 }
 
 func (o *Orchestrator) runEvidence(
@@ -655,6 +708,16 @@ func (o *Orchestrator) mergeFindings(
 		evidence.Finding,
 		knowledge.Finding,
 	)
+	report := o.processEvidenceForHypotheses(ctx, merged.Evidence)
+	applyCitationsToEvidence(merged.Evidence, report)
+	merged.Plan.Hypotheses = o.evaluateHypotheses(
+		ctx,
+		merged.Plan.Hypotheses,
+		report,
+	)
+	merged.Metadata = cloneMetadata(merged.Metadata)
+	merged.Metadata["hypotheses"] = merged.Plan.Hypotheses
+	merged.Metadata["hypothesis_count"] = len(merged.Plan.Hypotheses.Items)
 	emitAgentStepEvent(
 		ctx,
 		"agent_step_completed",
@@ -672,6 +735,52 @@ func (o *Orchestrator) mergeFindings(
 			knowledge.Step,
 		},
 	}, nil
+}
+
+func (o *Orchestrator) evaluateHypotheses(
+	ctx context.Context,
+	set diagnosis.HypothesisSet,
+	report evidenceprocessor.EvidenceReport,
+) diagnosis.HypothesisSet {
+	if o.evaluator == nil || len(set.Items) == 0 {
+		return set
+	}
+	return o.evaluator.Evaluate(ctx, set, report)
+}
+
+func (o *Orchestrator) processEvidenceForHypotheses(
+	ctx context.Context,
+	items []common.EvidenceItem,
+) evidenceprocessor.EvidenceReport {
+	processor := o.processor
+	if processor == nil {
+		processor = evidenceprocessor.NewDefault()
+	}
+	evidenceItems := make([]evidence.Item, 0, len(items))
+	for _, item := range items {
+		evidenceItems = append(evidenceItems, common.ToEvidenceItem(item))
+	}
+	return processor.Process(ctx, evidenceItems)
+}
+
+func applyCitationsToEvidence(
+	items []common.EvidenceItem,
+	report evidenceprocessor.EvidenceReport,
+) {
+	citations := make(map[string]string, len(report.Items))
+	for _, item := range report.Items {
+		citations[item.ID] = item.CitationID
+	}
+	for index := range items {
+		citation := citations[items[index].ID]
+		if citation == "" {
+			continue
+		}
+		if items[index].Metadata == nil {
+			items[index].Metadata = map[string]any{}
+		}
+		items[index].Metadata["citation_id"] = citation
+	}
 }
 
 func (o *Orchestrator) runSynthesis(
@@ -692,6 +801,7 @@ func (o *Orchestrator) runSynthesis(
 		Evidence:         input.Merged.Evidence,
 		ToolRuns:         input.Merged.ToolRuns,
 		Limitations:      input.Merged.Limitations,
+		Hypotheses:       input.Merged.Plan.Hypotheses,
 	})
 	if err != nil {
 		observability.MarkError(span, "Synthesis Agent failed")
@@ -792,6 +902,8 @@ func (o *Orchestrator) buildResponse(
 		"multi_agent_llm_call_count": llmCallCount,
 		"role_rag":                   input.Merged.Triage.Plan.RoleRAG.Metadata,
 		"role_rag_chunk_count":       roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
+		"hypotheses":                 input.Merged.Merged.Plan.Hypotheses,
+		"hypothesis_count":           len(input.Merged.Merged.Plan.Hypotheses.Items),
 	}
 	copyRoleLLMMetadata(metadata, triageMetadata, "triage")
 	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
