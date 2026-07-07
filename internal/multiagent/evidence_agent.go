@@ -66,7 +66,12 @@ func (a *EvidenceAgent) Analyze(
 		ToolRuns:    []agenteino.ToolRun{},
 		Limitations: []agenteino.Limitation{},
 		Metadata: map[string]any{
-			"planned_sources": append([]string{}, plan.EvidencePlan...),
+			"planned_sources":  append([]string{}, plan.EvidencePlan...),
+			"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleEvidence],
+			"role_skill_names": roleSkillNamesForRole(
+				plan.AgentPlan.RoleSkillHints,
+				AgentRoleEvidence,
+			),
 		},
 	}
 	executedSources := []string{}

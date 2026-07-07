@@ -89,6 +89,11 @@ func (DeterministicSynthesizer) Synthesize(
 			"hypotheses":         input.Hypotheses,
 			"hypothesis_count":   len(input.Hypotheses.Items),
 			"hypothesis_enabled": len(input.Hypotheses.Items) > 0,
+			"role_skill_cards":   input.Plan.AgentPlan.RoleSkillCards[AgentRoleSynthesis],
+			"role_skill_names": roleSkillNamesForRole(
+				input.Plan.AgentPlan.RoleSkillHints,
+				AgentRoleSynthesis,
+			),
 		},
 	}
 	if len(input.Evidence) == 0 {

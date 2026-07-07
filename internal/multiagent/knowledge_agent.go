@@ -71,7 +71,13 @@ func (a *KnowledgeAgent) Analyze(
 		EvidenceIDs: []string{},
 		ToolRuns:    []agenteino.ToolRun{},
 		Limitations: []agenteino.Limitation{},
-		Metadata:    map[string]any{},
+		Metadata: map[string]any{
+			"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge],
+			"role_skill_names": roleSkillNamesForRole(
+				plan.AgentPlan.RoleSkillHints,
+				AgentRoleKnowledge,
+			),
+		},
 	}
 	summaries := []string{}
 	roleRAGChunks := plan.RoleRAG.ChunksByRole[AgentRoleKnowledge]

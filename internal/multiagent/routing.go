@@ -9,13 +9,15 @@ import (
 )
 
 type AgentPlan struct {
-	Intent                intent.IntentResult             `json:"intent"`
-	SelectedAgents        []AgentRole                     `json:"selected_agents"`
-	SkippedAgents         []AgentRole                     `json:"skipped_agents"`
-	RoleTools             map[AgentRole][]intent.ToolName `json:"role_tools"`
-	RoleRAGHints          map[AgentRole]intent.RAGHints   `json:"role_rag_hints"`
-	Metadata              map[string]any                  `json:"metadata,omitempty"`
-	DynamicRoutingEnabled bool                            `json:"dynamic_routing_enabled"`
+	Intent                intent.IntentResult              `json:"intent"`
+	SelectedAgents        []AgentRole                      `json:"selected_agents"`
+	SkippedAgents         []AgentRole                      `json:"skipped_agents"`
+	RoleTools             map[AgentRole][]intent.ToolName  `json:"role_tools"`
+	RoleRAGHints          map[AgentRole]intent.RAGHints    `json:"role_rag_hints"`
+	RoleSkillHints        map[AgentRole][]intent.SkillCard `json:"role_skill_hints,omitempty"`
+	RoleSkillCards        map[AgentRole]string             `json:"role_skill_cards,omitempty"`
+	Metadata              map[string]any                   `json:"metadata,omitempty"`
+	DynamicRoutingEnabled bool                             `json:"dynamic_routing_enabled"`
 }
 
 func PlanAgents(result intent.IntentResult) AgentPlan {
@@ -55,18 +57,24 @@ func planAgents(result intent.IntentResult) AgentPlan {
 	}
 	selected = normalizeAgentRoles(selected)
 	skipped := skippedRoles(selected)
+	roleTools := defaultRoleTools()
+	roleSkillHints := buildRoleSkillHints(result, roleTools)
+	roleSkillCards := buildRoleSkillCards(roleSkillHints)
 	return AgentPlan{
 		Intent:                result,
 		SelectedAgents:        selected,
 		SkippedAgents:         skipped,
-		RoleTools:             defaultRoleTools(),
+		RoleTools:             roleTools,
 		RoleRAGHints:          roleRAGHints(result),
+		RoleSkillHints:        roleSkillHints,
+		RoleSkillCards:        roleSkillCards,
 		DynamicRoutingEnabled: dynamic,
 		Metadata: map[string]any{
 			"intent_type":             string(result.Intent),
 			"selected_agents":         agentRoleStrings(selected),
 			"skipped_agents":          agentRoleStrings(skipped),
 			"dynamic_routing_enabled": dynamic,
+			"role_skill_names":        roleSkillNames(roleSkillHints),
 		},
 	}
 }

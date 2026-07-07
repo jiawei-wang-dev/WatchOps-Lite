@@ -160,6 +160,11 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		if plan.Service != "checkout" || plan.Query != "Why is checkout failing?" {
 			t.Fatalf("analyzer plan = %#v", plan)
 		}
+		if plan.AgentPlan.RoleSkillCards[plan.AgentPlan.SelectedAgents[0]] == "" ||
+			plan.AgentPlan.RoleSkillCards[AgentRoleEvidence] == "" ||
+			plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge] == "" {
+			t.Fatalf("analyzer plan missing role skill cards: %#v", plan.AgentPlan.RoleSkillCards)
+		}
 	}
 	if len(result.Steps) != 4 {
 		t.Fatalf("Steps = %d, want 4", len(result.Steps))

@@ -107,6 +107,7 @@ func (l *RoleLLM) planTriage(
 		"allowed_evidence_types": supportedEvidenceSources,
 		"rule_based_candidate":   boundedPlanForPrompt(rulePlan),
 		"role_rag_context":       input.Metadata["role_rag_context"],
+		"role_skill_cards":       input.Metadata["role_skill_cards"],
 		"constraints": []string{
 			"Triage must not make final root-cause claims.",
 			"Triage must only produce a bounded investigation plan.",
@@ -123,6 +124,7 @@ func (l *RoleLLM) planTriage(
 Produce only a bounded investigation plan, not a final diagnosis.
 Do not claim a root cause, do not invent evidence, and do not expose chain-of-thought.
 Choose evidence_plan values only from the allowed_evidence_types list.
+Follow role_skill_cards as bounded diagnostic guidance, not as an execution engine.
 Use the requested language for triage_summary and constraints.
 Return JSON only with:
 service, incident_type, severity_hint, evidence_plan, language,
@@ -171,10 +173,11 @@ func (l *RoleLLM) analyzeEvidence(
 	limitations []agenteino.Limitation,
 ) (evidenceAnalysis, llmCallResult, error) {
 	payload := map[string]any{
-		"triage_plan": boundedPlanForPrompt(plan),
-		"evidence":    boundedEvidenceForPrompt(evidence),
-		"limitations": limitations,
-		"language":    plan.Language,
+		"triage_plan":      boundedPlanForPrompt(plan),
+		"evidence":         boundedEvidenceForPrompt(evidence),
+		"limitations":      limitations,
+		"language":         plan.Language,
+		"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleEvidence],
 	}
 	var output evidenceAnalysis
 	call, err := l.callJSON(
@@ -182,6 +185,7 @@ func (l *RoleLLM) analyzeEvidence(
 		AgentRoleEvidence,
 		`You are the Evidence Agent in a service reliability investigation.
 Analyze only the supplied tool evidence. Do not invent observations or evidence IDs.
+Follow role_skill_cards to interpret metrics, logs, traces, alerts, and topology.
 Use the requested language. Keep the analysis concise and return JSON only with:
 observation_summary, supported_signals, suspected_failure_pattern, missing_evidence, evidence_ids.
 suspected_failure_pattern must remain a hypothesis unless the evidence directly proves it.
@@ -212,11 +216,12 @@ func (l *RoleLLM) analyzeKnowledge(
 	limitations []agenteino.Limitation,
 ) (knowledgeAnalysis, llmCallResult, error) {
 	payload := map[string]any{
-		"triage_plan": boundedPlanForPrompt(plan),
-		"knowledge":   boundedEvidenceForPrompt(evidence),
-		"memory":      boundedMemoryForPrompt(memories),
-		"limitations": limitations,
-		"language":    plan.Language,
+		"triage_plan":      boundedPlanForPrompt(plan),
+		"knowledge":        boundedEvidenceForPrompt(evidence),
+		"memory":           boundedMemoryForPrompt(memories),
+		"limitations":      limitations,
+		"language":         plan.Language,
+		"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge],
 	}
 	var output knowledgeAnalysis
 	call, err := l.callJSON(
@@ -225,6 +230,7 @@ func (l *RoleLLM) analyzeKnowledge(
 		`You are the Knowledge Agent in a service reliability investigation.
 Summarize only the supplied runbook chunks and historical memory.
 Historical memory is prior experience, never proof of the current incident.
+Follow role_skill_cards when separating runbook guidance from current facts.
 Do not invent actions or evidence IDs. Use the requested language.
 Return JSON only with: knowledge_summary, runbook_supported_actions,
 historical_patterns, unsafe_actions_to_avoid, evidence_ids.
@@ -263,10 +269,11 @@ func (l *RoleLLM) synthesize(
 			"evidence_ids": input.KnowledgeFinding.EvidenceIDs,
 			"limitations":  input.KnowledgeFinding.Limitations,
 		},
-		"evidence":    boundedEvidenceForPrompt(input.Evidence),
-		"hypotheses":  input.Hypotheses,
-		"limitations": input.Limitations,
-		"language":    input.Plan.Language,
+		"evidence":         boundedEvidenceForPrompt(input.Evidence),
+		"hypotheses":       input.Hypotheses,
+		"limitations":      input.Limitations,
+		"language":         input.Plan.Language,
+		"role_skill_cards": input.Plan.AgentPlan.RoleSkillCards[AgentRoleSynthesis],
 	}
 	var draft synthesisDraft
 	call, err := l.callJSON(
@@ -274,6 +281,7 @@ func (l *RoleLLM) synthesize(
 		AgentRoleSynthesis,
 		`You are the Synthesis Agent for a service reliability investigation.
 Produce the final bounded diagnosis using only the supplied evidence and role findings.
+Follow role_skill_cards: consume existing findings and do not request or invent new evidence.
 Do not claim an observed root cause without direct evidence. Keep hypotheses in inferences.
 Every conclusion, inference, and recommendation must cite one or more exact supplied evidence IDs.
 Preserve limitations and use the requested language.
@@ -620,14 +628,15 @@ func boundedEvidenceForPrompt(evidence []common.EvidenceItem) []map[string]any {
 
 func boundedPlanForPrompt(plan TriagePlan) map[string]any {
 	return map[string]any{
-		"service":       plan.Service,
-		"incident_type": plan.IncidentType,
-		"evidence_plan": plan.EvidencePlan,
-		"query":         boundedSummary(plan.Query, 600),
-		"summary":       boundedSummary(plan.Summary, 600),
-		"time_context":  plan.TimeContext,
-		"language":      plan.Language,
-		"limitations":   plan.Limitations,
+		"service":          plan.Service,
+		"incident_type":    plan.IncidentType,
+		"evidence_plan":    plan.EvidencePlan,
+		"query":            boundedSummary(plan.Query, 600),
+		"summary":          boundedSummary(plan.Summary, 600),
+		"time_context":     plan.TimeContext,
+		"language":         plan.Language,
+		"limitations":      plan.Limitations,
+		"role_skill_cards": plan.AgentPlan.RoleSkillCards,
 		"role_rag": map[string]any{
 			"triage":            roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleTriage]),
 			"evidence":          roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleEvidence]),

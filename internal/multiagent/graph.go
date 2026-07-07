@@ -449,6 +449,8 @@ func (o *Orchestrator) runTriage(
 	}
 	triageInput.Metadata["intent"] = input.Input.Intent
 	triageInput.Metadata["agent_plan"] = input.Plan.Metadata
+	triageInput.Metadata["role_skill_cards"] =
+		input.Plan.RoleSkillCards[AgentRoleTriage]
 	plan, err := o.triage.Plan(ctx, triageInput)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
@@ -464,6 +466,9 @@ func (o *Orchestrator) runTriage(
 	plan.Metadata["skipped_agents"] = agentRoleStrings(input.Plan.SkippedAgents)
 	plan.Metadata["dynamic_routing_enabled"] = input.Plan.DynamicRoutingEnabled
 	plan.Metadata["role_tools"] = input.Plan.RoleTools
+	plan.Metadata["role_skill_cards"] = input.Plan.RoleSkillCards[AgentRoleTriage]
+	plan.Metadata["role_skill_names"] =
+		roleSkillNamesForRole(input.Plan.RoleSkillHints, AgentRoleTriage)
 	plan.Hypotheses = o.generateHypotheses(ctx, input.Input, plan)
 	plan.Metadata["hypothesis_count"] = len(plan.Hypotheses.Items)
 	plan.Metadata["hypothesis_enabled"] = len(plan.Hypotheses.Items) > 0
@@ -683,6 +688,10 @@ func (o *Orchestrator) runFinding(
 		completed,
 	)
 	step.Metadata = cloneMetadata(finding.Metadata)
+	step.Metadata["role_skill_cards"] =
+		input.Plan.AgentPlan.RoleSkillCards[role]
+	step.Metadata["role_skill_names"] =
+		roleSkillNamesForRole(input.Plan.AgentPlan.RoleSkillHints, role)
 	return findingOutput{
 		Triage:  input,
 		Finding: finding,
@@ -893,6 +902,8 @@ func (o *Orchestrator) buildResponse(
 		"dynamic_routing_enabled":    input.Merged.Triage.Plan.AgentPlan.DynamicRoutingEnabled,
 		"role_tools":                 input.Merged.Triage.Plan.AgentPlan.RoleTools,
 		"role_rag_hints":             input.Merged.Triage.Plan.AgentPlan.RoleRAGHints,
+		"role_skill_names":           roleSkillNames(input.Merged.Triage.Plan.AgentPlan.RoleSkillHints),
+		"role_skill_cards":           input.Merged.Triage.Plan.AgentPlan.RoleSkillCards,
 		"intent_type":                string(input.Merged.Triage.Plan.Intent.Intent),
 		"intent_source":              input.Merged.Triage.Plan.Intent.Source,
 		"fallback_used":              fallbackUsed,

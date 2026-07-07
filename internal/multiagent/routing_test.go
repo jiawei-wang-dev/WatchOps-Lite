@@ -2,6 +2,7 @@ package multiagent
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
@@ -87,5 +88,54 @@ func TestPlanAgentsRoleToolsAndRAGHintsAreRoleAware(t *testing.T) {
 	if len(plan.RoleRAGHints[AgentRoleKnowledge].Categories) == 0 ||
 		len(plan.RoleRAGHints[AgentRoleEvidence].Categories) == 0 {
 		t.Fatalf("role rag hints = %#v", plan.RoleRAGHints)
+	}
+}
+
+func TestPlanAgentsBuildsRoleSpecificSkillCards(t *testing.T) {
+	plan := PlanAgents(intent.IntentResult{
+		Intent:     intent.IntentIncidentTriage,
+		Confidence: 0.9,
+		Source:     "rule",
+	})
+
+	evidenceCard := plan.RoleSkillCards[AgentRoleEvidence]
+	knowledgeCard := plan.RoleSkillCards[AgentRoleKnowledge]
+	synthesisCard := plan.RoleSkillCards[AgentRoleSynthesis]
+	if evidenceCard == "" || knowledgeCard == "" || synthesisCard == "" {
+		t.Fatalf("role skill cards = %#v", plan.RoleSkillCards)
+	}
+	if !strings.Contains(evidenceCard, "metric_inspection") ||
+		!strings.Contains(evidenceCard, "log_investigation") ||
+		!strings.Contains(evidenceCard, "trace_inspection") {
+		t.Fatalf("evidence card = %q", evidenceCard)
+	}
+	if !strings.Contains(knowledgeCard, "runbook_lookup") {
+		t.Fatalf("knowledge card = %q", knowledgeCard)
+	}
+	if !strings.Contains(synthesisCard, evidenceSynthesisSkillName) ||
+		strings.Contains(synthesisCard, "metric_inspection") {
+		t.Fatalf("synthesis card = %q", synthesisCard)
+	}
+	if evidenceCard == knowledgeCard || knowledgeCard == synthesisCard {
+		t.Fatalf("role cards should be role-specific: %#v", plan.RoleSkillCards)
+	}
+}
+
+func TestPlanAgentsSkippedRolesStillHaveSafeSkillMetadata(t *testing.T) {
+	plan := PlanAgents(intent.IntentResult{
+		Intent:     intent.IntentKnowledgeQuery,
+		Confidence: 0.9,
+		Source:     "rule",
+	})
+
+	if !plan.Selected(AgentRoleKnowledge) || plan.Selected(AgentRoleEvidence) {
+		t.Fatalf("selected agents = %#v", plan.SelectedAgents)
+	}
+	if len(plan.RoleSkillHints[AgentRoleKnowledge]) == 0 ||
+		plan.RoleSkillCards[AgentRoleKnowledge] == "" {
+		t.Fatalf("knowledge role skills missing: %#v", plan.RoleSkillCards)
+	}
+	if _, ok := plan.RoleSkillCards[AgentRoleEvidence]; !ok {
+		t.Fatalf("skipped evidence role should still have non-panicking defaults")
 	}
 }
