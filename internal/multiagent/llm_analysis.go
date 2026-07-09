@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
@@ -108,6 +109,7 @@ func (l *RoleLLM) planTriage(
 		"rule_based_candidate":   boundedPlanForPrompt(rulePlan),
 		"role_rag_context":       input.Metadata["role_rag_context"],
 		"role_skill_cards":       input.Metadata["role_skill_cards"],
+		"session_context":        boundedSessionContextForPrompt(input.Metadata["session_context"]),
 		"constraints": []string{
 			"Triage must not make final root-cause claims.",
 			"Triage must only produce a bounded investigation plan.",
@@ -637,6 +639,7 @@ func boundedPlanForPrompt(plan TriagePlan) map[string]any {
 		"language":         plan.Language,
 		"limitations":      plan.Limitations,
 		"role_skill_cards": plan.AgentPlan.RoleSkillCards,
+		"session_context":  boundedSessionContextForPrompt(plan.Metadata["session_context"]),
 		"role_rag": map[string]any{
 			"triage":            roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleTriage]),
 			"evidence":          roleRAGPromptChunks(plan.RoleRAG.ChunksByRole[AgentRoleEvidence]),
@@ -664,6 +667,49 @@ func boundedPromptMetadata(metadata map[string]any) map[string]any {
 		case string, bool, int, int32, int64, float32, float64:
 			result[key] = value
 		}
+	}
+	return result
+}
+
+func boundedSessionContextForPrompt(value any) map[string]any {
+	contextMap, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	result := map[string]any{}
+	if summary, ok := contextMap["summary"].(session.Summary); ok {
+		result["summary"] = map[string]any{
+			"content":         boundedSummary(summary.Content, 500),
+			"goal":            boundedSummary(summary.Goal, 180),
+			"confirmed_facts": boundedStringSlice(summary.ConfirmedFacts, 5, 160),
+			"open_questions":  boundedStringSlice(summary.OpenQuestions, 5, 160),
+			"summary_version": summary.Version,
+			"important_entities": boundedStringSlice(
+				summary.ImportantEntities,
+				8,
+				80,
+			),
+		}
+	}
+	if count, ok := contextMap["recent_message_count"].(int); ok {
+		result["recent_message_count"] = count
+	}
+	if version, ok := contextMap["summary_version"].(int64); ok {
+		result["summary_version"] = version
+	}
+	if messages, ok := contextMap["recent_messages"].([]session.Message); ok {
+		limit := len(messages)
+		if limit > 4 {
+			limit = 4
+		}
+		recent := make([]map[string]any, 0, limit)
+		for _, message := range messages[:limit] {
+			recent = append(recent, map[string]any{
+				"role":    message.Role,
+				"content": boundedSummary(message.Content, 300),
+			})
+		}
+		result["recent_messages"] = recent
 	}
 	return result
 }

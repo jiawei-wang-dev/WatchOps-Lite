@@ -68,6 +68,64 @@ func TestPositiveFeedbackCreatesConfirmedLongTermMemory(t *testing.T) {
 	}
 }
 
+func TestPositiveFeedbackCreatesMemoryFromConclusionArray(t *testing.T) {
+	memory, ok := confirmedMemoryFromFeedback(Feedback{
+		ID:        "fb-conclusion",
+		RequestID: "req-1",
+		SessionID: "ses-1",
+		Rating:    RatingUp,
+		AnswerSnapshot: map[string]any{
+			"conclusion": []any{
+				map[string]any{"text": "checkout 错误率升高与 payment 超时证据一致。"},
+			},
+		},
+		EvidenceIDs: []string{"metric-1"},
+		Metadata:    map[string]any{"service": "checkout"},
+	})
+	if !ok {
+		t.Fatal("confirmedMemoryFromFeedback() ok = false, want true")
+	}
+	if memory.Summary != "checkout 错误率升高与 payment 超时证据一致。" ||
+		memory.Service != "checkout" ||
+		len(memory.EvidenceIDs) != 1 {
+		t.Fatalf("memory = %#v", memory)
+	}
+}
+
+func TestCorrectedAnswerTakesPriorityForConfirmedMemory(t *testing.T) {
+	memory, ok := confirmedMemoryFromFeedback(Feedback{
+		ID:              "fb-corrected",
+		Rating:          RatingUp,
+		CorrectedAnswer: "Operator-confirmed corrected answer.",
+		AnswerSnapshot: map[string]any{
+			"conclusion": []any{
+				map[string]any{"text": "Old answer."},
+			},
+		},
+		EvidenceIDs: []string{"metric-1"},
+	})
+	if !ok {
+		t.Fatal("confirmedMemoryFromFeedback() ok = false, want true")
+	}
+	if memory.Summary != "Operator-confirmed corrected answer." {
+		t.Fatalf("summary = %q", memory.Summary)
+	}
+}
+
+func TestPositiveFeedbackWithoutEvidenceDoesNotCreateConfirmedMemory(t *testing.T) {
+	if _, ok := confirmedMemoryFromFeedback(Feedback{
+		ID:     "fb-no-evidence",
+		Rating: RatingUp,
+		AnswerSnapshot: map[string]any{
+			"conclusion": []any{
+				map[string]any{"text": "Useful but not evidence-bound."},
+			},
+		},
+	}); ok {
+		t.Fatal("confirmedMemoryFromFeedback() ok = true, want false")
+	}
+}
+
 func TestNegativeFeedbackDoesNotCreateLongTermMemory(t *testing.T) {
 	memoryWriter := &memoryWriterStub{}
 	service, _ := NewServiceWithLongTermMemory(&storeStub{}, memoryWriter)

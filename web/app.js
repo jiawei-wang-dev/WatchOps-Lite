@@ -9,6 +9,8 @@ const state = {
   latestSSEEvents: [],
   lastLatencyMS: null,
   selectedRating: "",
+  latestUserMessage: "",
+  latestFeedback: null,
   latestHistoryResponse: null,
   latestKnowledgeResults: null,
   latestStreamResponse: null,
@@ -205,6 +207,7 @@ function bindActions() {
     button.addEventListener("click", () => selectRating(button.dataset.rating));
   });
   byId("submit-feedback").addEventListener("click", submitFeedback);
+  byId("create-eval-from-feedback").addEventListener("click", createEvalCaseFromFeedback);
   byId("run-eval").addEventListener("click", runEval);
   document.querySelectorAll("[data-copy]").forEach((button) => {
     button.addEventListener("click", () => copyToClipboard(button.dataset.copy));
@@ -309,6 +312,7 @@ async function sendChat() {
     state.lastRequestStatus = "running";
     renderRuntimeStatuses();
     const payload = buildChatPayload();
+    state.latestUserMessage = payload.message;
     setLoading(button, true, t("common.sending"));
     setResponseStatus(t("common.running"), "info");
     const started = performance.now();
@@ -338,6 +342,7 @@ async function sendStreamChat() {
   const buttons = [byId("send-stream"), byId("start-stream")];
   try {
     const payload = buildChatPayload("-stream");
+    state.latestUserMessage = payload.message;
     buttons.forEach((button) => setLoading(button, true, t("common.streaming")));
     resetStreamView();
     setResponseStatus(t("common.streaming"), "info");
@@ -1062,6 +1067,7 @@ function acceptChatResponse(response) {
   state.latestRequestId = safeText(response?.request_id);
   state.latestTraceId = safeText(response?.trace_id);
   state.latestSessionId = safeText(response?.session_id);
+  state.latestFeedback = null;
   state.lastRequestStatus = "success";
   renderChatResponse(response);
   renderToolRuns(response?.tool_runs);
@@ -1408,15 +1414,16 @@ function renderMemoryContext(response) {
   });
   const sessionAvailable = metadata.session_memory_available;
   const longTermAvailable = metadata.long_term_memory_available;
+  const longTermNotConfigured = metadata.long_term_memory_not_configured === true;
   const longTermCount = safeNumber(metadata.long_term_memory_count) ?? memoryEvidence.length;
   const memoryMatchMessage = longTermCount > 0 ?
     t("memory.long_term_loaded", { count: longTermCount }) :
-    t("memory.no_long_term_match");
+    longTermNotConfigured ? t("status.mysql_not_configured") : t("memory.no_long_term_match");
   byId("memory-context").className = "";
   byId("memory-context").innerHTML = `
     <div class="memory-status-grid">
       <article><span>${escapeHtml(t("dynamic.session_memory"))}</span><strong>${availabilityLabel(sessionAvailable)}</strong></article>
-      <article><span>${escapeHtml(t("dynamic.long_term_memory"))}</span><strong>${availabilityLabel(longTermAvailable)}</strong></article>
+      <article><span>${escapeHtml(t("dynamic.long_term_memory"))}</span><strong>${escapeHtml(longTermNotConfigured ? t("status.mysql_not_configured") : availabilityLabel(longTermAvailable))}</strong></article>
     </div>
     <div class="inline-note ${longTermCount > 0 ? "success-note" : "info-note"}">${escapeHtml(memoryMatchMessage)}</div>
     ${memoryEvidence.length
@@ -1612,6 +1619,7 @@ function selectRating(rating) {
 function updateFeedbackAvailability() {
   const enabled = Boolean(state.latestChatResponse && state.selectedRating);
   byId("submit-feedback").disabled = !enabled;
+  updateCreateEvalFromFeedbackButton();
   if (!state.latestChatResponse) {
     byId("feedback-result").textContent = t("feedback.requires_chat");
   } else if (!state.selectedRating) {
@@ -1643,9 +1651,14 @@ async function submitFeedback() {
         metadata: { source: "local_demo_console" },
       }),
     });
+    state.latestFeedback = {
+      id: result.feedback_id || "",
+      rating: state.selectedRating,
+    };
     byId("feedback-result").textContent = t("dynamic.feedback_created", {
       id: result.feedback_id || "",
-    });
+    }) + " " + t("feedback.create_eval_hint");
+    updateCreateEvalFromFeedbackButton();
     renderToast(t("dynamic.feedback_submitted"), "success");
   } catch (error) {
     byId("feedback-result").textContent = t("dynamic.feedback_unavailable", {
@@ -1655,6 +1668,66 @@ async function submitFeedback() {
   } finally {
     setLoading(button, false, t("feedback.submit"));
     updateFeedbackAvailability();
+  }
+}
+
+function updateCreateEvalFromFeedbackButton() {
+  const button = byId("create-eval-from-feedback");
+  if (!button) return;
+  const visible = Boolean(state.latestFeedback?.id && state.latestChatResponse);
+  button.hidden = !visible;
+  if (!visible) return;
+  const labelKey = state.latestFeedback.rating === "up" ?
+    "feedback.create_good_eval" : "feedback.create_bad_eval";
+  const label = t(labelKey);
+  const text = button.querySelector(".button-label");
+  if (text) text.textContent = label;
+}
+
+async function createEvalCaseFromFeedback() {
+  if (!state.latestFeedback?.id || !state.latestChatResponse) return;
+  const button = byId("create-eval-from-feedback");
+  const rating = state.latestFeedback.rating;
+  const caseType = rating === "up" ? "good_case" : "bad_case";
+  try {
+    setLoading(button, true, t("common.submitting"));
+    const result = await apiFetch("/api/v1/eval/cases", {
+      method: "POST",
+      body: JSON.stringify({
+        feedback_id: state.latestFeedback.id,
+        case_type: caseType,
+        input_message: state.latestUserMessage || byId("message").value.trim(),
+        expected_behavior: "The answer should include conclusions, evidence, recommendations, limitations, and evidence_id references.",
+        gold_answer: "",
+        forbidden_patterns: [
+          "绝对是根因",
+          "definitely the root cause",
+        ],
+        metadata: {
+          language: currentLanguage(),
+          source: "feedback_ui",
+          require_evidence: true,
+          require_tool_runs: true,
+          require_limitation: true,
+          require_conclusions: true,
+          require_recommendations: true,
+        },
+      }),
+    });
+    byId("feedback-result").textContent = t("feedback.eval_case_created", {
+      id: result.case_id || "",
+    });
+    byId("eval-case-type").value = caseType;
+    renderToast(t("feedback.eval_case_created", { id: result.case_id || "" }), "success");
+  } catch (error) {
+    byId("feedback-result").textContent = t("dynamic.eval_unavailable", {
+      message: error.message,
+    });
+    renderToast(error.message, "error");
+  } finally {
+    const labelKey = rating === "up" ?
+      "feedback.create_good_eval" : "feedback.create_bad_eval";
+    setLoading(button, false, t(labelKey));
   }
 }
 
@@ -1744,9 +1817,16 @@ function updateRuntimeContext() {
   }
 
   const metadata = response?.metadata || {};
+  const recentCount = safeNumber(metadata.recent_message_count);
+  const longTermCount = safeNumber(metadata.long_term_memory_count);
   byId("memory-pills").innerHTML = [
-    memoryPill("Redis", metadata.session_memory_available),
-    memoryPill("MySQL", metadata.long_term_memory_available),
+    memoryPill("Redis", metadata.session_memory_available, recentCount),
+    memoryPill(
+      "MySQL",
+      metadata.long_term_memory_available,
+      longTermCount,
+      metadata.long_term_memory_not_configured === true,
+    ),
   ].join("");
   byId("latest-tools").innerHTML = runs.length
     ? runs.slice(-5).map((run) => `<div class="mini-tool"><span>${escapeHtml(run?.tool || t("common.unknown"))}</span><span class="badge ${run?.success === false ? "danger" : "success"}">${run?.success === false ? escapeHtml(t("common.failed")) : "ok"}</span></div>`).join("")
@@ -1794,15 +1874,21 @@ function renderRuntimeStatuses() {
   setRuntimeStatus("status-redis", redisState, redisLabel);
 
   const longTermCount = safeNumber(metadata.long_term_memory_count);
+  const longTermKnown = metadata.long_term_memory_available !== undefined ||
+    metadata.long_term_memory_not_configured !== undefined ||
+    longTermCount !== null;
+  const longTermNotConfigured = metadata.long_term_memory_not_configured === true;
   const longTermUnavailable = responseHasLimitation(
     response,
     "LONG_TERM_MEMORY_UNAVAILABLE",
-  ) || metadata.long_term_memory_available === false;
-  const mysqlState = longTermUnavailable ? "fallback" :
+  ) || (metadata.long_term_memory_available === false && !longTermNotConfigured);
+  const mysqlState = longTermNotConfigured ? "unknown" :
+    longTermUnavailable ? "fallback" :
     longTermCount > 0 ? "active" :
-      longTermCount !== null ? "available" : "unknown";
+      longTermKnown ? "available" : "unknown";
   const mysqlLabel = mysqlState === "fallback" ? t("status.mysql_fallback") :
     mysqlState === "active" ? t("status.mysql_active", { count: longTermCount }) :
+      longTermNotConfigured ? t("status.mysql_not_configured") :
       mysqlState === "available" ? t("status.mysql_available") :
         t("status.unknown");
   setRuntimeStatus("status-mysql", mysqlState, mysqlLabel);
@@ -1850,9 +1936,11 @@ function responseHasLimitation(response, code) {
     safeText(limitation?.code).toUpperCase() === code);
 }
 
-function memoryPill(name, available) {
-  const label = available === true ? t("dynamic.ready") :
-    available === false ? t("dynamic.limited") : t("common.unknown");
+function memoryPill(name, available, count = null, notConfigured = false) {
+  const label = notConfigured ? t("status.mysql_not_configured") :
+    available === true && count !== null ? `${t("dynamic.ready")} / ${count}` :
+      available === true ? t("dynamic.ready") :
+        available === false ? t("dynamic.limited") : t("common.unknown");
   return `<span class="memory-pill ${available === true ? "available" : ""}">${escapeHtml(name)} · ${label}</span>`;
 }
 

@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
+
+const maxSearchTokens = 8
 
 type MySQLStore struct {
 	db *sql.DB
@@ -153,13 +157,23 @@ func buildSearchQuery(query SearchQuery) (string, []any) {
 		builder.WriteString(" AND service = ?")
 		arguments = append(arguments, query.Service)
 	}
-	if query.Query != "" {
-		term := "%" + escapeLike(query.Query) + "%"
-		builder.WriteString(
-			` AND (title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'` +
-				` OR service LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')`,
-		)
-		arguments = append(arguments, term, term, term, term)
+	tokens := searchTokens(query.Query)
+	if len(tokens) > 0 {
+		builder.WriteString(" AND (")
+		first := true
+		for _, token := range tokens {
+			if !first {
+				builder.WriteString(" OR ")
+			}
+			first = false
+			term := "%" + escapeLike(token) + "%"
+			builder.WriteString(
+				`title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'` +
+					` OR service LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\'`,
+			)
+			arguments = append(arguments, term, term, term, term)
+		}
+		builder.WriteString(")")
 	}
 	for _, tag := range query.Tags {
 		builder.WriteString(` AND tags LIKE ? ESCAPE '\\'`)
@@ -168,6 +182,36 @@ func buildSearchQuery(query SearchQuery) (string, []any) {
 	builder.WriteString(" ORDER BY updated_at DESC LIMIT ?")
 	arguments = append(arguments, query.Limit)
 	return builder.String(), arguments
+}
+
+func searchTokens(query string) []string {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return []string{}
+	}
+	raw := strings.FieldsFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) ||
+			unicode.IsPunct(r) ||
+			unicode.IsSymbol(r) ||
+			strings.ContainsRune("，。！？；：、（）【】《》“”‘’", r)
+	})
+	result := make([]string, 0, maxSearchTokens)
+	seen := map[string]struct{}{}
+	for _, token := range raw {
+		token = strings.TrimSpace(token)
+		if utf8.RuneCountInString(token) < 2 {
+			continue
+		}
+		if _, exists := seen[token]; exists {
+			continue
+		}
+		seen[token] = struct{}{}
+		result = append(result, token)
+		if len(result) == maxSearchTokens {
+			break
+		}
+	}
+	return result
 }
 
 func escapeLike(value string) string {

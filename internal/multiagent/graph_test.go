@@ -234,6 +234,45 @@ func TestOrchestratorSelectsKnowledgeAndSynthesisForKnowledgeIntent(t *testing.T
 	}
 }
 
+func TestOrchestratorPromotesKnowledgeMemoryMetadata(t *testing.T) {
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		fakeTriagePlanner{},
+		staticAnalyzer{finding: AgentFinding{Role: AgentRoleEvidence}},
+		staticAnalyzer{finding: AgentFinding{
+			Role: AgentRoleKnowledge,
+			Metadata: map[string]any{
+				"long_term_memory_available":      true,
+				"long_term_memory_count":          0,
+				"long_term_memory_not_configured": false,
+			},
+		}},
+		fakeSynthesizer{},
+	)
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID: "req-memory-metadata",
+		SessionID: "session-memory-metadata",
+		Message:   "find checkout memory",
+		Intent: intent.IntentResult{
+			Intent:     intent.IntentKnowledgeQuery,
+			Confidence: 0.9,
+			Source:     "rule",
+		},
+		TimeContext: common.TimeRange{
+			From: "2026-07-03T00:00:00Z",
+			To:   "2026-07-03T00:20:00Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Metadata["long_term_memory_available"] != true ||
+		result.Metadata["long_term_memory_count"] != 0 ||
+		result.Metadata["long_term_memory_not_configured"] != false {
+		t.Fatalf("metadata = %#v", result.Metadata)
+	}
+}
+
 func TestOrchestratorStatusSummarySkipsFindingsWithoutMergePanic(t *testing.T) {
 	orchestrator := NewOrchestrator(
 		context.Background(),

@@ -45,7 +45,14 @@ func confirmedSummary(value Feedback) string {
 	if corrected := strings.TrimSpace(value.CorrectedAnswer); corrected != "" {
 		return corrected
 	}
-	for _, key := range []string{"conclusions", "summary", "answer"} {
+	for _, key := range []string{
+		"conclusion",
+		"conclusions",
+		"inferences",
+		"recommendations",
+		"summary",
+		"answer",
+	} {
 		if text := snapshotText(value.AnswerSnapshot[key]); text != "" {
 			return text
 		}

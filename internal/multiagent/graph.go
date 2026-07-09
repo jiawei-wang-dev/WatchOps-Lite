@@ -451,6 +451,8 @@ func (o *Orchestrator) runTriage(
 	triageInput.Metadata["agent_plan"] = input.Plan.Metadata
 	triageInput.Metadata["role_skill_cards"] =
 		input.Plan.RoleSkillCards[AgentRoleTriage]
+	triageInput.Metadata["session_context"] =
+		input.Input.Metadata["session_context"]
 	plan, err := o.triage.Plan(ctx, triageInput)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
@@ -469,6 +471,7 @@ func (o *Orchestrator) runTriage(
 	plan.Metadata["role_skill_cards"] = input.Plan.RoleSkillCards[AgentRoleTriage]
 	plan.Metadata["role_skill_names"] =
 		roleSkillNamesForRole(input.Plan.RoleSkillHints, AgentRoleTriage)
+	plan.Metadata["session_context"] = input.Input.Metadata["session_context"]
 	plan.Hypotheses = o.generateHypotheses(ctx, input.Input, plan)
 	plan.Metadata["hypothesis_count"] = len(plan.Hypotheses.Items)
 	plan.Metadata["hypothesis_enabled"] = len(plan.Hypotheses.Items) > 0
@@ -915,6 +918,12 @@ func (o *Orchestrator) buildResponse(
 		"role_rag_chunk_count":       roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
 		"hypotheses":                 input.Merged.Merged.Plan.Hypotheses,
 		"hypothesis_count":           len(input.Merged.Merged.Plan.Hypotheses.Items),
+		"long_term_memory_available": metadataBool(knowledgeMetadata, "long_term_memory_available"),
+		"long_term_memory_count":     metadataInt(knowledgeMetadata, "long_term_memory_count"),
+		"long_term_memory_not_configured": metadataBool(
+			knowledgeMetadata,
+			"long_term_memory_not_configured",
+		),
 	}
 	copyRoleLLMMetadata(metadata, triageMetadata, "triage")
 	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
@@ -1039,6 +1048,21 @@ func copyRoleLLMMetadata(
 func metadataBool(metadata map[string]any, key string) bool {
 	value, _ := metadata[key].(bool)
 	return value
+}
+
+func metadataInt(metadata map[string]any, key string) int {
+	switch value := metadata[key].(type) {
+	case int:
+		return value
+	case int32:
+		return int(value)
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
 }
 
 func metadataString(metadata map[string]any, key string) string {

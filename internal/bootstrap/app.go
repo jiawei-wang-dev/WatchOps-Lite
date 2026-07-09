@@ -414,7 +414,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		knowledgeAgent,
 		multiagent.NewSynthesisAgent(multiAgentSynthesizer),
 	).WithRoleAwareRAG(knowledgeService).WithIntentRecognizer(intentRecognizer)
-	multiAgentService := multiagent.NewService(multiAgentOrchestrator)
+	multiAgentService := multiagent.NewService(multiAgentOrchestrator).
+		WithSessionMemory(sessionStore)
 	evalService, err := eval.NewServiceWithRunner(
 		evalStore,
 		feedbackService,

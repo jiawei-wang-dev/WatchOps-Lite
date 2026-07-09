@@ -75,6 +75,10 @@ func TestKnowledgeAgentCombinesRunbookAndLongTermMemory(t *testing.T) {
 	if finding.Metadata["long_term_memory_count"] != 1 {
 		t.Fatalf("Metadata = %#v", finding.Metadata)
 	}
+	if finding.Metadata["long_term_memory_available"] != true ||
+		finding.Metadata["long_term_memory_not_configured"] != false {
+		t.Fatalf("Metadata = %#v", finding.Metadata)
+	}
 	if !strings.Contains(finding.Summary, "runbook:") ||
 		!strings.Contains(finding.Summary, "memory:") {
 		t.Fatalf("Summary = %q", finding.Summary)
@@ -116,6 +120,53 @@ func TestKnowledgeAgentKeepsMemoryFailureAsLimitation(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Limitations = %#v", finding.Limitations)
+	}
+	if finding.Metadata["long_term_memory_available"] != false ||
+		finding.Metadata["long_term_memory_error"] != "search_failed" {
+		t.Fatalf("Metadata = %#v", finding.Metadata)
+	}
+}
+
+func TestKnowledgeAgentReportsLongTermMemoryConfiguredWithZeroMatches(t *testing.T) {
+	agent, err := NewKnowledgeAgent(
+		context.Background(),
+		nil,
+		&longTermMemoryStub{memories: []longterm.Memory{}},
+		3,
+	)
+	if err != nil {
+		t.Fatalf("NewKnowledgeAgent() error = %v", err)
+	}
+	finding, err := agent.Analyze(context.Background(), TriagePlan{
+		Service:  "checkout",
+		Query:    "checkout runbook",
+		Language: "en",
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if finding.Metadata["long_term_memory_available"] != true ||
+		finding.Metadata["long_term_memory_count"] != 0 {
+		t.Fatalf("Metadata = %#v", finding.Metadata)
+	}
+}
+
+func TestKnowledgeAgentReportsLongTermMemoryNotConfigured(t *testing.T) {
+	agent, err := NewKnowledgeAgent(context.Background(), nil, nil, 3)
+	if err != nil {
+		t.Fatalf("NewKnowledgeAgent() error = %v", err)
+	}
+	finding, err := agent.Analyze(context.Background(), TriagePlan{
+		Service:  "checkout",
+		Query:    "checkout runbook",
+		Language: "en",
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+	if finding.Metadata["long_term_memory_available"] != false ||
+		finding.Metadata["long_term_memory_not_configured"] != true {
+		t.Fatalf("Metadata = %#v", finding.Metadata)
 	}
 }
 

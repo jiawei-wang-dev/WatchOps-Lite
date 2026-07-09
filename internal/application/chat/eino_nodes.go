@@ -512,6 +512,13 @@ func (s *Service) collectToolEvidenceGraphNode(
 	ensureAgentMetadata(&state.agentOutput)
 	s.processAgentEvidence(ctx, &state.agentOutput)
 	state.agentOutput.Metadata["session_memory_available"] = state.memoryAvailable
+	state.agentOutput.Metadata["session_context_loaded"] = state.memoryAvailable
+	state.agentOutput.Metadata["recent_message_count"] = len(state.snapshot.RecentMessages)
+	state.agentOutput.Metadata["summary_version"] = state.snapshot.Summary.Version
+	state.agentOutput.Metadata["long_term_memory_available"] =
+		s.longTermMemory != nil && !state.longTermMemoryUnavailable
+	state.agentOutput.Metadata["long_term_memory_not_configured"] =
+		s.longTermMemory == nil
 	state.agentOutput.Metadata["long_term_memory_count"] = len(state.longTermMemories)
 	state.agentOutput.Metadata["pre_rag_used"] = state.agentInput.PreRAGAvailable
 	state.agentOutput.Metadata["pre_rag_chunk_count"] = len(state.agentInput.PreRetrievedKnowledge)
@@ -593,6 +600,7 @@ func (s *Service) persistSessionMemoryGraphNode(
 		runtimemetrics.IncSessionMemoryUnavailable()
 		state.memoryAvailable = false
 		state.agentOutput.Metadata["session_memory_available"] = false
+		state.agentOutput.Metadata["session_context_loaded"] = false
 		appendMemoryLimitation(&state.agentOutput)
 	}
 	return state, nil

@@ -130,6 +130,9 @@ func (a *KnowledgeAgent) Analyze(
 			Limit:   a.longTermMemoryLimit,
 		})
 		if err != nil {
+			finding.Metadata["long_term_memory_available"] = false
+			finding.Metadata["long_term_memory_not_configured"] = false
+			finding.Metadata["long_term_memory_error"] = "search_failed"
 			finding.Limitations = append(finding.Limitations, agenteino.Limitation{
 				Code: "LONG_TERM_MEMORY_UNAVAILABLE",
 				Message: localizedTriageText(
@@ -139,6 +142,8 @@ func (a *KnowledgeAgent) Analyze(
 				),
 			})
 		} else {
+			finding.Metadata["long_term_memory_available"] = true
+			finding.Metadata["long_term_memory_not_configured"] = false
 			memories = result
 			for _, memory := range memories {
 				summary := strings.TrimSpace(memory.Summary)
@@ -153,6 +158,9 @@ func (a *KnowledgeAgent) Analyze(
 				}
 			}
 		}
+	} else {
+		finding.Metadata["long_term_memory_available"] = false
+		finding.Metadata["long_term_memory_not_configured"] = true
 	}
 	finding.Metadata["long_term_memory_count"] = len(memories)
 	finding.Metadata["knowledge_evidence_count"] = len(finding.Evidence)

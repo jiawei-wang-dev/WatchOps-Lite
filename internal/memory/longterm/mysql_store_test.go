@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -92,11 +93,57 @@ func TestBuildSearchQueryIsBoundedAndEscapesKeywords(t *testing.T) {
 	if got := arguments[len(arguments)-1]; got != 3 {
 		t.Fatalf("limit argument = %#v, want 3", got)
 	}
-	if keyword, ok := arguments[1].(string); !ok ||
-		!strings.Contains(keyword, `\_`) ||
-		!strings.Contains(keyword, `\%`) {
-		t.Fatalf("keyword argument = %#v, want escaped LIKE pattern", arguments[1])
+	if escaped := escapeLike(`timeout_%\`); escaped != `timeout\_\%\\` {
+		t.Fatalf("escapeLike() = %q", escaped)
 	}
+}
+
+func TestBuildSearchQueryUsesKeywordTokensInsteadOfWholeSentence(t *testing.T) {
+	statement, arguments := buildSearchQuery(SearchQuery{
+		Query: "过去 20 分钟 checkout 服务错误率为什么升高？",
+		Limit: 5,
+	})
+
+	if strings.Contains(statement, "%完整用户问题%") {
+		t.Fatalf("statement = %q", statement)
+	}
+	joined := stringifyArguments(arguments)
+	if !strings.Contains(joined, "%checkout%") ||
+		!strings.Contains(joined, "%服务错误率为什么升高%") {
+		t.Fatalf("arguments = %#v, want keyword LIKE tokens", arguments)
+	}
+	if len(searchTokens("a b c !")) != 0 {
+		t.Fatalf("short tokens should be ignored")
+	}
+}
+
+func TestBuildSearchQueryKeepsServiceExactMatch(t *testing.T) {
+	statement, arguments := buildSearchQuery(SearchQuery{
+		Query:   "payment timeout",
+		Service: "checkout",
+		Limit:   3,
+	})
+	if !strings.Contains(statement, "service = ?") {
+		t.Fatalf("statement = %q", statement)
+	}
+	if arguments[0] != "checkout" {
+		t.Fatalf("first argument = %#v, want service", arguments[0])
+	}
+}
+
+func TestSearchTokensAreBounded(t *testing.T) {
+	tokens := searchTokens("one two three four five six seven eight nine ten")
+	if len(tokens) != maxSearchTokens {
+		t.Fatalf("tokens = %#v, want %d", tokens, maxSearchTokens)
+	}
+}
+
+func stringifyArguments(arguments []any) string {
+	parts := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		parts = append(parts, strings.TrimSpace(fmt.Sprint(argument)))
+	}
+	return strings.Join(parts, " ")
 }
 
 type memoryDriverState struct {
