@@ -25,6 +25,7 @@ const (
 	AgentStepPending   AgentStepStatus = "pending"
 	AgentStepRunning   AgentStepStatus = "running"
 	AgentStepCompleted AgentStepStatus = "completed"
+	AgentStepDegraded  AgentStepStatus = "degraded"
 	AgentStepFailed    AgentStepStatus = "failed"
 	AgentStepSkipped   AgentStepStatus = "skipped"
 )

@@ -490,11 +490,15 @@ func (o *Orchestrator) runTriage(
 	if output == "" {
 		output = plan.Query
 	}
+	stepStatus := AgentStepCompleted
+	if metadataBool(plan.Metadata, "triage_fallback_used") {
+		stepStatus = AgentStepDegraded
+	}
 	emitAgentStepEvent(
 		ctx,
 		"agent_step_completed",
 		AgentRoleTriage,
-		string(AgentStepCompleted),
+		string(stepStatus),
 		completed.Sub(started).Milliseconds(),
 		0,
 	)
@@ -510,6 +514,7 @@ func (o *Orchestrator) runTriage(
 		completed,
 	)
 	step.Metadata = cloneMetadata(plan.Metadata)
+	step.Status = stepStatus
 	return triageOutput{
 		Input: input.Input,
 		Plan:  plan,
@@ -675,7 +680,7 @@ func (o *Orchestrator) runFinding(
 		ctx,
 		"agent_step_completed",
 		role,
-		string(AgentStepCompleted),
+		string(stepStatusForMetadata(role, finding.Metadata)),
 		completed.Sub(started).Milliseconds(),
 		len(finding.Evidence),
 	)
@@ -691,6 +696,7 @@ func (o *Orchestrator) runFinding(
 		completed,
 	)
 	step.Metadata = cloneMetadata(finding.Metadata)
+	step.Status = stepStatusForMetadata(role, finding.Metadata)
 	step.Metadata["role_skill_cards"] =
 		input.Plan.AgentPlan.RoleSkillCards[role]
 	step.Metadata["role_skill_names"] =
@@ -700,6 +706,15 @@ func (o *Orchestrator) runFinding(
 		Finding: finding,
 		Step:    step,
 	}, nil
+}
+
+func stepStatusForMetadata(role AgentRole, metadata map[string]any) AgentStepStatus {
+	if metadataBool(metadata, string(role)+"_fallback_used") ||
+		metadataBool(metadata, "fallback") ||
+		metadataBool(metadata, "fallback_used") {
+		return AgentStepDegraded
+	}
+	return AgentStepCompleted
 }
 
 func (o *Orchestrator) mergeFindings(
@@ -828,7 +843,7 @@ func (o *Orchestrator) runSynthesis(
 		ctx,
 		"agent_step_completed",
 		AgentRoleSynthesis,
-		string(AgentStepCompleted),
+		string(stepStatusForMetadata(AgentRoleSynthesis, answer.Metadata)),
 		completed.Sub(started).Milliseconds(),
 		len(answer.Evidence),
 	)
@@ -844,6 +859,7 @@ func (o *Orchestrator) runSynthesis(
 		completed,
 	)
 	step.Metadata = cloneMetadata(answer.Metadata)
+	step.Status = stepStatusForMetadata(AgentRoleSynthesis, answer.Metadata)
 	return synthesisOutput{
 		Merged: input,
 		Answer: answer,
@@ -859,7 +875,7 @@ func (o *Orchestrator) buildResponse(
 	defer span.End()
 	steps := append([]AgentStep{}, input.Merged.Steps...)
 	steps = append(steps, input.Step)
-	fallbackUsed, _ := input.Answer.Metadata["fallback_used"].(bool)
+	finalAnswerFallback, _ := input.Answer.Metadata["fallback_used"].(bool)
 	synthesisMode, _ := input.Answer.Metadata["synthesis_mode"].(string)
 	triageMetadata := input.Merged.Triage.Plan.Metadata
 	evidenceMetadata := input.Merged.Merged.EvidenceFinding.Metadata
@@ -896,9 +912,21 @@ func (o *Orchestrator) buildResponse(
 	if synthesisUsed {
 		llmRoles = append(llmRoles, string(AgentRoleSynthesis))
 	}
+	llmExecution := aggregateLLMExecution([]roleExecutionMetadata{
+		{role: "triage", metadata: triageMetadata},
+		{role: "evidence", metadata: evidenceMetadata},
+		{role: "knowledge", metadata: knowledgeMetadata},
+		{role: "synthesis", metadata: synthesisMetadata},
+	})
+	anyRoleFallback := metadataBool(triageMetadata, "triage_fallback_used") ||
+		metadataBool(evidenceMetadata, "evidence_fallback_used") ||
+		metadataBool(knowledgeMetadata, "knowledge_fallback_used") ||
+		metadataBool(synthesisMetadata, "synthesis_fallback_used")
+	fallbackUsed := anyRoleFallback || finalAnswerFallback
 	metadata := map[string]any{
 		"agent_mode":                 "multi_agent",
 		"orchestrator":               "eino_graph",
+		"execution_status":           "completed",
 		"roles":                      RoleOrder(),
 		"selected_agents":            agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SelectedAgents),
 		"skipped_agents":             agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SkippedAgents),
@@ -910,6 +938,8 @@ func (o *Orchestrator) buildResponse(
 		"intent_type":                string(input.Merged.Triage.Plan.Intent.Intent),
 		"intent_source":              input.Merged.Triage.Plan.Intent.Source,
 		"fallback_used":              fallbackUsed,
+		"any_role_fallback":          anyRoleFallback,
+		"final_answer_fallback":      finalAnswerFallback,
 		"synthesis_mode":             synthesisMode,
 		"multi_agent_llm_used":       len(llmRoles) > 0,
 		"multi_agent_llm_roles":      llmRoles,
@@ -924,6 +954,20 @@ func (o *Orchestrator) buildResponse(
 			knowledgeMetadata,
 			"long_term_memory_not_configured",
 		),
+	}
+	for key, value := range llmExecution {
+		metadata[key] = value
+	}
+	if models, ok := llmExecution["llm_models"].([]string); ok {
+		metadata["llm_models"] = models
+		switch len(models) {
+		case 0:
+			metadata["model"] = ""
+		case 1:
+			metadata["model"] = models[0]
+		default:
+			metadata["model"] = "mixed"
+		}
 	}
 	copyRoleLLMMetadata(metadata, triageMetadata, "triage")
 	copyRoleLLMMetadata(metadata, evidenceMetadata, "evidence")
@@ -944,12 +988,38 @@ func (o *Orchestrator) buildResponse(
 
 func ensureRoleLLMMetadata(metadata map[string]any, role string) {
 	defaults := map[string]any{
-		role + "_llm_used":        false,
-		role + "_llm_attempted":   false,
-		role + "_model":           "",
-		role + "_fallback_used":   true,
-		role + "_llm_duration_ms": int64(0),
-		role + "_mode":            "rule_based",
+		role + "_llm_used":               false,
+		role + "_llm_attempted":          false,
+		role + "_llm_success":            false,
+		role + "_model":                  "",
+		role + "_fallback_used":          true,
+		role + "_llm_duration_ms":        int64(0),
+		role + "_llm_elapsed_ms":         int64(0),
+		role + "_llm_timeout_ms":         int64(0),
+		role + "_llm_retry_count":        0,
+		role + "_primary_llm_attempted":  false,
+		role + "_primary_llm_success":    false,
+		role + "_primary_llm_elapsed_ms": int64(0),
+		role + "_primary_llm_timeout_ms": int64(0),
+		role + "_primary_error_code":     "",
+		role + "_primary_error_message":  "",
+		role + "_repair_attempted":       false,
+		role + "_repair_success":         false,
+		role + "_repair_llm_elapsed_ms":  int64(0),
+		role + "_repair_llm_timeout_ms":  int64(0),
+		role + "_repair_error_code":      "",
+		role + "_repair_error_message":   "",
+		role + "_repair_skip_reason":     "",
+		role + "_llm_primary_elapsed_ms": int64(0),
+		role + "_llm_repair_elapsed_ms":  int64(0),
+		role + "_recovery_attempted":     false,
+		role + "_recovery_success":       false,
+		role + "_recovery_reason":        "",
+		role + "_llm_error_code":         "",
+		role + "_llm_error_message":      "",
+		role + "_fallback_reason":        "",
+		role + "_mode":                   "rule_based",
+		role + "_analysis_mode":          "rule_based",
 	}
 	for key, value := range defaults {
 		if _, exists := metadata[key]; !exists {
@@ -1033,16 +1103,215 @@ func copyRoleLLMMetadata(
 	for _, suffix := range []string{
 		"llm_used",
 		"llm_attempted",
+		"llm_success",
 		"model",
 		"fallback_used",
+		"fallback",
 		"llm_duration_ms",
+		"llm_elapsed_ms",
+		"llm_timeout_ms",
+		"llm_retry_count",
+		"primary_llm_attempted",
+		"primary_llm_success",
+		"primary_llm_elapsed_ms",
+		"primary_llm_timeout_ms",
+		"primary_error_code",
+		"primary_error_message",
+		"repair_attempted",
+		"repair_success",
+		"repair_llm_elapsed_ms",
+		"repair_llm_timeout_ms",
+		"repair_error_code",
+		"repair_error_message",
+		"repair_skip_reason",
+		"llm_primary_elapsed_ms",
+		"llm_repair_elapsed_ms",
+		"recovery_attempted",
+		"recovery_success",
+		"recovery_reason",
+		"llm_error_code",
+		"llm_error_message",
+		"fallback_reason",
 		"mode",
+		"analysis_mode",
 	} {
 		key := role + "_" + suffix
 		if value, exists := source[key]; exists {
 			target[key] = value
 		}
 	}
+}
+
+type roleExecutionMetadata struct {
+	role     string
+	metadata map[string]any
+}
+
+func aggregateLLMExecution(roles []roleExecutionMetadata) map[string]any {
+	roleCount := 0
+	attemptCount := 0
+	successCount := 0
+	failureCount := 0
+	fallbackCount := 0
+	retryCount := 0
+	totalElapsed := int64(0)
+	maxElapsed := int64(0)
+	models := []string{}
+	errorCodes := []string{}
+	for _, role := range roles {
+		if role.metadata == nil {
+			continue
+		}
+		roleCount++
+		attempted := roleMetadataBool(role.metadata, role.role, "llm_attempted")
+		success := roleMetadataBool(role.metadata, role.role, "llm_success") ||
+			roleMetadataBool(role.metadata, role.role, "llm_used")
+		fallback := roleMetadataBool(role.metadata, role.role, "fallback") ||
+			roleMetadataBool(role.metadata, role.role, "fallback_used")
+		elapsed := roleMetadataInt64(role.metadata, role.role, "llm_elapsed_ms")
+		if elapsed == 0 {
+			elapsed = roleMetadataInt64(role.metadata, role.role, "llm_duration_ms")
+		}
+		if attempted {
+			attemptCount++
+			retryCount += int(roleMetadataInt64(role.metadata, role.role, "llm_retry_count"))
+			totalElapsed += elapsed
+			if elapsed > maxElapsed {
+				maxElapsed = elapsed
+			}
+			if success {
+				successCount++
+			} else {
+				failureCount++
+			}
+		}
+		if fallback {
+			fallbackCount++
+		}
+		if model := roleMetadataString(role.metadata, role.role, "model"); model != "" {
+			models = appendUniqueString(models, model)
+		}
+		if code := roleMetadataString(role.metadata, role.role, "llm_error_code"); code != "" {
+			errorCodes = appendUniqueString(errorCodes, code)
+		}
+	}
+	status := llmExecutionStatus(
+		roleCount,
+		attemptCount,
+		successCount,
+		failureCount,
+		fallbackCount,
+		errorCodes,
+	)
+	return map[string]any{
+		"llm_execution_status":    status,
+		"llm_available":           llmProviderAvailable(status, errorCodes),
+		"llm_role_count":          roleCount,
+		"llm_attempt_count":       attemptCount,
+		"llm_retry_count":         retryCount,
+		"llm_call_count":          attemptCount + retryCount,
+		"llm_success_count":       successCount,
+		"llm_failure_count":       failureCount,
+		"llm_fallback_count":      fallbackCount,
+		"llm_models":              models,
+		"llm_error_codes":         errorCodes,
+		"llm_total_elapsed_ms":    totalElapsed,
+		"llm_max_role_elapsed_ms": maxElapsed,
+	}
+}
+
+func llmExecutionStatus(
+	roleCount int,
+	attemptCount int,
+	successCount int,
+	failureCount int,
+	fallbackCount int,
+	errorCodes []string,
+) string {
+	if roleCount == 0 {
+		return "unknown"
+	}
+	if attemptCount == 0 {
+		if containsString(errorCodes, "not_configured") {
+			return "not_configured"
+		}
+		return "not_used"
+	}
+	if successCount == attemptCount && failureCount == 0 {
+		return "success"
+	}
+	if successCount > 0 {
+		return "degraded"
+	}
+	if failureCount > 0 && fallbackCount > 0 && !allUnavailableLLMErrors(errorCodes) {
+		return "degraded"
+	}
+	if allUnavailableLLMErrors(errorCodes) {
+		return "unavailable"
+	}
+	if fallbackCount > 0 {
+		return "fallback"
+	}
+	return "unknown"
+}
+
+func allUnavailableLLMErrors(codes []string) bool {
+	if len(codes) == 0 {
+		return false
+	}
+	for _, code := range codes {
+		switch code {
+		case "rate_limited", "upstream_5xx", "auth_failed", "provider_unavailable":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func llmProviderAvailable(status string, errorCodes []string) bool {
+	switch status {
+	case "not_configured", "unavailable":
+		return false
+	}
+	for _, code := range errorCodes {
+		if code == "not_configured" ||
+			code == "auth_failed" ||
+			code == "provider_unavailable" {
+			return false
+		}
+	}
+	return status != "unknown"
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func roleMetadataBool(metadata map[string]any, role string, suffix string) bool {
+	if metadataBool(metadata, suffix) {
+		return true
+	}
+	return metadataBool(metadata, role+"_"+suffix)
+}
+
+func roleMetadataString(metadata map[string]any, role string, suffix string) string {
+	if value := metadataString(metadata, suffix); value != "" {
+		return value
+	}
+	return metadataString(metadata, role+"_"+suffix)
+}
+
+func roleMetadataInt64(metadata map[string]any, role string, suffix string) int64 {
+	if value := metadataInt(metadata, suffix); value > 0 {
+		return int64(value)
+	}
+	return int64(metadataInt(metadata, role+"_"+suffix))
 }
 
 func metadataBool(metadata map[string]any, key string) bool {

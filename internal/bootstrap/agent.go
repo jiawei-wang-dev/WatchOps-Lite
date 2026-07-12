@@ -111,10 +111,15 @@ func buildMultiAgentRoleLLM(
 		)
 		return nil
 	}
-	analyzer, err := multiagent.NewRoleLLM(
+	analyzer, err := multiagent.NewRoleLLMWithTimeouts(
 		chatModel,
 		cfg.LLM.Model,
-		cfg.LLM.RequestTimeout.Value(),
+		multiagent.RoleTimeouts{
+			TriageLLM:    cfg.MultiAgent.TriageLLMTimeout.Value(),
+			EvidenceLLM:  cfg.MultiAgent.EvidenceLLMTimeout.Value(),
+			KnowledgeLLM: cfg.MultiAgent.KnowledgeLLMTimeout.Value(),
+			SynthesisLLM: cfg.MultiAgent.SynthesisLLMTimeout.Value(),
+		},
 	)
 	if err != nil {
 		logger.Warn(

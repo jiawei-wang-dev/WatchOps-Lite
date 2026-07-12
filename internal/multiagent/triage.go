@@ -106,7 +106,15 @@ func (a *LLMTriageAgent) Plan(ctx context.Context, input Input) (TriagePlan, err
 		return TriagePlan{}, errors.New("triage fallback planner is required")
 	}
 	if a.llm == nil {
-		return a.fallback.Plan(ctx, input)
+		plan, err := a.fallback.Plan(ctx, input)
+		if err != nil {
+			return TriagePlan{}, err
+		}
+		plan.Metadata = mergeTriageMetadata(
+			plan.Metadata,
+			roleLLMNotConfiguredMetadata(AgentRoleTriage, "triage_llm_not_configured"),
+		)
+		return plan, nil
 	}
 	// Triage is allowed to improve the investigation plan with an LLM, but not
 	// to make root-cause claims. Any unsafe or malformed plan falls back to the
@@ -118,27 +126,32 @@ func (a *LLMTriageAgent) Plan(ctx context.Context, input Input) (TriagePlan, err
 	plan, call, err := a.llm.planTriage(ctx, input, rulePlan)
 	if err != nil {
 		fallbackPlan := rulePlan
-		fallbackPlan.Metadata = mergeTriageMetadata(fallbackPlan.Metadata, map[string]any{
-			"triage_mode":            "rule_based",
-			"triage_llm_used":        false,
-			"triage_llm_attempted":   true,
-			"triage_model":           "",
-			"triage_fallback_used":   true,
-			"triage_llm_duration_ms": call.durationMS,
-			"triage_fallback_reason": safeTriageFailureReason(err),
-		})
+		fallbackPlan.Metadata = mergeTriageMetadata(
+			fallbackPlan.Metadata,
+			roleLLMMetadata(roleLLMMetadataInput{
+				Role:           AgentRoleTriage,
+				Model:          a.llm.modelName,
+				Attempted:      true,
+				Success:        false,
+				Call:           call,
+				Fallback:       true,
+				FallbackReason: safeTriageFailureReason(err),
+				AnalysisMode:   "rule_based",
+			}),
+		)
 		return fallbackPlan, nil
 	}
 	plan.Query = strings.TrimSpace(input.Message)
 	plan.TimeContext = input.TimeContext
-	plan.Metadata = mergeTriageMetadata(plan.Metadata, map[string]any{
-		"triage_mode":            "llm",
-		"triage_llm_used":        true,
-		"triage_llm_attempted":   true,
-		"triage_model":           a.llm.modelName,
-		"triage_fallback_used":   false,
-		"triage_llm_duration_ms": call.durationMS,
-	})
+	plan.Metadata = mergeTriageMetadata(plan.Metadata, roleLLMMetadata(roleLLMMetadataInput{
+		Role:         AgentRoleTriage,
+		Model:        a.llm.modelName,
+		Attempted:    true,
+		Success:      true,
+		Call:         call,
+		Fallback:     false,
+		AnalysisMode: "llm",
+	}))
 	return plan, nil
 }
 

@@ -525,10 +525,14 @@ function renderStreamSummary() {
   const limitations = safeArray(response?.answer?.limitations);
   const completion = findLastStreamEvent("workflow_completed");
   const failure = findLastStreamEvent("workflow_failed");
-  const status = failure ? "failed" : state.streamStatus;
-  const fallbackUsed = metadata.fallback_used === true;
+  const status = failure ? "failed" :
+    metadata.llm_execution_status === "degraded" && state.streamStatus === "completed" ?
+      "degraded" : state.streamStatus;
+  const fallbackUsed = metadata.fallback_used === true ||
+    metadata.any_role_fallback === true;
   const agentMode = safeText(metadata.agent_mode);
-  const model = safeText(metadata.model);
+  const model = safeText(metadata.model) ||
+    safeArray(metadata.llm_models).map(safeText).filter(Boolean).join(", ");
   const latency = safeNumber(completion?.data?.latency_ms) ??
     safeNumber(failure?.data?.latency_ms) ??
     elapsedStreamMilliseconds();
@@ -541,7 +545,9 @@ function renderStreamSummary() {
     [t("common.status"), streamStatusLabel(status)],
     [
       t("stream.agent_mode"),
-      agentMode === "eino_react" && !fallbackUsed ?
+      agentMode === "multi_agent" ?
+        t("stream.multi_agent_mode") :
+        agentMode === "eino_react" && !fallbackUsed ?
         t("stream.llm_mode") :
         agentMode === "deterministic" || fallbackUsed ?
           t("stream.deterministic_mode") : "—",
@@ -555,7 +561,7 @@ function renderStreamSummary() {
     [t("common.tool_runs"), toolRuns.length || countCompletedToolEvents()],
     [t("common.evidence"), evidence.length || latestEvidenceCount()],
     [t("common.limitations"), limitations.length],
-    ["fallback_used", String(fallbackUsed)],
+    [t("stream.role_fallback"), fallbackUsed ? t("common.yes") : t("common.no")],
   ]);
 
   const statusBadge = byId("stream-summary-status");
@@ -571,7 +577,7 @@ function renderStreamSummary() {
   } else if (status === "failed") {
     noticeKey = "stream.failed_notice";
     noticeTone = "danger-note";
-  } else if (fallbackUsed) {
+  } else if (metadata.llm_execution_status === "degraded" || fallbackUsed) {
     noticeKey = "stream.fallback_notice";
     noticeTone = "warning-note";
   } else if (agentMode === "deterministic") {
@@ -615,14 +621,16 @@ function renderStreamSteps() {
 }
 
 function aggregateStreamStep(definition) {
+  const reconciled = reconciledStepFromFinalResponse(definition);
   const matches = state.latestSSEEvents.filter((event) => {
     const node = safeText(event?.data?.node || event?.data?.node_name);
-    const role = safeText(event?.data?.role);
+    const role = eventRole(event?.data);
     return safeArray(definition.nodes).includes(node) ||
       (definition.role && definition.role === role) ||
       safeArray(definition.events).includes(event.type);
   });
   if (!matches.length) {
+    if (reconciled) return reconciled;
     return {
       status: state.streamStatus === "running" ? "waiting" : "untriggered",
       startedAt: "",
@@ -638,6 +646,8 @@ function aggregateStreamStep(definition) {
     event.type.endsWith("_started") || event.type === "workflow_started");
   const completed = matches.filter((event) =>
     event.type.endsWith("_completed") ||
+    safeText(event?.data?.status) === "degraded" ||
+    safeText(event?.data?.status) === "success" ||
     event.type === "final_answer" ||
     event.type === "memory_loaded" ||
     event.type === "evidence_collected");
@@ -648,14 +658,48 @@ function aggregateStreamStep(definition) {
     completed[completed.length - 1] ||
     (failure ? matches[matches.length - 1] : null);
   const endedAt = endedEvent ? eventTimestamp(endedEvent) : "";
+  const terminalStatus = safeText(endedEvent?.data?.status);
   const status = failure ? "failed" :
-    endedEvent ? "completed" : "running";
+    terminalStatus === "degraded" ? "degraded" :
+      terminalStatus === "skipped" ? "skipped" :
+        terminalStatus === "success" ? "completed" :
+          endedEvent ? "completed" :
+            state.streamStatus === "completed" && reconciled ? reconciled.status : "running";
   return {
     status,
     startedAt,
-    endedAt,
-    durationMS: durationBetween(startedAt, endedAt),
+    endedAt: endedAt || reconciled?.endedAt || "",
+    durationMS: durationBetween(startedAt, endedAt) ?? reconciled?.durationMS ?? null,
   };
+}
+
+function reconciledStepFromFinalResponse(definition) {
+  const response = state.latestMultiAgentResponse;
+  if (!response || state.streamStatus !== "completed") return null;
+  if (definition.role && definition.role !== "merge") {
+    const step = safeArray(response.agent_steps).find((item) =>
+      safeText(item?.role) === definition.role);
+    if (!step) return null;
+    const status = safeText(step.status) || "completed";
+    return {
+      status,
+      startedAt: safeText(step.started_at),
+      endedAt: safeText(step.completed_at) || state.streamEndedAt,
+      durationMS: safeNumber(step.duration_ms),
+    };
+  }
+  if (definition.role === "merge") {
+    const hasSynthesis = safeArray(response.agent_steps).some((item) =>
+      safeText(item?.role) === "synthesis");
+    if (!hasSynthesis) return null;
+    return {
+      status: "completed",
+      startedAt: state.streamEndedAt,
+      endedAt: state.streamEndedAt,
+      durationMS: 0,
+    };
+  }
+  return null;
 }
 
 function renderStreamToolTimeline() {
@@ -865,6 +909,8 @@ function streamStatusLabel(status) {
     waiting: "stream.waiting",
     running: "common.running",
     completed: "common.completed",
+    degraded: "common.degraded_completed",
+    success: "common.completed",
     failed: "common.failed",
     untriggered: "stream.untriggered",
     no_data: "stream.no_data",
@@ -875,11 +921,16 @@ function streamStatusLabel(status) {
 }
 
 function statusTone(status) {
-  if (status === "completed") return "success";
+  if (status === "completed" || status === "success") return "success";
+  if (status === "degraded") return "warning";
   if (status === "failed") return "danger";
   if (status === "no_data" || status === "untriggered") return "warning";
   if (status === "running") return "info";
   return "neutral";
+}
+
+function eventRole(data) {
+  return safeText(data?.role || data?.agent_role);
 }
 
 function updateTraceGuide() {
@@ -927,7 +978,7 @@ function describeSSEEvent(type, data) {
   const messageText = data.message ? t("event.message_suffix", {
     message: safeText(data.message),
   }) : "";
-  const role = safeText(data.role) || t("common.unknown");
+  const role = eventRole(data) || t("common.unknown");
   const messages = {
     workflow_started: t("event.workflow_started", {
       session: safeText(data.session_id) || t("context.session"),
@@ -995,7 +1046,8 @@ function renderMultiAgentSteps(response) {
       safeNumber(response?.metadata?.multi_agent_llm_call_count) ?? 0,
     );
   }
-  const workflowStatus = steps.length ? "completed" :
+  const workflowStatus = steps.some((step) => safeText(step?.status) === "degraded") ? "degraded" :
+    steps.length ? "completed" :
     state.streamStatus === "running" && state.latestSSEEvents.some((event) =>
       event.type === "multi_agent_started") ? "running" : "pending";
   status.textContent = streamStatusLabel(workflowStatus);
@@ -1004,11 +1056,12 @@ function renderMultiAgentSteps(response) {
     const step = steps.find((item) => safeText(item?.role) === role);
     const startedEvent = state.latestSSEEvents.find((event) =>
       event.type === "agent_step_started" &&
-      safeText(event?.data?.role) === role);
+      eventRole(event?.data) === role);
     const completedEvent = [...state.latestSSEEvents].reverse().find((event) =>
       event.type === "agent_step_completed" &&
-      safeText(event?.data?.role) === role);
+      eventRole(event?.data) === role);
     const stepStatus = safeText(step?.status) ||
+      safeText(completedEvent?.data?.status) ||
       (completedEvent ? "completed" : startedEvent ? "running" : "pending");
     const toolNames = safeArray(step?.tool_runs)
       .map((run) => safeText(run?.tool))
@@ -1019,16 +1072,35 @@ function renderMultiAgentSteps(response) {
     const duration = step ?
       safeNumber(step.duration_ms) : safeNumber(completedEvent?.data?.latency_ms);
     const metadata = step?.metadata || {};
-    const prefix = role;
-    const llmUsed = metadata[`${prefix}_llm_used`] === true;
-    const llmFallback = metadata[`${prefix}_fallback_used`] === true;
-    const modelName = safeText(metadata[`${prefix}_model`]);
-    const llmDuration = llmUsed ?
-      safeNumber(metadata[`${prefix}_llm_duration_ms`]) : null;
-    const analysisMode = llmUsed ? t(multiAgentModeLabels[role]) :
-      role === "triage" ? t("multi.rule_based") :
-      llmFallback ? t("multi.llm_fallback") : t(multiAgentModeLabels[role]);
+    const llm = roleLLMDetails(role, metadata);
+    const analysisMode = roleAnalysisLabel(role, llm);
     const output = safeText(step?.output);
+    const llmExtraRows = [
+      llm.timeoutMs !== null ?
+        `<div><dt>${escapeHtml(t("multi.llm_timeout"))}</dt><dd>${escapeHtml(formatLatency(llm.timeoutMs))}</dd></div>` : "",
+      llm.primaryTimeoutMs !== null ?
+        `<div><dt>${escapeHtml(t("multi.llm_primary_timeout"))}</dt><dd>${escapeHtml(formatLatency(llm.primaryTimeoutMs))}</dd></div>` : "",
+      llm.primaryElapsedMs !== null ?
+        `<div><dt>${escapeHtml(t("multi.llm_primary_latency"))}</dt><dd>${escapeHtml(formatLatency(llm.primaryElapsedMs))}</dd></div>` : "",
+      llm.repairAttempted === false && llm.attempted ?
+        `<div><dt>${escapeHtml(t("multi.llm_repair"))}</dt><dd>${escapeHtml(t("multi.not_attempted"))}</dd></div>` : "",
+      llm.repairAttempted && llm.repairTimeoutMs !== null ?
+        `<div><dt>${escapeHtml(t("multi.llm_repair_timeout"))}</dt><dd>${escapeHtml(formatLatency(llm.repairTimeoutMs))}</dd></div>` : "",
+      llm.repairAttempted && llm.repairElapsedMs !== null ?
+        `<div><dt>${escapeHtml(t("multi.llm_repair_latency"))}</dt><dd>${escapeHtml(formatLatency(llm.repairElapsedMs))}</dd></div>` : "",
+      llm.repairSkipReason ?
+        `<div><dt>${escapeHtml(t("multi.repair_skip_reason"))}</dt><dd>${escapeHtml(llm.repairSkipReason)}</dd></div>` : "",
+      llm.primaryErrorCode ?
+        `<div><dt>${escapeHtml(t("multi.primary_error"))}</dt><dd>${escapeHtml(llmErrorLabel(llm.primaryErrorCode, llm.primaryErrorMessage))}</dd></div>` : "",
+      llm.retryCount > 0 ?
+        `<div><dt>${escapeHtml(t("multi.llm_retry_count"))}</dt><dd>${llm.retryCount}</dd></div>` : "",
+      llm.recoverySuccess ?
+        `<div><dt>${escapeHtml(t("multi.fallback_reason"))}</dt><dd>${escapeHtml(t("multi.recovery_success"))}</dd></div>` : "",
+      llm.errorCode ?
+        `<div><dt>${escapeHtml(t("multi.llm_error"))}</dt><dd>${escapeHtml(llm.errorLabel)}</dd></div>` : "",
+      llm.fallback && llm.fallbackReason ?
+        `<div><dt>${escapeHtml(t("multi.fallback_reason"))}</dt><dd>${escapeHtml(llm.fallbackReason)}</dd></div>` : "",
+    ].join("");
     return `
       <article class="agent-role-card ${escapeHtml(stepStatus)}">
         <div class="agent-role-heading">
@@ -1053,13 +1125,129 @@ function renderMultiAgentSteps(response) {
         </div>
         <dl class="agent-role-runtime">
           <div><dt>${escapeHtml(t("multi.analysis_mode"))}</dt><dd>${escapeHtml(analysisMode)}</dd></div>
-          <div><dt>${escapeHtml(t("multi.model"))}</dt><dd>${escapeHtml(modelName || "—")}</dd></div>
-          <div><dt>${escapeHtml(t("multi.llm_latency"))}</dt><dd>${llmDuration === null ? "—" : escapeHtml(formatLatency(llmDuration))}</dd></div>
-          <div><dt>${escapeHtml(t("multi.fallback"))}</dt><dd>${escapeHtml(llmFallback ? t("common.yes") : t("common.no"))}</dd></div>
+          <div><dt>${escapeHtml(t("multi.model"))}</dt><dd>${escapeHtml(llm.model || "—")}</dd></div>
+          <div><dt>${escapeHtml(t("multi.llm_latency"))}</dt><dd>${llm.elapsedMs === null ? "—" : escapeHtml(formatLatency(llm.elapsedMs))}</dd></div>
+          <div><dt>${escapeHtml(t("multi.fallback"))}</dt><dd>${escapeHtml(llm.fallback ? t("common.yes") : t("common.no"))}</dd></div>
+          ${llmExtraRows}
         </dl>
         ${output ? `<details class="agent-output-details"><summary><span>${escapeHtml(t("multi.step_output"))}</span><span class="when-closed">${escapeHtml(t("multi.expand"))}</span><span class="when-open">${escapeHtml(t("multi.collapse"))}</span></summary><p>${escapeHtml(output)}</p></details>` : ""}
       </article>`;
   }).join("");
+}
+
+function roleLLMDetails(role, metadata) {
+  const prefix = role;
+  const attempted = metadata.llm_attempted === true ||
+    metadata[`${prefix}_llm_attempted`] === true;
+  const success = metadata.llm_success === true ||
+    metadata[`${prefix}_llm_success`] === true ||
+    metadata[`${prefix}_llm_used`] === true;
+  const fallback = metadata.fallback === true ||
+    metadata[`${prefix}_fallback`] === true ||
+    metadata[`${prefix}_fallback_used`] === true;
+  const elapsedMs = safeNumber(
+    metadata.llm_elapsed_ms ?? metadata[`${prefix}_llm_elapsed_ms`] ??
+    metadata[`${prefix}_llm_duration_ms`],
+  );
+  const timeoutMs = safeNumber(
+    metadata.llm_timeout_ms ?? metadata[`${prefix}_llm_timeout_ms`],
+  );
+  const primaryElapsedMs = safeNumber(
+    metadata.primary_llm_elapsed_ms ?? metadata[`${prefix}_primary_llm_elapsed_ms`] ??
+    metadata.llm_primary_elapsed_ms ?? metadata[`${prefix}_llm_primary_elapsed_ms`],
+  );
+  const repairElapsedMs = safeNumber(
+    metadata.repair_llm_elapsed_ms ?? metadata[`${prefix}_repair_llm_elapsed_ms`] ??
+    metadata.llm_repair_elapsed_ms ?? metadata[`${prefix}_llm_repair_elapsed_ms`],
+  );
+  const primaryTimeoutMs = safeNumber(
+    metadata.primary_llm_timeout_ms ?? metadata[`${prefix}_primary_llm_timeout_ms`],
+  );
+  const repairTimeoutMs = safeNumber(
+    metadata.repair_llm_timeout_ms ?? metadata[`${prefix}_repair_llm_timeout_ms`],
+  );
+  const primaryErrorCode = safeText(
+    metadata.primary_error_code || metadata[`${prefix}_primary_error_code`],
+  );
+  const primaryErrorMessage = safeText(
+    metadata.primary_error_message || metadata[`${prefix}_primary_error_message`],
+  );
+  const repairAttemptedValue = metadata.repair_attempted ??
+    metadata[`${prefix}_repair_attempted`];
+  const repairAttempted = repairAttemptedValue === true ? true :
+    repairAttemptedValue === false ? false : null;
+  const repairSkipReason = safeText(
+    metadata.repair_skip_reason || metadata[`${prefix}_repair_skip_reason`],
+  );
+  const errorCode = safeText(
+    metadata.llm_error_code || metadata[`${prefix}_llm_error_code`],
+  );
+  const retryCount = safeNumber(
+    metadata.llm_retry_count ?? metadata[`${prefix}_llm_retry_count`],
+  ) ?? 0;
+  const errorMessage = safeText(
+    metadata.llm_error_message || metadata[`${prefix}_llm_error_message`],
+  );
+  const fallbackReason = safeText(
+    metadata.fallback_reason || metadata[`${prefix}_fallback_reason`],
+  );
+  const recoverySuccess = metadata.recovery_success === true ||
+    metadata[`${prefix}_recovery_success`] === true;
+  return {
+    attempted,
+    success,
+    fallback,
+    elapsedMs: attempted ? elapsedMs : null,
+    timeoutMs: attempted || timeoutMs !== null ? timeoutMs : null,
+    primaryElapsedMs: attempted ? primaryElapsedMs : null,
+    primaryTimeoutMs: attempted ? primaryTimeoutMs : null,
+    repairAttempted,
+    repairElapsedMs: repairAttempted ? repairElapsedMs : null,
+    repairTimeoutMs: repairAttempted ? repairTimeoutMs : null,
+    repairSkipReason,
+    primaryErrorCode,
+    primaryErrorMessage,
+    errorCode,
+    retryCount,
+    recoverySuccess,
+    errorLabel: llmErrorLabel(errorCode, errorMessage),
+    fallbackReason,
+    model: safeText(metadata.model || metadata[`${prefix}_model`]),
+    analysisMode: safeText(metadata.analysis_mode || metadata[`${prefix}_analysis_mode`] ||
+      metadata[`${prefix}_mode`]),
+  };
+}
+
+function llmErrorLabel(errorCode, errorMessage = "") {
+  switch (errorCode) {
+  case "role_contract_violation":
+    return t("multi.error_role_contract_violation");
+  case "invalid_evidence_id":
+    return t("multi.error_invalid_evidence_id");
+  case "provider_unavailable":
+  case "auth_failed":
+    return t("multi.error_provider_unavailable");
+  case "deadline_exceeded":
+    return t("multi.error_deadline_exceeded");
+  default:
+    return errorMessage ? `${errorCode}: ${errorMessage}` : errorCode;
+  }
+}
+
+function roleAnalysisLabel(role, details) {
+  if (details.analysisMode === "llm" || details.success) {
+    return t(multiAgentModeLabels[role]);
+  }
+  if (details.attempted && details.fallback) {
+    return t("multi.llm_fallback");
+  }
+  if (details.analysisMode === "rule_based" || role === "triage") {
+    return t("multi.rule_based");
+  }
+  if (details.fallback) {
+    return t("multi.llm_fallback");
+  }
+  return t(multiAgentModeLabels[role]);
 }
 
 function acceptChatResponse(response) {
@@ -1902,16 +2090,83 @@ function renderRuntimeStatuses() {
         t("status.not_run");
   setRuntimeStatus("status-sse", sseState, sseLabel);
 
+  const llmRuntime = deriveLLMRuntimeStatus(response, requestFailed);
+  setRuntimeStatus("status-llm", llmRuntime.state, llmRuntime.label);
+}
+
+function deriveLLMRuntimeStatus(response, requestFailed = false) {
+  if (requestFailed) {
+    return { state: "error", label: t("status.error") };
+  }
+  const metadata = response?.metadata || {};
   const agentMode = safeText(metadata.agent_mode);
+  const status = safeText(metadata.llm_execution_status);
+  const total = safeNumber(metadata.llm_role_count) ??
+    safeNumber(metadata.llm_attempt_count) ?? 0;
+  const success = safeNumber(metadata.llm_success_count) ?? 0;
+  const fallback = safeNumber(metadata.llm_fallback_count) ?? 0;
+  if (status) {
+    switch (status) {
+    case "success":
+    case "healthy":
+      return {
+        state: "active",
+        label: t("status.llm_success"),
+      };
+    case "degraded":
+      return {
+        state: "fallback",
+        label: t("status.llm_partially_failed"),
+      };
+    case "fallback":
+      return {
+        state: "fallback",
+        label: metadata.llm_available === false ?
+          t("status.llm_unavailable_fallback") :
+          t("status.llm_analysis_failed"),
+      };
+    case "not_used":
+      return { state: "available", label: t("status.llm_not_used") };
+    case "not_configured":
+      return { state: "unknown", label: t("status.llm_not_configured") };
+    case "unavailable":
+      return { state: "error", label: t("status.llm_unavailable_fallback") };
+    default:
+      return { state: "unknown", label: t("status.unknown") };
+    }
+  }
+  if (agentMode === "multi_agent") {
+    return deriveRoleMetadataLLMStatus(metadata);
+  }
   const fallbackUsed = metadata.fallback_used === true ||
     agentMode === "deterministic";
-  const llmState = requestFailed ? "error" :
-    fallbackUsed ? "fallback" :
-      agentMode === "eino_react" ? "active" : "unknown";
-  const llmLabel = llmState === "error" ? t("status.error") :
-    llmState === "fallback" ? t("status.llm_fallback") :
-      llmState === "active" ? t("status.llm_active") : t("status.unknown");
-  setRuntimeStatus("status-llm", llmState, llmLabel);
+  const llmState = fallbackUsed ? "fallback" :
+    agentMode === "eino_react" ? "active" : "unknown";
+  const llmLabel = llmState === "fallback" ? t("status.llm_fallback") :
+    llmState === "active" ? t("status.llm_active") : t("status.unknown");
+  return { state: llmState, label: llmLabel };
+}
+
+function deriveRoleMetadataLLMStatus(metadata) {
+  const roles = multiAgentRoles
+    .map((role) => roleLLMDetails(role, metadata))
+    .filter((details) => details.attempted || details.fallback);
+  if (!roles.length) {
+    return { state: "unknown", label: t("status.unknown") };
+  }
+  const success = roles.filter((details) => details.success).length;
+  const fallback = roles.filter((details) => details.fallback).length;
+  const total = roles.length;
+  if (success === total) {
+    return { state: "active", label: t("status.llm_healthy", { success, total }) };
+  }
+  if (success > 0) {
+    return {
+      state: "fallback",
+      label: t("status.llm_degraded", { success, total, fallback }),
+    };
+  }
+  return { state: "fallback", label: t("status.llm_fallback_all") };
 }
 
 function setRuntimeStatus(id, status, label) {

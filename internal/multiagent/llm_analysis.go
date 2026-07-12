@@ -1,6 +1,7 @@
 package multiagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 )
 
 const maxRoleEvidenceItems = 20
+const triageMinRepairBudget = 3 * time.Second
 
 type AnalysisChatModel interface {
 	Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error)
@@ -28,7 +30,33 @@ type AnalysisChatModel interface {
 type RoleLLM struct {
 	model     AnalysisChatModel
 	modelName string
-	timeout   time.Duration
+	timeouts  RoleTimeouts
+}
+
+type RoleTimeouts struct {
+	TriageLLM    time.Duration
+	EvidenceLLM  time.Duration
+	KnowledgeLLM time.Duration
+	SynthesisLLM time.Duration
+}
+
+func (t RoleTimeouts) Normalize(fallback time.Duration) RoleTimeouts {
+	if fallback <= 0 {
+		fallback = 20 * time.Second
+	}
+	if t.TriageLLM <= 0 {
+		t.TriageLLM = fallback
+	}
+	if t.EvidenceLLM <= 0 {
+		t.EvidenceLLM = fallback
+	}
+	if t.KnowledgeLLM <= 0 {
+		t.KnowledgeLLM = fallback
+	}
+	if t.SynthesisLLM <= 0 {
+		t.SynthesisLLM = fallback
+	}
+	return t
 }
 
 func NewRoleLLM(
@@ -36,19 +64,31 @@ func NewRoleLLM(
 	modelName string,
 	timeout time.Duration,
 ) (*RoleLLM, error) {
+	return NewRoleLLMWithTimeouts(chatModel, modelName, RoleTimeouts{}.Normalize(timeout))
+}
+
+func NewRoleLLMWithTimeouts(
+	chatModel AnalysisChatModel,
+	modelName string,
+	timeouts RoleTimeouts,
+) (*RoleLLM, error) {
 	if chatModel == nil {
 		return nil, errors.New("multi-agent analysis model is required")
 	}
 	if strings.TrimSpace(modelName) == "" {
 		return nil, errors.New("multi-agent analysis model name is required")
 	}
-	if timeout <= 0 {
-		return nil, errors.New("multi-agent analysis timeout must be greater than zero")
+	timeouts = timeouts.Normalize(20 * time.Second)
+	if timeouts.TriageLLM <= 0 ||
+		timeouts.EvidenceLLM <= 0 ||
+		timeouts.KnowledgeLLM <= 0 ||
+		timeouts.SynthesisLLM <= 0 {
+		return nil, errors.New("multi-agent role timeouts must be greater than zero")
 	}
 	return &RoleLLM{
 		model:     chatModel,
 		modelName: strings.TrimSpace(modelName),
-		timeout:   timeout,
+		timeouts:  timeouts,
 	}, nil
 }
 
@@ -61,11 +101,11 @@ type evidenceAnalysis struct {
 }
 
 type knowledgeAnalysis struct {
-	KnowledgeSummary     string   `json:"knowledge_summary"`
-	RunbookActions       []string `json:"runbook_supported_actions"`
-	HistoricalPatterns   []string `json:"historical_patterns"`
-	UnsafeActionsToAvoid []string `json:"unsafe_actions_to_avoid"`
-	EvidenceIDs          []string `json:"evidence_ids"`
+	KnowledgeSummary     string     `json:"knowledge_summary"`
+	RunbookActions       StringList `json:"runbook_supported_actions"`
+	HistoricalPatterns   []string   `json:"historical_patterns"`
+	UnsafeActionsToAvoid []string   `json:"unsafe_actions_to_avoid"`
+	EvidenceIDs          []string   `json:"evidence_ids"`
 }
 
 type synthesisDraft struct {
@@ -81,18 +121,39 @@ type synthesisStatement struct {
 }
 
 type triageLLMOutput struct {
-	Service          string   `json:"service"`
-	IncidentType     string   `json:"incident_type"`
-	SeverityHint     string   `json:"severity_hint"`
-	EvidencePlan     []string `json:"evidence_plan"`
-	Language         string   `json:"language"`
-	TimeWindowReason string   `json:"time_window_reason"`
-	TriageSummary    string   `json:"triage_summary"`
-	Constraints      []string `json:"constraints"`
+	SuspectedServices []string           `json:"suspected_services"`
+	IncidentType      string             `json:"incident_type"`
+	EvidencePlan      []string           `json:"evidence_plan"`
+	Hypotheses        []triageHypothesis `json:"hypotheses"`
+	Uncertainties     []string           `json:"uncertainties"`
+	Language          string             `json:"language,omitempty"`
+}
+
+type triageHypothesis struct {
+	Statement            string `json:"statement"`
+	RequiresVerification bool   `json:"requires_verification"`
 }
 
 type llmCallResult struct {
-	durationMS int64
+	durationMS          int64
+	timeout             time.Duration
+	primaryTimeout      time.Duration
+	repairTimeout       time.Duration
+	errorCode           string
+	errorMessage        string
+	retryCount          int
+	recoveryReason      string
+	primaryMS           int64
+	repairMS            int64
+	primaryAttempted    bool
+	primarySuccess      bool
+	primaryErrorCode    string
+	primaryErrorMessage string
+	repairAttempted     bool
+	repairSuccess       bool
+	repairErrorCode     string
+	repairErrorMessage  string
+	repairSkipReason    string
 }
 
 func (l *RoleLLM) planTriage(
@@ -106,33 +167,23 @@ func (l *RoleLLM) planTriage(
 		"language":               rulePlan.Language,
 		"available_services":     supportedServices(),
 		"allowed_evidence_types": supportedEvidenceSources,
-		"rule_based_candidate":   boundedPlanForPrompt(rulePlan),
-		"role_rag_context":       input.Metadata["role_rag_context"],
-		"role_skill_cards":       input.Metadata["role_skill_cards"],
-		"session_context":        boundedSessionContextForPrompt(input.Metadata["session_context"]),
-		"constraints": []string{
-			"Triage must not make final root-cause claims.",
-			"Triage must only produce a bounded investigation plan.",
-			"Triage must choose evidence types from the allowed list.",
-			"Triage must output JSON only.",
-			"Do not expose private chain-of-thought.",
-		},
 	}
 	var output triageLLMOutput
 	call, err := l.callJSON(
 		ctx,
 		AgentRoleTriage,
-		`You are the Triage Agent in a service reliability investigation.
-Produce only a bounded investigation plan, not a final diagnosis.
-Do not claim a root cause, do not invent evidence, and do not expose chain-of-thought.
-Choose evidence_plan values only from the allowed_evidence_types list.
-Follow role_skill_cards as bounded diagnostic guidance, not as an execution engine.
-Use the requested language for triage_summary and constraints.
-Return JSON only with:
-service, incident_type, severity_hint, evidence_plan, language,
-time_window_reason, triage_summary, constraints.
-incident_type must be one of:
-high_error_rate, latency, timeout, dependency_failure, unknown.`,
+		`You are the Triage Agent.
+Produce a short investigation plan only.
+Do not provide final diagnosis, confirmed root cause, remediation, restart, rollback, scaling, or mitigation.
+Return JSON only. No Markdown. No explanation outside JSON.
+Allowed fields only: suspected_services, incident_type, evidence_plan, hypotheses, uncertainties, language.
+suspected_services: max 3 values from available_services.
+incident_type: one of high_error_rate, latency, timeout, dependency_failure, unknown.
+evidence_plan: max 6 values from allowed_evidence_types.
+hypotheses: max 3 items, each unverified with requires_verification=true.
+uncertainties: max 3 short strings.
+Example:
+{"suspected_services":["checkout"],"incident_type":"high_error_rate","evidence_plan":["metrics","logs","traces","knowledge"],"hypotheses":[{"statement":"Checkout may have elevated errors that require metrics and log verification.","requires_verification":true}],"uncertainties":["Root cause is not confirmed."],"language":"en"}`,
 		payload,
 		&output,
 		func() error {
@@ -143,18 +194,17 @@ high_error_rate, latency, timeout, dependency_failure, unknown.`,
 		return TriagePlan{}, call, err
 	}
 	plan := TriagePlan{
-		Service:      strings.TrimSpace(output.Service),
+		Service:      selectTriageService(output.SuspectedServices, rulePlan.Service),
 		IncidentType: normalizeTriageIncidentType(output.IncidentType),
-		EvidencePlan: normalizeEvidencePlan(output.EvidencePlan),
+		EvidencePlan: triageEvidencePlan(output, rulePlan.EvidencePlan),
 		Query:        strings.TrimSpace(input.Message),
-		Summary:      strings.TrimSpace(output.TriageSummary),
+		Summary:      "",
 		TimeContext:  input.TimeContext,
 		Language:     normalizeTriageLanguage(output.Language, rulePlan.Language),
 		Limitations:  append([]agenteino.Limitation{}, rulePlan.Limitations...),
 		Metadata: map[string]any{
-			"triage_severity_hint":      normalizeSeverityHint(output.SeverityHint),
-			"triage_time_window_reason": boundedSummary(output.TimeWindowReason, 240),
-			"triage_constraints":        boundedStringSlice(output.Constraints, 5, 160),
+			"triage_hypotheses":    boundedTriageHypotheses(output.Hypotheses),
+			"triage_uncertainties": boundedStringSlice(output.Uncertainties, 3, 160),
 		},
 	}
 	if plan.Summary == "" {
@@ -218,12 +268,13 @@ func (l *RoleLLM) analyzeKnowledge(
 	limitations []agenteino.Limitation,
 ) (knowledgeAnalysis, llmCallResult, error) {
 	payload := map[string]any{
-		"triage_plan":      boundedPlanForPrompt(plan),
-		"knowledge":        boundedEvidenceForPrompt(evidence),
-		"memory":           boundedMemoryForPrompt(memories),
-		"limitations":      limitations,
-		"language":         plan.Language,
-		"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge],
+		"triage_plan":          boundedPlanForPrompt(plan),
+		"knowledge":            boundedEvidenceForPrompt(evidence),
+		"memory":               boundedMemoryForPrompt(memories),
+		"allowed_evidence_ids": evidenceIDsForPrompt(evidence),
+		"limitations":          limitations,
+		"language":             plan.Language,
+		"role_skill_cards":     plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge],
 	}
 	var output knowledgeAnalysis
 	call, err := l.callJSON(
@@ -236,6 +287,16 @@ Follow role_skill_cards when separating runbook guidance from current facts.
 Do not invent actions or evidence IDs. Use the requested language.
 Return JSON only with: knowledge_summary, runbook_supported_actions,
 historical_patterns, unsafe_actions_to_avoid, evidence_ids.
+runbook_supported_actions must always be a JSON array of strings. Use [] when
+there are no runbook-supported actions; never return an empty string or a single
+string for this field.
+You may cite only IDs from allowed_evidence_ids. Never cite internal memory IDs,
+database IDs, document IDs, chunk IDs, or IDs not listed there. If no allowed
+evidence supports a claim, return an empty evidence_ids array.
+Example:
+{"knowledge_summary":"Relevant runbook guidance was found.",
+"runbook_supported_actions":["check dependency health","validate timeout budget"],
+"historical_patterns":[],"unsafe_actions_to_avoid":[],"evidence_ids":["runbook-1"]}.
 Every evidence_id must exactly match an ID in the knowledge input.`,
 		payload,
 		&output,
@@ -296,14 +357,17 @@ Each statement is {"text":"...","evidence_ids":["..."]}; each limitation is
 			return validateSynthesisDraft(draft, input.Evidence)
 		},
 	)
-	metadata := map[string]any{
-		"synthesis_llm_used":        err == nil,
-		"synthesis_llm_attempted":   true,
-		"synthesis_model":           l.modelName,
-		"synthesis_fallback_used":   err != nil,
-		"synthesis_llm_duration_ms": call.durationMS,
-		"synthesis_mode":            "llm",
-	}
+	metadata := roleLLMMetadata(roleLLMMetadataInput{
+		Role:           AgentRoleSynthesis,
+		Model:          l.modelName,
+		Attempted:      true,
+		Success:        err == nil,
+		Call:           call,
+		Fallback:       err != nil,
+		FallbackReason: synthesisFallbackReason(err),
+		AnalysisMode:   "llm",
+	})
+	metadata["synthesis_mode"] = "llm"
 	if err != nil {
 		return agenteino.AgentOutput{Metadata: metadata}, err
 	}
@@ -362,14 +426,19 @@ func (l *RoleLLM) callJSON(
 	if err != nil {
 		return l.failCall(ctx, span, role, started, "prompt_encode_failed", err)
 	}
-	callContext, cancel := context.WithTimeout(ctx, l.timeout)
+	timeout := l.timeoutForRole(role)
+	callContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	response, err := l.model.Generate(callContext, []*schema.Message{
+	primaryContext, cancelPrimary, primaryTimeout := l.attemptContext(callContext, role, timeout, false)
+	primaryStarted := time.Now()
+	response, err := l.model.Generate(primaryContext, []*schema.Message{
 		schema.SystemMessage(systemPrompt),
 		schema.UserMessage(string(encoded)),
-	})
+	}, roleModelOptions(role)...)
+	cancelPrimary()
+	primaryMS := time.Since(primaryStarted).Milliseconds()
 	if err != nil {
-		return l.failCall(ctx, span, role, started, "model_call_failed", err)
+		return l.failCall(ctx, span, role, started, "model_call_failed", err, 0, primaryMS, 0, primaryTimeout.Milliseconds(), 0)
 	}
 	if response == nil {
 		return l.failCall(
@@ -379,30 +448,429 @@ func (l *RoleLLM) callJSON(
 			started,
 			"empty_model_response",
 			errors.New("model returned no response"),
+			0,
+			primaryMS,
+			0,
+			primaryTimeout.Milliseconds(),
+			0,
 		)
 	}
-	if err := json.Unmarshal([]byte(stripRoleJSONFence(response.Content)), target); err != nil {
-		return l.failCall(ctx, span, role, started, "invalid_json", err)
+	content := stripRoleJSONFence(response.Content)
+	retryCount := 0
+	recoveryReason := ""
+	repairMS := int64(0)
+	configuredRepairTimeout := time.Duration(0)
+	if err := parseRoleJSON(role, content, target); err != nil {
+		if ok, _ := shouldRepairJSON(callContext, role, err); ok {
+			retryCount = 1
+			recoveryReason = repairReasonFor(role, err)
+			repairStarted := time.Now()
+			repaired, actualRepairTimeout, repairErr := l.repairJSON(
+				callContext,
+				role,
+				systemPrompt,
+				content,
+				err,
+				payload,
+			)
+			configuredRepairTimeout = actualRepairTimeout
+			repairMS = time.Since(repairStarted).Milliseconds()
+			if repairErr == nil {
+				content = repaired
+				if parseErr := parseRoleJSON(role, content, target); parseErr != nil {
+					return l.failCall(
+						ctx,
+						span,
+						role,
+						started,
+						"invalid_json",
+						fmt.Errorf("json repair parse failed: %w; initial parse: %v", parseErr, err),
+						int64(retryCount),
+						primaryMS,
+						repairMS,
+						primaryTimeout.Milliseconds(),
+						configuredRepairTimeout.Milliseconds(),
+					)
+				}
+			} else {
+				return l.failCall(
+					ctx,
+					span,
+					role,
+					started,
+					"invalid_json",
+					fmt.Errorf("json repair failed: %w; initial parse: %v", repairErr, err),
+					int64(retryCount),
+					primaryMS,
+					repairMS,
+					primaryTimeout.Milliseconds(),
+					configuredRepairTimeout.Milliseconds(),
+				)
+			}
+		} else {
+			_, skipReason := shouldRepairJSON(callContext, role, err)
+			return l.failCall(ctx, span, role, started, "invalid_json", err, 0, primaryMS, 0, primaryTimeout.Milliseconds(), 0, skipReason)
+		}
 	}
 	if validate != nil {
 		if err := validate(); err != nil {
-			return l.failCall(ctx, span, role, started, "invalid_output", err)
+			if ok, _ := shouldRepairJSON(callContext, role, err); retryCount == 0 && ok {
+				retryCount = 1
+				recoveryReason = repairReasonFor(role, err)
+				repairStarted := time.Now()
+				repaired, actualRepairTimeout, repairErr := l.repairJSON(
+					callContext,
+					role,
+					systemPrompt,
+					content,
+					err,
+					payload,
+				)
+				configuredRepairTimeout = actualRepairTimeout
+				repairMS = time.Since(repairStarted).Milliseconds()
+				if repairErr == nil {
+					content = repaired
+					if parseErr := parseRoleJSON(role, content, target); parseErr != nil {
+						return l.failCall(
+							ctx,
+							span,
+							role,
+							started,
+							"invalid_json",
+							fmt.Errorf("validation repair parse failed: %w; initial validation: %v", parseErr, err),
+							int64(retryCount),
+							primaryMS,
+							repairMS,
+							primaryTimeout.Milliseconds(),
+							configuredRepairTimeout.Milliseconds(),
+						)
+					}
+					if validationErr := validate(); validationErr == nil {
+						goto success
+					} else {
+						return l.failCall(
+							ctx,
+							span,
+							role,
+							started,
+							"invalid_output",
+							fmt.Errorf("validation repair failed: %w; initial validation: %v", validationErr, err),
+							int64(retryCount),
+							primaryMS,
+							repairMS,
+							primaryTimeout.Milliseconds(),
+							configuredRepairTimeout.Milliseconds(),
+						)
+					}
+				}
+				return l.failCall(
+					ctx,
+					span,
+					role,
+					started,
+					"invalid_output",
+					fmt.Errorf("validation repair request failed: %w; initial validation: %v", repairErr, err),
+					int64(retryCount),
+					primaryMS,
+					repairMS,
+					primaryTimeout.Milliseconds(),
+					configuredRepairTimeout.Milliseconds(),
+				)
+			}
+			return l.failCall(
+				ctx,
+				span,
+				role,
+				started,
+				"invalid_output",
+				err,
+				int64(retryCount),
+				primaryMS,
+				repairMS,
+				primaryTimeout.Milliseconds(),
+				0,
+				repairSkipReason(callContext, role, err),
+			)
 		}
 	}
+success:
 	duration := time.Since(started).Milliseconds()
 	span.SetAttributes(
 		attribute.Int64("llm.duration_ms", duration),
+		attribute.Int64("llm.timeout_ms", timeout.Milliseconds()),
+		attribute.Int("llm.retry_count", retryCount),
+		attribute.String("llm.recovery_reason", recoveryReason),
+		attribute.Int64("llm.primary_duration_ms", primaryMS),
+		attribute.Int64("llm.repair_duration_ms", repairMS),
+		attribute.Int64("llm.primary_timeout_ms", primaryTimeout.Milliseconds()),
+		attribute.Int64("llm.repair_timeout_ms", configuredRepairTimeout.Milliseconds()),
 		attribute.Bool("llm.used", true),
 		attribute.Bool("fallback_used", false),
 		attribute.Bool("fallback.used", false),
 	)
 	agenteino.EmitStreamEvent(ctx, "agent_llm_completed", map[string]any{
-		"role":        string(role),
-		"agent_role":  string(role),
-		"model":       l.modelName,
-		"duration_ms": duration,
+		"role":                string(role),
+		"agent_role":          string(role),
+		"model":               l.modelName,
+		"duration_ms":         duration,
+		"timeout_ms":          timeout.Milliseconds(),
+		"retry_count":         retryCount,
+		"primary_duration_ms": primaryMS,
+		"repair_duration_ms":  repairMS,
+		"primary_timeout_ms":  primaryTimeout.Milliseconds(),
+		"repair_timeout_ms":   configuredRepairTimeout.Milliseconds(),
 	})
-	return llmCallResult{durationMS: duration}, nil
+	return llmCallResult{
+		durationMS:       duration,
+		timeout:          timeout,
+		primaryTimeout:   primaryTimeout,
+		repairTimeout:    configuredRepairTimeout,
+		retryCount:       retryCount,
+		recoveryReason:   recoveryReason,
+		primaryMS:        primaryMS,
+		repairMS:         repairMS,
+		primaryAttempted: true,
+		primarySuccess:   retryCount == 0,
+		repairAttempted:  retryCount > 0,
+		repairSuccess:    retryCount > 0,
+	}, nil
+}
+
+func (l *RoleLLM) attemptContext(
+	ctx context.Context,
+	role AgentRole,
+	total time.Duration,
+	repair bool,
+) (context.Context, context.CancelFunc, time.Duration) {
+	if role != AgentRoleTriage {
+		child, cancel := context.WithCancel(ctx)
+		return child, cancel, total
+	}
+	primaryBudget, repairBudget := triageAttemptBudgets(total)
+	if repair {
+		child, cancel := context.WithTimeout(ctx, repairBudget)
+		return child, cancel, repairBudget
+	}
+	child, cancel := context.WithTimeout(ctx, primaryBudget)
+	return child, cancel, primaryBudget
+}
+
+func (l *RoleLLM) repairAttemptContext(
+	ctx context.Context,
+	role AgentRole,
+	total time.Duration,
+) (context.Context, context.CancelFunc, time.Duration) {
+	if role != AgentRoleTriage {
+		return l.attemptContext(ctx, role, total, true)
+	}
+	remaining := remainingContextBudget(ctx)
+	if remaining <= 0 {
+		child, cancel := context.WithCancel(ctx)
+		return child, cancel, 0
+	}
+	budget := triageMinRepairBudget
+	if remaining > 7*time.Second {
+		budget = 6 * time.Second
+	} else if remaining > triageMinRepairBudget+500*time.Millisecond {
+		budget = remaining - 500*time.Millisecond
+	} else {
+		budget = remaining
+	}
+	if budget <= 0 {
+		budget = remaining
+	}
+	child, cancel := context.WithTimeout(ctx, budget)
+	return child, cancel, budget
+}
+
+func triageAttemptBudgets(total time.Duration) (time.Duration, time.Duration) {
+	if total <= 0 {
+		return 0, 0
+	}
+	repair := triageMinRepairBudget
+	if total < 9*time.Second {
+		repair = total / 3
+	}
+	if repair <= 0 {
+		repair = total / 4
+	}
+	if repair >= total {
+		repair = total / 3
+	}
+	primary := total - repair
+	if primary <= 0 {
+		primary = total
+		repair = 0
+	}
+	return primary, repair
+}
+
+func shouldRepairJSON(ctx context.Context, role AgentRole, err error) (bool, string) {
+	if err == nil {
+		return false, ""
+	}
+	if ctx.Err() != nil {
+		return false, "parent_context_done"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false, "primary_not_repairable"
+	}
+	code := classifyLLMError("invalid_output", err)
+	if code == "provider_unavailable" || code == "auth_failed" || code == "rate_limited" {
+		return false, "primary_not_repairable"
+	}
+	if role == AgentRoleTriage && remainingContextBudget(ctx) < triageRepairThreshold(ctx) {
+		return false, "insufficient_budget"
+	}
+	return true, ""
+}
+
+func repairSkipReason(ctx context.Context, role AgentRole, err error) string {
+	_, reason := shouldRepairJSON(ctx, role, err)
+	return reason
+}
+
+func remainingContextBudget(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return time.Hour
+	}
+	remaining := time.Until(deadline)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func triageRepairThreshold(ctx context.Context) time.Duration {
+	remaining := remainingContextBudget(ctx)
+	if remaining < triageMinRepairBudget {
+		return remaining / 2
+	}
+	return triageMinRepairBudget
+}
+
+func (l *RoleLLM) repairJSON(
+	ctx context.Context,
+	role AgentRole,
+	systemPrompt string,
+	previousOutput string,
+	parseErr error,
+	payload any,
+) (string, time.Duration, error) {
+	agenteino.EmitStreamEvent(ctx, "agent_llm_json_repair_started", map[string]any{
+		"role":       string(role),
+		"agent_role": string(role),
+		"model":      l.modelName,
+	})
+	repairContext, cancel, repairTimeout := l.repairAttemptContext(ctx, role, l.timeoutForRole(role))
+	defer cancel()
+	response, err := l.model.Generate(repairContext, []*schema.Message{
+		schema.SystemMessage(systemPrompt),
+		schema.UserMessage(jsonRepairPrompt(role, previousOutput, parseErr, payload)),
+	}, roleModelOptions(role)...)
+	if err != nil {
+		return "", repairTimeout, err
+	}
+	if response == nil || strings.TrimSpace(response.Content) == "" {
+		return "", repairTimeout, errors.New("json repair returned empty response")
+	}
+	agenteino.EmitStreamEvent(ctx, "agent_llm_json_repair_completed", map[string]any{
+		"role":       string(role),
+		"agent_role": string(role),
+		"model":      l.modelName,
+	})
+	return stripRoleJSONFence(response.Content), repairTimeout, nil
+}
+
+func roleModelOptions(role AgentRole) []model.Option {
+	if role != AgentRoleTriage {
+		return nil
+	}
+	return []model.Option{
+		model.WithTemperature(0),
+		model.WithMaxTokens(512),
+	}
+}
+
+func parseRoleJSON(role AgentRole, content string, target any) error {
+	decoder := json.NewDecoder(bytes.NewBufferString(content))
+	if role == AgentRoleTriage {
+		decoder.DisallowUnknownFields()
+	}
+	return decoder.Decode(target)
+}
+
+func jsonRepairPrompt(role AgentRole, previousOutput string, parseErr error, payload any) string {
+	lines := []string{
+		"Your previous response could not be parsed.",
+		"",
+		"The field \"runbook_supported_actions\" must be a JSON array of strings.",
+		"Use [] when there are no actions.",
+		"All list-like fields must be JSON arrays, not plain strings.",
+		"",
+		"Return corrected JSON only.",
+		"Do not use Markdown code fences.",
+		"Do not include explanations.",
+		"",
+		"Previous response:",
+		boundedSummary(previousOutput, 4000),
+		"",
+		"Parse error:",
+		boundedSummary(parseErr.Error(), 500),
+	}
+	message := strings.ToLower(parseErr.Error())
+	if role == AgentRoleTriage || strings.Contains(message, "triage") {
+		field, reason, excerpt := roleContractRepairDetails(parseErr)
+		lines = []string{
+			"Your previous response violated the Triage Agent role contract.",
+			"",
+			"Field: " + field,
+			"Reason: " + reason,
+			"Excerpt: " + excerpt,
+			"",
+			"Rewrite it as a short investigation plan using only this JSON shape:",
+			`{"suspected_services":["checkout"],"incident_type":"high_error_rate","evidence_plan":["metrics","logs","traces","knowledge"],"hypotheses":[{"statement":"Checkout may have elevated errors that require metrics and log verification.","requires_verification":true}],"uncertainties":["Root cause is not confirmed."],"language":"en"}`,
+			"",
+			"Allowed suspected_services values:",
+			allowedServicesForRepair(payload),
+			"If unsure, use checkout. Never use user as a service name.",
+			"",
+			"Do not include:",
+			"- final diagnosis",
+			"- root cause conclusion",
+			"- remediation",
+			"- restart, rollback, scaling, or mitigation actions",
+			"",
+			"Return valid JSON only.",
+			"Do not use Markdown code fences.",
+			"Do not include explanations.",
+			"Every hypothesis must set requires_verification=true.",
+		}
+	}
+	if strings.Contains(message, "unknown evidence id") {
+		lines = []string{
+			"Your previous response cited an invalid evidence ID.",
+			"",
+			"You may cite only these evidence IDs:",
+			allowedEvidenceIDsForRepair(payload),
+			"",
+			"Remove unsupported citations.",
+			"Only use an allowed ID when that evidence directly supports the claim.",
+			"If no allowed evidence supports the claim, return an empty evidence_ids array.",
+			"",
+			"Return corrected JSON only.",
+			"Do not use Markdown code fences.",
+			"Do not include explanations.",
+			"",
+			"Previous response:",
+			boundedSummary(previousOutput, 4000),
+			"",
+			"Validation error:",
+			boundedSummary(parseErr.Error(), 500),
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (l *RoleLLM) failCall(
@@ -412,24 +880,249 @@ func (l *RoleLLM) failCall(
 	started time.Time,
 	reason string,
 	err error,
+	retryData ...any,
 ) (llmCallResult, error) {
 	duration := time.Since(started).Milliseconds()
+	code := classifyLLMError(reason, err)
+	message := boundedSummary(err.Error(), 240)
+	retries := 0
+	primaryMS := int64(0)
+	repairMS := int64(0)
+	primaryTimeoutMS := int64(0)
+	repairTimeoutMS := int64(0)
+	repairSkip := ""
+	if len(retryData) > 0 {
+		retries = int(asInt64(retryData[0]))
+	}
+	if len(retryData) > 1 {
+		primaryMS = asInt64(retryData[1])
+	}
+	if len(retryData) > 2 {
+		repairMS = asInt64(retryData[2])
+	}
+	if len(retryData) > 3 {
+		primaryTimeoutMS = asInt64(retryData[3])
+	}
+	if len(retryData) > 4 {
+		repairTimeoutMS = asInt64(retryData[4])
+	}
+	if len(retryData) > 5 {
+		repairSkip = asString(retryData[5])
+	}
 	span.SetAttributes(
 		attribute.Int64("llm.duration_ms", duration),
-		attribute.String("error_code", reason),
+		attribute.Int64("llm.timeout_ms", l.timeoutForRole(role).Milliseconds()),
+		attribute.Int("llm.retry_count", retries),
+		attribute.Int64("llm.primary_duration_ms", primaryMS),
+		attribute.Int64("llm.repair_duration_ms", repairMS),
+		attribute.Int64("llm.primary_timeout_ms", primaryTimeoutMS),
+		attribute.Int64("llm.repair_timeout_ms", repairTimeoutMS),
+		attribute.String("llm.repair_skip_reason", repairSkip),
+		attribute.String("error_code", code),
+		attribute.String("failure_reason", reason),
 		attribute.Bool("llm.used", false),
 		attribute.Bool("fallback_used", true),
 		attribute.Bool("fallback.used", true),
 	)
 	observability.MarkError(span, "multi-agent role LLM analysis failed")
 	agenteino.EmitStreamEvent(ctx, "agent_llm_failed", map[string]any{
-		"role":        string(role),
-		"agent_role":  string(role),
-		"model":       l.modelName,
-		"error_code":  reason,
-		"duration_ms": duration,
+		"role":                string(role),
+		"agent_role":          string(role),
+		"model":               l.modelName,
+		"error_code":          code,
+		"reason":              reason,
+		"duration_ms":         duration,
+		"timeout_ms":          l.timeoutForRole(role).Milliseconds(),
+		"retry_count":         retries,
+		"primary_duration_ms": primaryMS,
+		"repair_duration_ms":  repairMS,
+		"primary_timeout_ms":  primaryTimeoutMS,
+		"repair_timeout_ms":   repairTimeoutMS,
+		"repair_skip_reason":  repairSkip,
 	})
-	return llmCallResult{durationMS: duration}, fmt.Errorf("%s: %w", reason, err)
+	return llmCallResult{
+		durationMS:          duration,
+		timeout:             l.timeoutForRole(role),
+		primaryTimeout:      time.Duration(primaryTimeoutMS) * time.Millisecond,
+		repairTimeout:       time.Duration(repairTimeoutMS) * time.Millisecond,
+		errorCode:           code,
+		errorMessage:        message,
+		retryCount:          retries,
+		primaryMS:           primaryMS,
+		repairMS:            repairMS,
+		primaryAttempted:    true,
+		primarySuccess:      false,
+		primaryErrorCode:    code,
+		primaryErrorMessage: message,
+		repairAttempted:     retries > 0,
+		repairSuccess:       false,
+		repairErrorCode:     "",
+		repairErrorMessage:  "",
+		repairSkipReason:    repairSkip,
+	}, fmt.Errorf("%s: %w", reason, err)
+}
+
+func asInt64(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case time.Duration:
+		return typed.Milliseconds()
+	default:
+		return 0
+	}
+}
+
+func asString(value any) string {
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+	return ""
+}
+
+func (l *RoleLLM) timeoutForRole(role AgentRole) time.Duration {
+	if l == nil {
+		return 0
+	}
+	switch role {
+	case AgentRoleTriage:
+		return l.timeouts.TriageLLM
+	case AgentRoleEvidence:
+		return l.timeouts.EvidenceLLM
+	case AgentRoleKnowledge:
+		return l.timeouts.KnowledgeLLM
+	case AgentRoleSynthesis:
+		return l.timeouts.SynthesisLLM
+	default:
+		return l.timeouts.EvidenceLLM
+	}
+}
+
+func classifyLLMError(reason string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	switch reason {
+	case "invalid_json":
+		return "parse_failed"
+	case "invalid_output":
+		var contractErr RoleContractViolation
+		if errors.As(err, &contractErr) {
+			return "role_contract_violation"
+		}
+		var evidenceErr invalidEvidenceIDError
+		if errors.As(err, &evidenceErr) {
+			return "invalid_evidence_id"
+		}
+		return "parse_failed"
+	case "empty_model_response":
+		return "empty_response"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "429") ||
+		strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too many requests"):
+		return "rate_limited"
+	case strings.Contains(message, "401") ||
+		strings.Contains(message, "403") ||
+		strings.Contains(message, "unauthorized") ||
+		strings.Contains(message, "forbidden") ||
+		strings.Contains(message, "invalid api key") ||
+		strings.Contains(message, "auth"):
+		return "auth_failed"
+	case strings.Contains(message, "500") ||
+		strings.Contains(message, "502") ||
+		strings.Contains(message, "503") ||
+		strings.Contains(message, "504") ||
+		strings.Contains(message, "5xx"):
+		return "upstream_5xx"
+	case strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "provider unavailable") ||
+		strings.Contains(message, "unavailable"):
+		return "provider_unavailable"
+	default:
+		return "unknown"
+	}
+}
+
+func repairReasonFor(role AgentRole, err error) string {
+	if err == nil {
+		return ""
+	}
+	var evidenceErr invalidEvidenceIDError
+	if errors.As(err, &evidenceErr) {
+		return "invalid_evidence_id"
+	}
+	var contractErr RoleContractViolation
+	if errors.As(err, &contractErr) || role == AgentRoleTriage {
+		return "role_contract_violation"
+	}
+	return "json_parse_failed"
+}
+
+type RoleContractViolation struct {
+	Field   string
+	Index   int
+	Reason  string
+	Excerpt string
+}
+
+func (e RoleContractViolation) Error() string {
+	field := strings.TrimSpace(e.Field)
+	if field == "" {
+		field = "triage"
+	}
+	reason := strings.TrimSpace(e.Reason)
+	if reason == "" {
+		reason = "role contract violation"
+	}
+	if e.Index >= 0 {
+		field = fmt.Sprintf("%s[%d]", field, e.Index)
+	}
+	if e.Excerpt == "" {
+		return fmt.Sprintf("%s: %s", field, reason)
+	}
+	return fmt.Sprintf("%s: %s: %s", field, reason, boundedSummary(e.Excerpt, 120))
+}
+
+func roleContractRepairDetails(err error) (string, string, string) {
+	var violation RoleContractViolation
+	if errors.As(err, &violation) {
+		field := violation.Field
+		if violation.Index >= 0 {
+			field = fmt.Sprintf("%s[%d]", field, violation.Index)
+		}
+		return nonEmpty(field, "triage"),
+			nonEmpty(violation.Reason, "role contract violation"),
+			boundedSummary(violation.Excerpt, 160)
+	}
+	return "triage", boundedSummary(err.Error(), 180), ""
+}
+
+func nonEmpty(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+type invalidEvidenceIDError struct {
+	ID string
+}
+
+func (e invalidEvidenceIDError) Error() string {
+	return fmt.Sprintf("LLM cited unknown evidence id %q", e.ID)
 }
 
 func validateSynthesisDraft(
@@ -460,27 +1153,115 @@ func validateSynthesisDraft(
 }
 
 func validateTriageLLMOutput(output triageLLMOutput) error {
-	if strings.TrimSpace(output.Service) == "" {
-		return errors.New("triage LLM returned empty service")
+	if len(output.SuspectedServices) == 0 {
+		return errors.New("triage LLM returned empty suspected_services")
 	}
-	if !isSupportedService(output.Service) {
-		return fmt.Errorf("triage LLM returned unsupported service %q", output.Service)
+	if len(output.SuspectedServices) > 3 {
+		return RoleContractViolation{
+			Field:   "suspected_services",
+			Index:   -1,
+			Reason:  "too many suspected services",
+			Excerpt: strings.Join(output.SuspectedServices, ", "),
+		}
+	}
+	for index, service := range output.SuspectedServices {
+		if !isSupportedService(service) {
+			return RoleContractViolation{
+				Field:   "suspected_services",
+				Index:   index,
+				Reason:  "unsupported service; use only available_services",
+				Excerpt: service,
+			}
+		}
+		if len([]rune(service)) > 40 {
+			return RoleContractViolation{
+				Field:   "suspected_services",
+				Index:   index,
+				Reason:  "service name is too long",
+				Excerpt: service,
+			}
+		}
 	}
 	incidentType := normalizeTriageIncidentType(output.IncidentType)
 	if incidentType == "" {
 		return fmt.Errorf("triage LLM returned invalid incident_type %q", output.IncidentType)
 	}
-	if len(normalizeEvidencePlan(output.EvidencePlan)) == 0 {
+	if len(triageEvidencePlan(output, nil)) == 0 {
 		return errors.New("triage LLM returned empty or unsupported evidence_plan")
 	}
-	if summary := strings.TrimSpace(output.TriageSummary); summary == "" {
-		return errors.New("triage LLM returned empty triage_summary")
-	} else if containsFinalDiagnosisClaim(summary) {
-		return errors.New("triage LLM returned final diagnosis instead of triage plan")
+	if len(output.EvidencePlan) > maxEvidencePlanSize {
+		return RoleContractViolation{
+			Field:   "evidence_plan",
+			Index:   -1,
+			Reason:  "too many evidence sources",
+			Excerpt: strings.Join(output.EvidencePlan, ", "),
+		}
 	}
-	for _, constraint := range output.Constraints {
-		if containsFinalDiagnosisClaim(constraint) {
-			return errors.New("triage LLM constraints contain final diagnosis language")
+	if len(output.Hypotheses) == 0 {
+		return errors.New("triage LLM returned no hypotheses")
+	}
+	if len(output.Hypotheses) > 3 {
+		return RoleContractViolation{
+			Field:   "hypotheses",
+			Index:   -1,
+			Reason:  "too many hypotheses",
+			Excerpt: fmt.Sprintf("%d hypotheses", len(output.Hypotheses)),
+		}
+	}
+	for index, hypothesis := range output.Hypotheses {
+		statement := strings.TrimSpace(hypothesis.Statement)
+		if statement == "" {
+			return errors.New("triage LLM returned empty hypothesis statement")
+		}
+		if len([]rune(statement)) > 180 {
+			return RoleContractViolation{
+				Field:   "hypotheses.statement",
+				Index:   index,
+				Reason:  "hypothesis is too long",
+				Excerpt: statement,
+			}
+		}
+		if !hypothesis.RequiresVerification {
+			return RoleContractViolation{
+				Field:   "hypotheses.requires_verification",
+				Index:   index,
+				Reason:  "requires_verification must be true",
+				Excerpt: statement,
+			}
+		}
+		if containsFinalDiagnosisClaim(statement) {
+			return RoleContractViolation{
+				Field:   "hypotheses.statement",
+				Index:   index,
+				Reason:  "stated a final diagnosis or operational action",
+				Excerpt: statement,
+			}
+		}
+	}
+	if len(output.Uncertainties) > 3 {
+		return RoleContractViolation{
+			Field:   "uncertainties",
+			Index:   -1,
+			Reason:  "too many uncertainties",
+			Excerpt: strings.Join(output.Uncertainties, ", "),
+		}
+	}
+	for index, value := range output.Uncertainties {
+		if containsFinalDiagnosisClaim(value) {
+			return RoleContractViolation{
+				Field:   "uncertainties",
+				Index:   index,
+				Reason:  "stated a final diagnosis or operational action",
+				Excerpt: value,
+			}
+		}
+		if len([]rune(value)) > 160 {
+			return RoleContractViolation{
+				Field:   "uncertainties",
+				Index:   index,
+				Reason:  "uncertainty is too long",
+				Excerpt: value,
+			}
 		}
 	}
 	return nil
@@ -524,6 +1305,23 @@ func normalizeEvidencePlan(values []string) []string {
 	return result
 }
 
+func selectTriageService(values []string, fallback string) string {
+	for _, value := range values {
+		if isSupportedService(value) {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func triageEvidencePlan(output triageLLMOutput, fallback []string) []string {
+	normalized := normalizeEvidencePlan(output.EvidencePlan)
+	if len(normalized) == 0 {
+		return normalizeEvidencePlan(fallback)
+	}
+	return normalized
+}
+
 func normalizeTriageLanguage(value string, fallback string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "zh", "en":
@@ -535,13 +1333,23 @@ func normalizeTriageLanguage(value string, fallback string) string {
 	return "en"
 }
 
-func normalizeSeverityHint(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "info", "warning", "critical":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "unknown"
+func boundedTriageHypotheses(values []triageHypothesis) []map[string]any {
+	limit := len(values)
+	if limit > 3 {
+		limit = 3
 	}
+	result := make([]map[string]any, 0, limit)
+	for _, value := range values[:limit] {
+		statement := strings.TrimSpace(value.Statement)
+		if statement == "" {
+			continue
+		}
+		result = append(result, map[string]any{
+			"statement":             boundedSummary(statement, 180),
+			"requires_verification": value.RequiresVerification,
+		})
+	}
+	return result
 }
 
 func supportedServices() []string {
@@ -560,16 +1368,69 @@ func isSupportedService(value string) bool {
 
 func containsFinalDiagnosisClaim(value string) bool {
 	text := strings.ToLower(strings.TrimSpace(value))
+	if text == "" {
+		return false
+	}
+	if containsAny(
+		text,
+		"not confirmed",
+		"not yet confirmed",
+		"unconfirmed",
+		"requires verification",
+		"needs verification",
+		"may be",
+		"might be",
+		"could be",
+		"待验证",
+		"未确认",
+		"尚未确认",
+		"需要验证",
+		"可能",
+	) && !containsOperationalAction(text) {
+		return false
+	}
 	return containsAny(
 		text,
 		"root cause is",
 		"confirmed root cause",
 		"definitive root cause",
 		"final diagnosis",
+		"final conclusion",
+		"remediation",
+		"restart",
+		"rollback",
+		"scale up",
+		"mitigation",
 		"根因是",
 		"最终根因",
 		"已确认根因",
 		"确定是",
+		"最终诊断",
+		"最终结论",
+		"重启",
+		"回滚",
+		"扩容",
+		"缓解",
+	)
+}
+
+func containsOperationalAction(text string) bool {
+	return containsAny(
+		text,
+		"remediation",
+		"restart",
+		"rollback",
+		"scale up",
+		"scale down",
+		"failover",
+		"mitigation",
+		"重启",
+		"回滚",
+		"扩容",
+		"缩容",
+		"切流",
+		"故障转移",
+		"缓解",
 	)
 }
 
@@ -624,6 +1485,16 @@ func boundedEvidenceForPrompt(evidence []common.EvidenceItem) []map[string]any {
 			"score":       item.Score,
 			"metadata":    boundedPromptMetadata(item.Metadata),
 		})
+	}
+	return result
+}
+
+func evidenceIDsForPrompt(evidence []common.EvidenceItem) []string {
+	result := make([]string, 0, len(evidence))
+	for _, item := range evidence {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			result = append(result, id)
+		}
 	}
 	return result
 }
@@ -718,7 +1589,6 @@ func boundedMemoryForPrompt(memories []longterm.Memory) []map[string]any {
 	result := make([]map[string]any, 0, len(memories))
 	for _, memory := range memories {
 		result = append(result, map[string]any{
-			"id":      memory.ID,
 			"service": memory.Service,
 			"title":   boundedSummary(memory.Title, 160),
 			"summary": boundedSummary(memory.Summary, 400),
@@ -731,10 +1601,52 @@ func validateExactEvidenceIDs(ids []string, evidence []common.EvidenceItem) erro
 	allowed := evidenceIDSet(evidence)
 	for _, id := range ids {
 		if _, ok := allowed[strings.TrimSpace(id)]; !ok {
-			return fmt.Errorf("LLM cited unknown evidence id %q", id)
+			return invalidEvidenceIDError{ID: strings.TrimSpace(id)}
 		}
 	}
 	return nil
+}
+
+func allowedEvidenceIDsForRepair(payload any) string {
+	if values, ok := payload.(map[string]any); ok {
+		if ids, ok := values["allowed_evidence_ids"].([]string); ok {
+			encoded, err := json.Marshal(ids)
+			if err == nil {
+				return string(encoded)
+			}
+		}
+	}
+	return "[]"
+}
+
+func allowedServicesForRepair(payload any) string {
+	if values, ok := payload.(map[string]any); ok {
+		switch raw := values["available_services"].(type) {
+		case []string:
+			encoded, err := json.Marshal(raw)
+			if err == nil {
+				return string(encoded)
+			}
+		case []any:
+			services := make([]string, 0, len(raw))
+			for _, item := range raw {
+				service, ok := item.(string)
+				if !ok || strings.TrimSpace(service) == "" {
+					continue
+				}
+				services = append(services, strings.TrimSpace(service))
+			}
+			encoded, err := json.Marshal(services)
+			if err == nil {
+				return string(encoded)
+			}
+		}
+	}
+	encoded, err := json.Marshal(supportedServices())
+	if err != nil {
+		return `["checkout"]`
+	}
+	return string(encoded)
 }
 
 func stripRoleJSONFence(content string) string {

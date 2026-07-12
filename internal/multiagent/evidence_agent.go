@@ -129,6 +129,12 @@ func (a *EvidenceAgent) Analyze(
 	finding.Metadata["evidence_model"] = ""
 	finding.Metadata["evidence_fallback_used"] = true
 	finding.Metadata["evidence_llm_duration_ms"] = int64(0)
+	for key, value := range roleLLMNotConfiguredMetadata(
+		AgentRoleEvidence,
+		"evidence_llm_not_configured",
+	) {
+		finding.Metadata[key] = value
+	}
 	if a.llm != nil {
 		finding.Metadata["evidence_llm_attempted"] = true
 		analysis, call, err := a.llm.analyzeEvidence(
@@ -140,6 +146,17 @@ func (a *EvidenceAgent) Analyze(
 		finding.Metadata["evidence_model"] = a.llm.modelName
 		finding.Metadata["evidence_llm_duration_ms"] = call.durationMS
 		if err == nil {
+			for key, value := range roleLLMMetadata(roleLLMMetadataInput{
+				Role:         AgentRoleEvidence,
+				Model:        a.llm.modelName,
+				Attempted:    true,
+				Success:      true,
+				Call:         call,
+				Fallback:     false,
+				AnalysisMode: "llm",
+			}) {
+				finding.Metadata[key] = value
+			}
 			finding.Summary = strings.TrimSpace(analysis.ObservationSummary)
 			finding.EvidenceIDs = append([]string{}, analysis.EvidenceIDs...)
 			finding.Metadata["evidence_llm_used"] = true
@@ -149,7 +166,19 @@ func (a *EvidenceAgent) Analyze(
 				analysis.SuspectedFailurePattern
 			finding.Metadata["missing_evidence"] = analysis.MissingEvidence
 		} else {
-			finding.Metadata["evidence_llm_error"] = "analysis_failed"
+			for key, value := range roleLLMMetadata(roleLLMMetadataInput{
+				Role:           AgentRoleEvidence,
+				Model:          a.llm.modelName,
+				Attempted:      true,
+				Success:        false,
+				Call:           call,
+				Fallback:       true,
+				FallbackReason: "evidence_llm_analysis_failed",
+				AnalysisMode:   "fallback",
+			}) {
+				finding.Metadata[key] = value
+			}
+			finding.Metadata["evidence_llm_error"] = call.errorCode
 		}
 	}
 	return finding, nil

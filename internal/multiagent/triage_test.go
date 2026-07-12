@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	einomodel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -97,14 +98,12 @@ func TestDeterministicTriageUsesBoundedFallbackForUnknownService(t *testing.T) {
 func TestLLMTriageAgentUsesValidLLMPlan(t *testing.T) {
 	llm, err := NewRoleLLM(
 		&analysisModelStub{response: schema.AssistantMessage(`{
-			"service":"checkout",
+			"suspected_services":["checkout"],
 			"incident_type":"high_error_rate",
-			"severity_hint":"warning",
 			"evidence_plan":["metrics","logs","traces","knowledge"],
-			"language":"en",
-			"time_window_reason":"Use the supplied incident time range.",
-			"triage_summary":"Investigate checkout high error rate using metrics, logs, traces, and knowledge.",
-			"constraints":["Do not claim root cause before evidence is reviewed."]
+			"hypotheses":[{"statement":"Checkout may have elevated errors and needs evidence review.","requires_verification":true}],
+			"uncertainties":["Root cause is not confirmed."],
+			"language":"en"
 		}`, nil)},
 		"test-model",
 		time.Second,
@@ -124,6 +123,13 @@ func TestLLMTriageAgentUsesValidLLMPlan(t *testing.T) {
 		plan.Metadata["triage_fallback_used"] != false ||
 		plan.Metadata["triage_model"] != "test-model" {
 		t.Fatalf("plan = %#v", plan)
+	}
+	options := einomodel.GetCommonOptions(nil, llm.model.(*analysisModelStub).options...)
+	if options.MaxTokens == nil || *options.MaxTokens != 512 {
+		t.Fatalf("MaxTokens = %#v, want 512", options.MaxTokens)
+	}
+	if options.Temperature == nil || *options.Temperature != 0 {
+		t.Fatalf("Temperature = %#v, want 0", options.Temperature)
 	}
 }
 
@@ -153,14 +159,12 @@ func TestLLMTriageAgentInvalidJSONFallsBack(t *testing.T) {
 func TestLLMTriageAgentInvalidEvidencePlanFallsBack(t *testing.T) {
 	llm, err := NewRoleLLM(
 		&analysisModelStub{response: schema.AssistantMessage(`{
-			"service":"checkout",
+			"suspected_services":["checkout"],
 			"incident_type":"high_error_rate",
-			"severity_hint":"warning",
 			"evidence_plan":["database_magic"],
-			"language":"en",
-			"time_window_reason":"Use the supplied incident time range.",
-			"triage_summary":"Investigate checkout high error rate.",
-			"constraints":[]
+			"hypotheses":[{"statement":"Checkout errors require verification.","requires_verification":true}],
+			"uncertainties":["Root cause is not confirmed."],
+			"language":"en"
 		}`, nil)},
 		"test-model",
 		time.Second,
@@ -183,14 +187,12 @@ func TestLLMTriageAgentInvalidEvidencePlanFallsBack(t *testing.T) {
 func TestLLMTriageAgentRejectsFinalDiagnosisClaim(t *testing.T) {
 	llm, err := NewRoleLLM(
 		&analysisModelStub{response: schema.AssistantMessage(`{
-			"service":"checkout",
+			"suspected_services":["checkout"],
 			"incident_type":"high_error_rate",
-			"severity_hint":"critical",
-			"evidence_plan":["metrics","logs"],
-			"language":"en",
-			"time_window_reason":"Use the supplied incident time range.",
-			"triage_summary":"The root cause is payment timeout.",
-			"constraints":[]
+			"evidence_plan":["metrics"],
+			"hypotheses":[{"statement":"The root cause is payment timeout.","requires_verification":true}],
+			"uncertainties":[],
+			"language":"en"
 		}`, nil)},
 		"test-model",
 		time.Second,
@@ -205,8 +207,87 @@ func TestLLMTriageAgentRejectsFinalDiagnosisClaim(t *testing.T) {
 		t.Fatalf("Plan() error = %v", err)
 	}
 	if plan.Metadata["triage_fallback_used"] != true ||
-		plan.Metadata["triage_fallback_reason"] != "invalid_output" {
+		plan.Metadata["triage_fallback_reason"] != "invalid_output" ||
+		plan.Metadata["triage_llm_error_code"] != "role_contract_violation" {
 		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+}
+
+func TestLLMTriageAgentAllowsUnconfirmedRootCauseBoundary(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{response: schema.AssistantMessage(`{
+			"suspected_services":["checkout"],
+			"incident_type":"high_error_rate",
+			"evidence_plan":["metrics","logs"],
+			"hypotheses":[{"statement":"Checkout may have elevated errors and requires evidence review.","requires_verification":true}],
+			"uncertainties":["Root cause is not confirmed."],
+			"language":"en"
+		}`, nil)},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_llm_used"] != true ||
+		plan.Metadata["triage_fallback_used"] != false {
+		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+}
+
+func TestLLMTriageAgentRepairsRoleContractViolation(t *testing.T) {
+	llm, err := NewRoleLLM(
+		&analysisModelStub{responses: []*schema.Message{
+			schema.AssistantMessage(`{
+				"suspected_services":["checkout"],
+				"incident_type":"high_error_rate",
+				"evidence_plan":["metrics"],
+				"hypotheses":[{"statement":"The root cause is payment timeout.","requires_verification":true}],
+				"uncertainties":[],
+				"language":"en"
+			}`, nil),
+			schema.AssistantMessage(`{
+				"suspected_services":["checkout"],
+				"incident_type":"high_error_rate",
+				"evidence_plan":["metrics","logs","traces"],
+				"hypotheses":[{"statement":"Checkout error rate may be elevated and requires verification.","requires_verification":true}],
+				"uncertainties":["Root cause is not confirmed."],
+				"language":"en"
+			}`, nil),
+		}},
+		"test-model",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "Investigate checkout error rate.",
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Metadata["triage_llm_used"] != true ||
+		plan.Metadata["triage_fallback_used"] != false ||
+		plan.Metadata["triage_llm_retry_count"] != 1 ||
+		plan.Metadata["triage_recovery_success"] != true ||
+		plan.Metadata["triage_analysis_mode"] != "llm_repaired" {
+		t.Fatalf("metadata = %#v", plan.Metadata)
+	}
+	if _, ok := plan.Metadata["triage_llm_primary_elapsed_ms"]; !ok {
+		t.Fatalf("missing triage_llm_primary_elapsed_ms metadata: %#v", plan.Metadata)
+	}
+	if _, ok := plan.Metadata["triage_llm_repair_elapsed_ms"]; !ok {
+		t.Fatalf("missing triage_llm_repair_elapsed_ms metadata: %#v", plan.Metadata)
+	}
+	if timeout, ok := plan.Metadata["triage_repair_llm_timeout_ms"].(int64); !ok || timeout <= 0 {
+		t.Fatalf("triage_repair_llm_timeout_ms = %#v, want > 0", plan.Metadata["triage_repair_llm_timeout_ms"])
 	}
 }
 

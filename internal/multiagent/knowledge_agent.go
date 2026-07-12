@@ -20,6 +20,7 @@ type KnowledgeAgent struct {
 	tool                einotool.InvokableTool
 	longTermMemory      longterm.Store
 	longTermMemoryLimit int
+	retrievalTimeout    time.Duration
 	llm                 *RoleLLM
 }
 
@@ -50,11 +51,19 @@ func NewKnowledgeAgent(
 		tool:                knowledgeTool,
 		longTermMemory:      longTermMemory,
 		longTermMemoryLimit: longTermMemoryLimit,
+		retrievalTimeout:    8 * time.Second,
 	}, nil
 }
 
 func (a *KnowledgeAgent) WithLLM(llm *RoleLLM) *KnowledgeAgent {
 	a.llm = llm
+	return a
+}
+
+func (a *KnowledgeAgent) WithRetrievalTimeout(timeout time.Duration) *KnowledgeAgent {
+	if timeout > 0 {
+		a.retrievalTimeout = timeout
+	}
 	return a
 }
 
@@ -80,6 +89,12 @@ func (a *KnowledgeAgent) Analyze(
 		},
 	}
 	summaries := []string{}
+	retrievalCtx := ctx
+	cancelRetrieval := func() {}
+	if a.retrievalTimeout > 0 {
+		retrievalCtx, cancelRetrieval = context.WithTimeout(ctx, a.retrievalTimeout)
+	}
+	defer cancelRetrieval()
 	roleRAGChunks := plan.RoleRAG.ChunksByRole[AgentRoleKnowledge]
 	if len(roleRAGChunks) > 0 {
 		roleEvidence := roleRAGChunksAsEvidence(roleRAGChunks)
@@ -94,7 +109,7 @@ func (a *KnowledgeAgent) Analyze(
 		finding.Metadata["role_rag_chunk_count"] = len(roleRAGChunks)
 	}
 	if planIncludesSource(plan, "knowledge") {
-		result, run, limitation := a.invokeKnowledge(ctx, plan)
+		result, run, limitation := a.invokeKnowledge(retrievalCtx, plan)
 		finding.ToolRuns = append(finding.ToolRuns, run)
 		if limitation != nil {
 			finding.Limitations = append(finding.Limitations, *limitation)
@@ -124,7 +139,7 @@ func (a *KnowledgeAgent) Analyze(
 
 	memories := []longterm.Memory{}
 	if a.longTermMemory != nil {
-		result, err := a.longTermMemory.Search(ctx, longterm.SearchQuery{
+		result, err := a.longTermMemory.Search(retrievalCtx, longterm.SearchQuery{
 			Query:   plan.Query,
 			Service: plan.Service,
 			Limit:   a.longTermMemoryLimit,
@@ -163,6 +178,13 @@ func (a *KnowledgeAgent) Analyze(
 		finding.Metadata["long_term_memory_not_configured"] = true
 	}
 	finding.Metadata["long_term_memory_count"] = len(memories)
+	if len(finding.Evidence) > 0 || len(memories) > 0 {
+		normalizedEvidence, idMap := stableKnowledgeEvidence(finding.Evidence, memories)
+		finding.Evidence = normalizedEvidence
+		finding.EvidenceIDs = evidenceIDsForPrompt(normalizedEvidence)
+		finding.Metadata["allowed_evidence_ids"] = append([]string{}, finding.EvidenceIDs...)
+		finding.Metadata["evidence_id_map"] = idMap
+	}
 	finding.Metadata["knowledge_evidence_count"] = len(finding.Evidence)
 	finding.Summary = knowledgeSummary(
 		plan.Language,
@@ -175,6 +197,12 @@ func (a *KnowledgeAgent) Analyze(
 	finding.Metadata["knowledge_model"] = ""
 	finding.Metadata["knowledge_fallback_used"] = true
 	finding.Metadata["knowledge_llm_duration_ms"] = int64(0)
+	for key, value := range roleLLMNotConfiguredMetadata(
+		AgentRoleKnowledge,
+		"knowledge_llm_not_configured",
+	) {
+		finding.Metadata[key] = value
+	}
 	if a.llm != nil {
 		finding.Metadata["knowledge_llm_attempted"] = true
 		analysis, call, err := a.llm.analyzeKnowledge(
@@ -187,16 +215,39 @@ func (a *KnowledgeAgent) Analyze(
 		finding.Metadata["knowledge_model"] = a.llm.modelName
 		finding.Metadata["knowledge_llm_duration_ms"] = call.durationMS
 		if err == nil {
+			for key, value := range roleLLMMetadata(roleLLMMetadataInput{
+				Role:         AgentRoleKnowledge,
+				Model:        a.llm.modelName,
+				Attempted:    true,
+				Success:      true,
+				Call:         call,
+				Fallback:     false,
+				AnalysisMode: "llm",
+			}) {
+				finding.Metadata[key] = value
+			}
 			finding.Summary = strings.TrimSpace(analysis.KnowledgeSummary)
 			finding.EvidenceIDs = append([]string{}, analysis.EvidenceIDs...)
 			finding.Metadata["knowledge_llm_used"] = true
 			finding.Metadata["knowledge_fallback_used"] = false
-			finding.Metadata["runbook_supported_actions"] = analysis.RunbookActions
+			finding.Metadata["runbook_supported_actions"] = []string(analysis.RunbookActions)
 			finding.Metadata["historical_patterns"] = analysis.HistoricalPatterns
 			finding.Metadata["unsafe_actions_to_avoid"] =
 				analysis.UnsafeActionsToAvoid
 		} else {
-			finding.Metadata["knowledge_llm_error"] = "analysis_failed"
+			for key, value := range roleLLMMetadata(roleLLMMetadataInput{
+				Role:           AgentRoleKnowledge,
+				Model:          a.llm.modelName,
+				Attempted:      true,
+				Success:        false,
+				Call:           call,
+				Fallback:       true,
+				FallbackReason: "knowledge_llm_analysis_failed",
+				AnalysisMode:   "fallback",
+			}) {
+				finding.Metadata[key] = value
+			}
+			finding.Metadata["knowledge_llm_error"] = call.errorCode
 		}
 	}
 	return finding, nil
@@ -325,4 +376,52 @@ func knowledgeSummary(
 	}
 	return "Knowledge summary (service=" + service + "): " + joined +
 		fmt.Sprintf(". limitations=%d.", limitationCount)
+}
+
+func stableKnowledgeEvidence(
+	evidence []common.EvidenceItem,
+	memories []longterm.Memory,
+) ([]common.EvidenceItem, map[string]string) {
+	result := make([]common.EvidenceItem, 0, len(evidence)+len(memories))
+	idMap := map[string]string{}
+	nextID := func() string {
+		return fmt.Sprintf("knowledge_%d", len(result)+1)
+	}
+	for _, item := range evidence {
+		stableID := nextID()
+		originalID := strings.TrimSpace(item.ID)
+		if item.Metadata == nil {
+			item.Metadata = map[string]any{}
+		}
+		item.Metadata["source_internal_id"] = originalID
+		item.Metadata["stable_evidence_id"] = stableID
+		item.ID = stableID
+		result = append(result, item)
+		idMap[stableID] = originalID
+	}
+	for _, memory := range memories {
+		summary := strings.TrimSpace(memory.Summary)
+		if summary == "" {
+			summary = strings.TrimSpace(memory.Title)
+		}
+		if summary == "" {
+			continue
+		}
+		stableID := nextID()
+		result = append(result, common.EvidenceItem{
+			ID:         stableID,
+			SourceType: "memory",
+			SourceName: "long-term-memory",
+			Content:    summary,
+			ResourceID: memory.Service,
+			Metadata: map[string]any{
+				"source_internal_id": memory.ID,
+				"stable_evidence_id": stableID,
+				"title":              memory.Title,
+				"service":            memory.Service,
+			},
+		})
+		idMap[stableID] = memory.ID
+	}
+	return result, idMap
 }

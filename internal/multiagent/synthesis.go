@@ -316,9 +316,21 @@ func normalizeSynthesisOutput(
 	if output.Metadata == nil {
 		output.Metadata = map[string]any{}
 	}
+	if _, exists := output.Metadata["llm_attempted"]; !exists {
+		for key, value := range roleLLMNotConfiguredMetadata(
+			AgentRoleSynthesis,
+			"primary_synthesizer_unavailable",
+		) {
+			output.Metadata[key] = value
+		}
+	}
 	output.Metadata["fallback_used"] = fallbackUsed
-	if fallbackReason != "" {
+	output.Metadata["fallback"] = fallbackUsed
+	if fallbackUsed && fallbackReason != "" {
 		output.Metadata["fallback_reason"] = fallbackReason
+	} else if !fallbackUsed {
+		delete(output.Metadata, "fallback_reason")
+		delete(output.Metadata, "synthesis_fallback_reason")
 	}
 	if _, exists := output.Metadata["synthesis_llm_used"]; !exists {
 		output.Metadata["synthesis_llm_used"] = false
@@ -330,6 +342,7 @@ func normalizeSynthesisOutput(
 		output.Metadata["synthesis_model"] = ""
 	}
 	output.Metadata["synthesis_fallback_used"] = fallbackUsed
+	output.Metadata["synthesis_fallback"] = fallbackUsed
 	if _, exists := output.Metadata["synthesis_llm_duration_ms"]; !exists {
 		output.Metadata["synthesis_llm_duration_ms"] = int64(0)
 	}
@@ -347,9 +360,64 @@ func mergeSynthesisMetadata(target map[string]any, source map[string]any) {
 		switch key {
 		case "synthesis_llm_used",
 			"synthesis_llm_attempted",
+			"synthesis_llm_success",
 			"synthesis_model",
 			"synthesis_fallback_used",
-			"synthesis_llm_duration_ms":
+			"synthesis_fallback",
+			"synthesis_fallback_reason",
+			"synthesis_llm_duration_ms",
+			"synthesis_llm_elapsed_ms",
+			"synthesis_llm_timeout_ms",
+			"synthesis_llm_retry_count",
+			"synthesis_llm_error_code",
+			"synthesis_llm_error_message",
+			"synthesis_primary_llm_attempted",
+			"synthesis_primary_llm_success",
+			"synthesis_primary_llm_elapsed_ms",
+			"synthesis_primary_llm_timeout_ms",
+			"synthesis_primary_error_code",
+			"synthesis_primary_error_message",
+			"synthesis_repair_attempted",
+			"synthesis_repair_success",
+			"synthesis_repair_llm_elapsed_ms",
+			"synthesis_repair_llm_timeout_ms",
+			"synthesis_repair_error_code",
+			"synthesis_repair_error_message",
+			"synthesis_repair_skip_reason",
+			"synthesis_llm_primary_elapsed_ms",
+			"synthesis_llm_repair_elapsed_ms",
+			"synthesis_recovery_attempted",
+			"synthesis_recovery_success",
+			"synthesis_recovery_reason",
+			"synthesis_analysis_mode",
+			"llm_attempted",
+			"llm_success",
+			"llm_elapsed_ms",
+			"llm_timeout_ms",
+			"llm_retry_count",
+			"llm_error_code",
+			"llm_error_message",
+			"primary_llm_attempted",
+			"primary_llm_success",
+			"primary_llm_elapsed_ms",
+			"primary_llm_timeout_ms",
+			"primary_error_code",
+			"primary_error_message",
+			"repair_attempted",
+			"repair_success",
+			"repair_llm_elapsed_ms",
+			"repair_llm_timeout_ms",
+			"repair_error_code",
+			"repair_error_message",
+			"repair_skip_reason",
+			"llm_primary_elapsed_ms",
+			"llm_repair_elapsed_ms",
+			"recovery_attempted",
+			"recovery_success",
+			"recovery_reason",
+			"fallback",
+			"model",
+			"analysis_mode":
 			target[key] = value
 		}
 	}

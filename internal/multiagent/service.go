@@ -40,6 +40,7 @@ func (e *ValidationError) Error() string {
 type Service struct {
 	orchestrator *Orchestrator
 	sessionStore session.Store
+	timeout      time.Duration
 	now          func() time.Time
 }
 
@@ -52,6 +53,13 @@ func NewService(orchestrator *Orchestrator) *Service {
 
 func (s *Service) WithSessionMemory(store session.Store) *Service {
 	s.sessionStore = store
+	return s
+}
+
+func (s *Service) WithTimeout(timeout time.Duration) *Service {
+	if timeout > 0 {
+		s.timeout = timeout
+	}
 	return s
 }
 
@@ -96,6 +104,12 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	if s.orchestrator == nil {
 		observability.MarkError(span, "multi-agent orchestrator unavailable")
 		return Result{}, fmt.Errorf("%w: orchestrator unavailable", ErrExecution)
+	}
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+		span.SetAttributes(attribute.Int64("multiagent.timeout_ms", s.timeout.Milliseconds()))
 	}
 
 	snapshot, memoryAvailable := s.loadSessionContext(ctx, command.SessionID)

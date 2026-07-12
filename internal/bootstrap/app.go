@@ -395,6 +395,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	knowledgeAgent.WithRetrievalTimeout(cfg.MultiAgent.KnowledgeRetrievalTimeout.Value())
 	multiAgentLLM := buildMultiAgentRoleLLM(
 		context.Background(),
 		cfg,
@@ -415,7 +416,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		multiagent.NewSynthesisAgent(multiAgentSynthesizer),
 	).WithRoleAwareRAG(knowledgeService).WithIntentRecognizer(intentRecognizer)
 	multiAgentService := multiagent.NewService(multiAgentOrchestrator).
-		WithSessionMemory(sessionStore)
+		WithSessionMemory(sessionStore).
+		WithTimeout(cfg.MultiAgent.OverallTimeout.Value())
 	evalService, err := eval.NewServiceWithRunner(
 		evalStore,
 		feedbackService,

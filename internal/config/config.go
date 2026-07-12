@@ -54,6 +54,7 @@ type Config struct {
 	MySQL          MySQLConfig          `json:"mysql"`
 	LongTermMemory LongTermMemoryConfig `json:"long_term_memory"`
 	Agent          AgentConfig          `json:"agent"`
+	MultiAgent     MultiAgentConfig     `json:"multi_agent"`
 	Intent         IntentConfig         `json:"intent"`
 	LLM            LLMConfig            `json:"llm"`
 	Telemetry      TelemetryConfig      `json:"telemetry"`
@@ -186,6 +187,15 @@ type AgentConfig struct {
 	PromptVersion               string   `json:"prompt_version"`
 }
 
+type MultiAgentConfig struct {
+	OverallTimeout            Duration `json:"overall_timeout"`
+	TriageLLMTimeout          Duration `json:"triage_llm_timeout"`
+	EvidenceLLMTimeout        Duration `json:"evidence_llm_timeout"`
+	KnowledgeRetrievalTimeout Duration `json:"knowledge_retrieval_timeout"`
+	KnowledgeLLMTimeout       Duration `json:"knowledge_llm_timeout"`
+	SynthesisLLMTimeout       Duration `json:"synthesis_llm_timeout"`
+}
+
 type IntentConfig struct {
 	Enabled          bool     `json:"enabled"`
 	Mode             string   `json:"mode"`
@@ -225,7 +235,7 @@ func Default() Config {
 			Address:           ":8080",
 			ReadHeaderTimeout: Duration(5 * time.Second),
 			ReadTimeout:       Duration(15 * time.Second),
-			WriteTimeout:      Duration(15 * time.Second),
+			WriteTimeout:      Duration(90 * time.Second),
 			IdleTimeout:       Duration(60 * time.Second),
 			ShutdownTimeout:   Duration(10 * time.Second),
 		},
@@ -328,6 +338,14 @@ func Default() Config {
 			EnableJSONRepairOnce:        true,
 			EnableRepeatedToolDetection: true,
 			PromptVersion:               "watchops_agent_v1",
+		},
+		MultiAgent: MultiAgentConfig{
+			OverallTimeout:            Duration(75 * time.Second),
+			TriageLLMTimeout:          Duration(20 * time.Second),
+			EvidenceLLMTimeout:        Duration(20 * time.Second),
+			KnowledgeRetrievalTimeout: Duration(8 * time.Second),
+			KnowledgeLLMTimeout:       Duration(20 * time.Second),
+			SynthesisLLMTimeout:       Duration(25 * time.Second),
 		},
 		Intent: IntentConfig{
 			Enabled:          true,
@@ -463,6 +481,12 @@ func applyEnvironment(cfg *Config) error {
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
 		{"AGENT_TIMEOUT", &cfg.Agent.Timeout},
 		{"AGENT_TOTAL_EXECUTION_TIMEOUT", &cfg.Agent.TotalExecutionTimeout},
+		{"MULTI_AGENT_OVERALL_TIMEOUT", &cfg.MultiAgent.OverallTimeout},
+		{"MULTI_AGENT_TRIAGE_LLM_TIMEOUT", &cfg.MultiAgent.TriageLLMTimeout},
+		{"MULTI_AGENT_EVIDENCE_LLM_TIMEOUT", &cfg.MultiAgent.EvidenceLLMTimeout},
+		{"MULTI_AGENT_KNOWLEDGE_RETRIEVAL_TIMEOUT", &cfg.MultiAgent.KnowledgeRetrievalTimeout},
+		{"MULTI_AGENT_KNOWLEDGE_LLM_TIMEOUT", &cfg.MultiAgent.KnowledgeLLMTimeout},
+		{"MULTI_AGENT_SYNTHESIS_LLM_TIMEOUT", &cfg.MultiAgent.SynthesisLLMTimeout},
 		{"INTENT_TIMEOUT", &cfg.Intent.Timeout},
 		{"LLM_REQUEST_TIMEOUT", &cfg.LLM.RequestTimeout},
 		{"TELEMETRY_EXPORT_TIMEOUT", &cfg.Telemetry.ExportTimeout},
@@ -969,6 +993,22 @@ func (cfg Config) Validate() error {
 	}
 	if strings.TrimSpace(cfg.Agent.PromptVersion) == "" {
 		return errors.New("agent.prompt_version is required")
+	}
+	multiAgentDurations := []struct {
+		name  string
+		value Duration
+	}{
+		{"multi_agent.overall_timeout", cfg.MultiAgent.OverallTimeout},
+		{"multi_agent.triage_llm_timeout", cfg.MultiAgent.TriageLLMTimeout},
+		{"multi_agent.evidence_llm_timeout", cfg.MultiAgent.EvidenceLLMTimeout},
+		{"multi_agent.knowledge_retrieval_timeout", cfg.MultiAgent.KnowledgeRetrievalTimeout},
+		{"multi_agent.knowledge_llm_timeout", cfg.MultiAgent.KnowledgeLLMTimeout},
+		{"multi_agent.synthesis_llm_timeout", cfg.MultiAgent.SynthesisLLMTimeout},
+	}
+	for _, item := range multiAgentDurations {
+		if item.value <= 0 {
+			return fmt.Errorf("%s must be greater than zero", item.name)
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Intent.Mode)) {
 	case "hybrid", "rule", "llm":
