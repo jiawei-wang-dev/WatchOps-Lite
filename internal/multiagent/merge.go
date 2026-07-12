@@ -70,20 +70,46 @@ func MergeAgentFindings(
 
 func mergeLimitations(groups ...[]agenteino.Limitation) []agenteino.Limitation {
 	result := []agenteino.Limitation{}
-	seen := map[string]struct{}{}
+	seen := map[string]int{}
 	for _, group := range groups {
 		for _, limitation := range group {
-			key := limitation.Code + "\x00" +
-				limitation.Tool + "\x00" +
-				limitation.Message
-			if _, exists := seen[key]; exists {
+			limitation.Code = canonicalMergedLimitationCode(limitation.Code, limitation.Tool)
+			key := limitation.Code + "\x00" + limitation.Tool
+			if existingIndex, exists := seen[key]; exists {
+				if len(limitation.Message) > len(result[existingIndex].Message) {
+					result[existingIndex].Message = limitation.Message
+				}
 				continue
 			}
-			seen[key] = struct{}{}
+			seen[key] = len(result)
 			result = append(result, limitation)
 		}
 	}
 	return result
+}
+
+func canonicalMergedLimitationCode(code string, tool string) string {
+	upper := strings.ToUpper(strings.TrimSpace(code))
+	if !strings.Contains(upper, "NO_DATA") {
+		return upper
+	}
+	combined := strings.ToUpper(tool + " " + upper)
+	switch {
+	case strings.Contains(combined, "LOG"):
+		return "LOGS_NO_DATA"
+	case strings.Contains(combined, "TRACE"):
+		return "TRACES_NO_DATA"
+	case strings.Contains(combined, "METRIC"):
+		return "METRICS_NO_DATA"
+	case strings.Contains(combined, "KNOWLEDGE"):
+		return "KNOWLEDGE_NO_DATA"
+	case strings.Contains(combined, "ALERT"):
+		return "ALERTS_NO_DATA"
+	case strings.Contains(combined, "TOPOLOGY"):
+		return "TOPOLOGY_NO_DATA"
+	default:
+		return upper
+	}
 }
 
 func hasAgentFailure(finding AgentFinding, role AgentRole) bool {

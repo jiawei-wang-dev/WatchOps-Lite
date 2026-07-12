@@ -64,12 +64,28 @@ type LimitationItem struct {
 }
 
 type ToolRunDTO struct {
-	Tool          string `json:"tool"`
-	Success       bool   `json:"success"`
-	DurationMS    int64  `json:"duration_ms"`
-	ErrorCode     string `json:"error_code,omitempty"`
-	EvidenceCount int    `json:"evidence_count"`
-	WarningCount  int    `json:"warning_count"`
+	Tool               string         `json:"tool"`
+	Success            bool           `json:"success"`
+	DurationMS         int64          `json:"duration_ms"`
+	ElapsedMS          int64          `json:"elapsed_ms"`
+	ErrorCode          string         `json:"error_code,omitempty"`
+	ErrorMessage       string         `json:"error_message,omitempty"`
+	EvidenceCount      int            `json:"evidence_count"`
+	WarningCount       int            `json:"warning_count"`
+	EvidenceIDs        []string       `json:"evidence_ids,omitempty"`
+	ExecutionStatus    string         `json:"execution_status"`
+	DataStatus         string         `json:"data_status"`
+	FallbackUsed       bool           `json:"fallback_used"`
+	NormalizedArgs     string         `json:"normalized_args,omitempty"`
+	NormalizedArgsHash string         `json:"normalized_args_hash,omitempty"`
+	Service            string         `json:"service,omitempty"`
+	TimeRange          *TimeContext   `json:"time_range,omitempty"`
+	ToolCategory       string         `json:"tool_category,omitempty"`
+	Deduplicated       bool           `json:"deduplicated"`
+	ReusedResultFrom   int            `json:"reused_result_from,omitempty"`
+	RetryCount         int            `json:"retry_count"`
+	RetryReason        string         `json:"retry_reason,omitempty"`
+	Metadata           map[string]any `json:"metadata,omitempty"`
 }
 
 type MultiAgentResponse struct {

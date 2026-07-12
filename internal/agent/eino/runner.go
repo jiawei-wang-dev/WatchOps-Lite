@@ -90,12 +90,27 @@ type Limitation struct {
 }
 
 type ToolRun struct {
-	Tool          string
-	Success       bool
-	DurationMS    int64
-	ErrorCode     common.ToolErrorCode
-	EvidenceCount int
-	WarningCount  int
+	Tool               string
+	Success            bool
+	DurationMS         int64
+	ErrorCode          common.ToolErrorCode
+	ErrorMessage       string
+	EvidenceCount      int
+	WarningCount       int
+	EvidenceIDs        []string
+	ExecutionStatus    string
+	DataStatus         string
+	FallbackUsed       bool
+	NormalizedArgs     string
+	NormalizedArgsHash string
+	Service            string
+	TimeRange          *common.TimeRange
+	ToolCategory       string
+	Deduplicated       bool
+	ReusedResultFrom   int
+	RetryCount         int
+	RetryReason        string
+	Metadata           map[string]any
 }
 
 type DeterministicRunner struct {
@@ -247,7 +262,12 @@ func (r *DeterministicRunner) invoke(
 	call plannedToolCall,
 ) (common.ToolResult, ToolRun, *common.ToolError) {
 	startedAt := time.Now()
-	run := ToolRun{Tool: call.name}
+	run := ToolRun{
+		Tool:            call.name,
+		ExecutionStatus: "running",
+		DataStatus:      "unknown",
+		Metadata:        map[string]any{},
+	}
 
 	assembledTool, err := r.findTool(ctx, call.name)
 	if err != nil {
@@ -261,6 +281,8 @@ func (r *DeterministicRunner) invoke(
 		)
 		run.DurationMS = time.Since(startedAt).Milliseconds()
 		run.ErrorCode = toolErr.Code
+		run.ErrorMessage = toolErr.Message
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, toolErr
 	}
 
@@ -276,8 +298,16 @@ func (r *DeterministicRunner) invoke(
 		)
 		run.DurationMS = time.Since(startedAt).Milliseconds()
 		run.ErrorCode = toolErr.Code
+		run.ErrorMessage = toolErr.Message
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, toolErr
 	}
+	callMetadata := extractToolCallMetadata(call.name, arguments)
+	run.NormalizedArgs = callMetadata.NormalizedArgs
+	run.NormalizedArgsHash = callMetadata.NormalizedArgsHash
+	run.Service = callMetadata.Service
+	run.TimeRange = callMetadata.TimeRange
+	run.ToolCategory = callMetadata.ToolCategory
 
 	EmitStreamEvent(ctx, "tool_call_started", map[string]any{"tool": call.name})
 	rawResult, err := assembledTool.InvokableRun(ctx, string(arguments))
@@ -285,6 +315,8 @@ func (r *DeterministicRunner) invoke(
 	if err != nil {
 		toolErr := safeToolError(call.name, err)
 		run.ErrorCode = toolErr.Code
+		run.ErrorMessage = toolErr.Message
+		run.ExecutionStatus = "failed"
 		EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
 			"tool":       call.name,
 			"error_code": string(toolErr.Code),
@@ -292,8 +324,6 @@ func (r *DeterministicRunner) invoke(
 		})
 		return common.ToolResult{}, run, toolErr
 	}
-	emitToolResultStreamEvent(ctx, call.name, rawResult)
-
 	var result common.ToolResult
 	if err := json.Unmarshal([]byte(rawResult), &result); err != nil {
 		toolErr := common.NewToolError(
@@ -305,6 +335,8 @@ func (r *DeterministicRunner) invoke(
 			"continue with the remaining evidence",
 		)
 		run.ErrorCode = toolErr.Code
+		run.ErrorMessage = toolErr.Message
+		run.ExecutionStatus = "failed"
 		EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
 			"tool":       call.name,
 			"error_code": string(toolErr.Code),
@@ -312,13 +344,29 @@ func (r *DeterministicRunner) invoke(
 		})
 		return common.ToolResult{}, run, toolErr
 	}
+	result = enrichToolResultMetadata(result, callMetadata)
+	if encodedResult, err := json.Marshal(result); err == nil {
+		emitToolResultStreamEvent(ctx, call.name, string(encodedResult))
+	} else {
+		emitToolResultStreamEvent(ctx, call.name, rawResult)
+	}
 
 	run.Success = result.Success
 	run.DurationMS = result.DurationMS
 	run.EvidenceCount = len(result.Evidence)
 	run.WarningCount = len(result.Warnings)
+	run.EvidenceIDs = collectEvidenceIDs(result.Evidence)
+	run.Metadata = result.Metadata
+	run.FallbackUsed = toolResultFallbackUsed(result)
+	run.DataStatus = toolResultDataStatus(result)
+	if result.Success {
+		run.ExecutionStatus = "success"
+	} else {
+		run.ExecutionStatus = "failed"
+	}
 	if result.Error != nil {
 		run.ErrorCode = result.Error.Code
+		run.ErrorMessage = result.Error.Message
 		return common.ToolResult{}, run, result.Error
 	}
 
@@ -336,6 +384,52 @@ func (r *DeterministicRunner) findTool(ctx context.Context, name string) (einoto
 		}
 	}
 	return nil, fmt.Errorf("tool not found")
+}
+
+func toolResultFallbackUsed(result common.ToolResult) bool {
+	if result.Metadata != nil {
+		if fallback, _ := result.Metadata["fallback_used"].(bool); fallback {
+			return true
+		}
+		if mode, _ := result.Metadata["mode"].(string); strings.Contains(mode, "fallback") || strings.Contains(mode, "mock") {
+			return true
+		}
+	}
+	for _, warning := range result.Warnings {
+		if strings.Contains(strings.ToUpper(warning.Code), "FALLBACK") {
+			return true
+		}
+	}
+	return false
+}
+
+func ToolResultFallbackUsed(result common.ToolResult) bool {
+	return toolResultFallbackUsed(result)
+}
+
+func toolResultDataStatus(result common.ToolResult) string {
+	if result.Metadata != nil {
+		if status, _ := result.Metadata["data_status"].(string); status != "" {
+			return status
+		}
+	}
+	if toolResultFallbackUsed(result) {
+		return "fallback"
+	}
+	if result.Error != nil {
+		return "unknown"
+	}
+	if len(result.Evidence) == 0 {
+		return "empty"
+	}
+	if len(result.Warnings) > 0 {
+		return "partial"
+	}
+	return "available"
+}
+
+func ToolResultDataStatus(result common.ToolResult) string {
+	return toolResultDataStatus(result)
 }
 
 func planToolCalls(input AgentInput) []plannedToolCall {

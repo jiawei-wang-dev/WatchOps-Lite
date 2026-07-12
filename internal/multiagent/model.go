@@ -89,15 +89,18 @@ type MergedFindings struct {
 }
 
 type FinalDiagnosis struct {
-	Language        string                `json:"language"`
-	Summary         string                `json:"summary"`
-	Incident        IncidentOverview      `json:"incident"`
-	Findings        []FinalFinding        `json:"findings"`
-	RootCause       RootCauseAssessment   `json:"root_cause_assessment"`
-	Recommendations []FinalRecommendation `json:"recommendations"`
-	Limitations     []string              `json:"limitations"`
-	EvidenceRefs    []string              `json:"evidence_refs"`
-	Metadata        map[string]any        `json:"metadata,omitempty"`
+	SchemaVersion     string                `json:"schema_version"`
+	Language          string                `json:"language"`
+	ExecutionMode     string                `json:"execution_mode"`
+	Summary           string                `json:"summary"`
+	Incident          IncidentOverview      `json:"incident"`
+	Findings          []FinalFinding        `json:"findings"`
+	RootCause         RootCauseAssessment   `json:"root_cause_assessment"`
+	Recommendations   []FinalRecommendation `json:"recommendations"`
+	Limitations       []FinalLimitation     `json:"limitations"`
+	ExecutionWarnings []ExecutionWarning    `json:"execution_warnings"`
+	EvidenceRefs      []EvidenceReference   `json:"evidence_refs"`
+	Metadata          map[string]any        `json:"metadata,omitempty"`
 }
 
 type IncidentOverview struct {
@@ -105,13 +108,15 @@ type IncidentOverview struct {
 	IncidentType string `json:"incident_type"`
 	Severity     string `json:"severity"`
 	Status       string `json:"status"`
+	StartedAt    string `json:"started_at,omitempty"`
 }
 
 type FinalFinding struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
-	EvidenceIDs []string `json:"evidence_ids"`
 	Confidence  string   `json:"confidence"`
+	EvidenceIDs []string `json:"evidence_ids"`
+	Kind        string   `json:"kind"`
 }
 
 type RootCauseAssessment struct {
@@ -119,14 +124,44 @@ type RootCauseAssessment struct {
 	Confidence   string   `json:"confidence"`
 	EvidenceIDs  []string `json:"evidence_ids"`
 	Alternatives []string `json:"alternatives"`
+	Status       string   `json:"status"`
 }
 
 type FinalRecommendation struct {
-	Priority     string `json:"priority"`
-	Action       string `json:"action"`
-	Reason       string `json:"reason"`
-	Risk         string `json:"risk"`
-	Verification string `json:"verification"`
+	Priority     string   `json:"priority"`
+	Action       string   `json:"action"`
+	Reason       string   `json:"reason"`
+	Risk         string   `json:"risk"`
+	Verification string   `json:"verification"`
+	EvidenceIDs  []string `json:"evidence_ids"`
+}
+
+type FinalLimitation struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Source      string `json:"source,omitempty"`
+}
+
+type ExecutionWarning struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Source      string `json:"source,omitempty"`
+}
+
+type EvidenceReference struct {
+	ID                    string `json:"id"`
+	Type                  string `json:"type"`
+	Title                 string `json:"title"`
+	RawExcerpt            string `json:"raw_excerpt,omitempty"`
+	Interpretation        string `json:"interpretation,omitempty"`
+	SourceLabel           string `json:"source_label,omitempty"`
+	Source                string `json:"source,omitempty"`
+	DataStatus            string `json:"data_status,omitempty"`
+	EvidenceWeight        string `json:"evidence_weight,omitempty"`
+	EvidenceOrigin        string `json:"evidence_origin,omitempty"`
+	CanConfirmCurrentFact bool   `json:"can_confirm_current_fact"`
+	CanSupportHypothesis  bool   `json:"can_support_hypothesis"`
+	SupportsRootCause     bool   `json:"supports_root_cause"`
 }
 
 type MultiAgentResult struct {

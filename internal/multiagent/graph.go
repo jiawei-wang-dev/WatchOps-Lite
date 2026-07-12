@@ -483,6 +483,12 @@ func (o *Orchestrator) runTriage(
 		roleSkillNamesForRole(input.Plan.RoleSkillHints, AgentRoleTriage)
 	plan.Metadata["session_context"] = input.Input.Metadata["session_context"]
 	plan.Metadata["requested_language"] = input.Input.Metadata["requested_language"]
+	plan.Metadata["tool_budget"] = maxEvidencePlanSize
+	plan.Metadata["evidence_plan_tools"] = evidencePlanTools(plan.EvidencePlan)
+	plan.Metadata["skipped_tool_reasons"] = skippedToolReasons(plan.EvidencePlan)
+	for key, value := range roleContextMetadata(input.Input.Metadata["session_context"], AgentRoleTriage) {
+		plan.Metadata[key] = value
+	}
 	plan.Hypotheses = o.generateHypotheses(ctx, input.Input, plan)
 	plan.Metadata["hypothesis_count"] = len(plan.Hypotheses.Items)
 	plan.Metadata["hypothesis_enabled"] = len(plan.Hypotheses.Items) > 0
@@ -936,6 +942,7 @@ func (o *Orchestrator) buildResponse(
 	fallbackUsed := anyRoleFallback || finalAnswerFallback
 	metadata := map[string]any{
 		"agent_mode":                     "multi_agent",
+		"execution_mode":                 "multi_agent",
 		"orchestrator":                   "eino_graph",
 		"execution_status":               "completed",
 		"roles":                          RoleOrder(),
@@ -959,6 +966,8 @@ func (o *Orchestrator) buildResponse(
 		"multi_agent_llm_used":           len(llmRoles) > 0,
 		"multi_agent_llm_roles":          llmRoles,
 		"multi_agent_llm_call_count":     llmCallCount,
+		"limitation_count":               len(input.Answer.Limitations),
+		"tool_call_executed_count":       nonDeduplicatedToolRunCount(input.Merged.Merged.ToolRuns),
 		"role_rag":                       input.Merged.Triage.Plan.RoleRAG.Metadata,
 		"role_rag_chunk_count":           roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
 		"hypotheses":                     input.Merged.Merged.Plan.Hypotheses,
@@ -969,6 +978,24 @@ func (o *Orchestrator) buildResponse(
 			knowledgeMetadata,
 			"long_term_memory_not_configured",
 		),
+	}
+	if diagnosis, ok := input.Answer.Metadata["final_diagnosis"].(FinalDiagnosis); ok {
+		for _, key := range []string{
+			"llm_execution_status",
+			"evidence_completeness",
+			"diagnosis_status",
+			"data_degraded",
+			"limitation_count",
+			"live_evidence_count",
+			"knowledge_evidence_count",
+			"long_term_memory_count",
+			"fallback_evidence_count",
+			"total_evidence_count",
+		} {
+			if value, exists := diagnosis.Metadata[key]; exists {
+				metadata[key] = value
+			}
+		}
 	}
 	for key, value := range llmExecution {
 		metadata[key] = value
@@ -1090,6 +1117,9 @@ func skippedTriagePlan(
 			"skipped_agents":          agentRoleStrings(plan.SkippedAgents),
 			"dynamic_routing_enabled": plan.DynamicRoutingEnabled,
 			"role_tools":              plan.RoleTools,
+			"tool_budget":             maxEvidencePlanSize,
+			"evidence_plan_tools":     evidencePlanTools([]string{}),
+			"skipped_tool_reasons":    skippedToolReasons([]string{}),
 		},
 	}
 }
@@ -1360,6 +1390,110 @@ func roleRAGChunkCount(context RoleRAGContext) int {
 		total += len(chunks)
 	}
 	return total
+}
+
+func nonDeduplicatedToolRunCount(toolRuns []agenteino.ToolRun) int {
+	count := 0
+	for _, run := range toolRuns {
+		if !run.Deduplicated {
+			count++
+		}
+	}
+	return count
+}
+
+func evidencePlanTools(plan []string) []map[string]string {
+	result := make([]map[string]string, 0, len(plan))
+	for _, source := range plan {
+		tool := toolNameForEvidenceSource(source)
+		if tool == "" {
+			continue
+		}
+		result = append(result, map[string]string{
+			"source": source,
+			"tool":   tool,
+		})
+	}
+	return result
+}
+
+func skippedToolReasons(plan []string) []map[string]string {
+	selected := map[string]bool{}
+	for _, source := range plan {
+		selected[source] = true
+	}
+	result := []map[string]string{}
+	for _, source := range supportedEvidenceSources {
+		if selected[source] {
+			continue
+		}
+		result = append(result, map[string]string{
+			"source": source,
+			"tool":   toolNameForEvidenceSource(source),
+			"reason": "not selected by triage evidence plan",
+		})
+	}
+	return result
+}
+
+func toolNameForEvidenceSource(source string) string {
+	switch source {
+	case "metrics":
+		return "query_metrics"
+	case "logs":
+		return "query_logs"
+	case "alerts":
+		return "query_alerts"
+	case "traces":
+		return "query_traces"
+	case "topology":
+		return "get_service_topology"
+	case "knowledge":
+		return "search_knowledge"
+	default:
+		return ""
+	}
+}
+
+func roleContextMetadata(value any, role AgentRole) map[string]any {
+	contextMap, _ := value.(map[string]any)
+	recentCount := metadataInt(contextMap, "recent_message_count")
+	summaryVersion := metadataInt(contextMap, "summary_version")
+	before := recentCount
+	if summaryVersion > 0 {
+		before++
+	}
+	after := roleContextAfterCount(role, recentCount, summaryVersion > 0)
+	return map[string]any{
+		"session_context_used":         before > 0,
+		"session_recent_message_count": recentCount,
+		"rolling_summary_used":         summaryVersion > 0,
+		"role_context_scope":           string(role),
+		"context_items_before_filter":  before,
+		"context_items_after_filter":   after,
+		"context_truncated":            after < before,
+		"context_token_estimate":       after * 120,
+	}
+}
+
+func roleContextAfterCount(role AgentRole, recentCount int, hasSummary bool) int {
+	maxRecent := map[AgentRole]int{
+		AgentRoleTriage:    3,
+		AgentRoleEvidence:  1,
+		AgentRoleKnowledge: 2,
+		AgentRoleSynthesis: 2,
+	}[role]
+	if maxRecent == 0 {
+		maxRecent = 2
+	}
+	count := recentCount
+	if count > maxRecent {
+		count = maxRecent
+	}
+	if hasSummary {
+		count++
+	}
+	return count
 }
 
 func cloneMetadata(metadata map[string]any) map[string]any {

@@ -533,7 +533,10 @@ function renderStreamSummary() {
   const limitations = safeArray(response?.answer?.limitations);
   const completion = findLastStreamEvent("workflow_completed");
   const failure = findLastStreamEvent("workflow_failed");
+  const evidenceCompleteness = safeText(metadata.evidence_completeness || metadata?.final_diagnosis?.metadata?.evidence_completeness);
   const status = failure ? "failed" :
+    state.streamStatus === "completed" && (evidenceCompleteness === "empty" || evidenceCompleteness === "insufficient") ? "no_data" :
+    state.streamStatus === "completed" && evidenceCompleteness === "partial" ? "partial_evidence" :
     metadata.llm_execution_status === "degraded" && state.streamStatus === "completed" ?
       "degraded" : state.streamStatus;
   const fallbackUsed = metadata.fallback_used === true ||
@@ -566,10 +569,20 @@ function renderStreamSummary() {
         t("stream.fallback_model") : "—"),
     ],
     [t("stream.total_latency"), latency === null ? "—" : formatLatency(latency)],
-    [t("common.tool_runs"), toolRuns.length || countCompletedToolEvents()],
-    [t("common.evidence"), evidence.length || latestEvidenceCount()],
+    [t("tool.attempt_count"), metadataNumber(metadata, "tool_call_attempt_count", toolRuns.length || countCompletedToolEvents())],
+    [t("tool.executed_count"), metadataNumber(metadata, "tool_call_executed_count", toolRuns.filter((run) => run?.deduplicated !== true).length || countCompletedToolEvents())],
+    [t("tool.unique_count"), metadataNumber(metadata, "tool_call_unique_count", toolRuns.length || countCompletedToolEvents())],
+    [t("tool.deduped_count"), metadataNumber(metadata, "tool_call_deduped_count", countDedupedToolRuns(toolRuns))],
+    [t("tool.effective_count"), metadataNumber(metadata, "tool_call_effective_count", countEffectiveToolRuns(toolRuns))],
+    [t("tool.no_data_count"), metadataNumber(metadata, "no_data_tool_count", countToolRunsByDataStatus(toolRuns, "empty"))],
+    [t("tool.partial_count"), metadataNumber(metadata, "partial_tool_count", countToolRunsByDataStatus(toolRuns, "partial"))],
+    [t("tool.fallback_count"), metadataNumber(metadata, "fallback_tool_count", countToolRunsByDataStatus(toolRuns, "fallback"))],
+    [t("tool.final_evidence_count"), metadataNumber(metadata, "total_evidence_count", evidence.length || latestEvidenceCount())],
     [t("common.limitations"), limitations.length],
-    [t("stream.role_fallback"), fallbackUsed ? t("common.yes") : t("common.no")],
+    [
+      agentMode === "multi_agent" ? t("stream.role_fallback") : t("stream.execution_fallback"),
+      fallbackUsed ? t("common.yes") : t("common.no"),
+    ],
   ]);
 
   const statusBadge = byId("stream-summary-status");
@@ -585,6 +598,9 @@ function renderStreamSummary() {
   } else if (status === "failed") {
     noticeKey = "stream.failed_notice";
     noticeTone = "danger-note";
+  } else if (status === "partial_evidence" || status === "no_data") {
+    noticeKey = "stream.partial_notice";
+    noticeTone = "warning-note";
   } else if (metadata.llm_execution_status === "degraded" || fallbackUsed) {
     noticeKey = "stream.fallback_notice";
     noticeTone = "warning-note";
@@ -718,27 +734,46 @@ function renderStreamToolTimeline() {
     return;
   }
   container.innerHTML = calls.map((call, index) => {
-    const evidence = evidenceForTool(call.tool).slice(0, 3);
+    const evidence = evidenceForToolRun(call).slice(0, 3);
     const evidenceCount = safeNumber(call.evidenceCount) ?? evidence.length;
     const warningCount = safeNumber(call.warningCount) ?? 0;
-    const failed = call.success === false || Boolean(call.errorCode);
-    const noData = !failed && call.completed && evidenceCount === 0;
+    const executionStatus = safeText(call.executionStatus) ||
+      (call.completed ? (call.success === false || Boolean(call.errorCode) ? "failed" : "success") : "running");
+    const dataStatus = safeText(call.dataStatus) ||
+      inferToolDataStatus({
+        success: executionStatus !== "failed",
+        evidence_count: evidenceCount,
+        warning_count: warningCount,
+        fallback_used: call.fallbackUsed,
+        error_code: call.errorCode,
+      });
+    const failed = executionStatus === "failed";
     const status = failed ? "failed" :
-      noData ? "no_data" :
-        call.completed ? "completed" : "running";
-    const summaries = evidence.length
+      dataStatus === "fallback" || dataStatus === "partial" ? "degraded" :
+        dataStatus === "empty" ? "no_data" :
+          call.completed ? "completed" : "running";
+    const summaries = call.deduplicated
+      ? `<p class="subtle">${escapeHtml(t("tool.reused_result", { from: call.reusedResultFrom || "—" }))}</p>`
+      : evidence.length
       ? `<ul>${evidence.map((item) =>
         `<li>${escapeHtml(truncateText(item?.content || t("dynamic.evidence_unavailable"), 180))}</li>`
       ).join("")}</ul>`
-      : `<p class="subtle">${escapeHtml(t("stream.no_evidence"))}</p>`;
+      : `<p class="subtle">${escapeHtml(t("tool.no_new_evidence"))}</p>`;
     const detail = {
       sequence: index + 1,
       tool: call.tool,
       status,
+      execution_status: executionStatus,
+      data_status: dataStatus,
+      fallback_used: call.fallbackUsed === true,
       latency_ms: call.latencyMS,
       evidence_count: evidenceCount,
       warning_count: warningCount,
       error_code: call.errorCode || "",
+      evidence_ids: call.evidenceIDs || [],
+      deduplicated: call.deduplicated === true,
+      reused_result_from: call.reusedResultFrom || 0,
+      service: call.service || "",
     };
     return `
       <article class="tool-call-card ${failed ? "failed" : ""}">
@@ -747,12 +782,17 @@ function renderStreamToolTimeline() {
           <div>
             <h4><code>${escapeHtml(call.tool || t("common.unknown"))}</code></h4>
             <span class="badge ${statusTone(status)}">${escapeHtml(streamStatusLabel(status))}</span>
+            <span class="badge ${statusTone(dataStatus)}">${escapeHtml(toolDataStatusLabel(dataStatus))}</span>
           </div>
           <strong>${call.latencyMS === null ? "—" : escapeHtml(formatLatency(call.latencyMS))}</strong>
         </div>
         <div class="tool-call-stats">
           <span>${escapeHtml(t("tool.evidence_count", { count: evidenceCount }))}</span>
           <span>${escapeHtml(t("tool.warning_count", { count: warningCount }))}</span>
+          <span>${escapeHtml(t("tool.execution_status"))}: ${escapeHtml(toolExecutionStatusLabel(executionStatus))}</span>
+          <span>${escapeHtml(t("tool.data_status"))}: ${escapeHtml(toolDataStatusLabel(dataStatus))}</span>
+          ${call.deduplicated ? `<span>${escapeHtml(t("tool.deduplicated"))}</span>` : ""}
+          ${call.service ? `<span>${escapeHtml(t("tool.service"))}: ${escapeHtml(call.service)}</span>` : ""}
           ${call.errorCode ? `<span class="danger-text">${escapeHtml(t("tool.error", { error: call.errorCode }))}</span>` : ""}
         </div>
         <div class="tool-evidence-summary">
@@ -784,6 +824,14 @@ function buildStreamToolCalls() {
         evidenceCount: null,
         warningCount: null,
         errorCode: "",
+        executionStatus: "running",
+        dataStatus: "unknown",
+        fallbackUsed: false,
+        evidenceIDs: [],
+        deduplicated: false,
+        reusedResultFrom: 0,
+        service: "",
+        normalizedArgs: "",
       });
       return;
     }
@@ -807,6 +855,17 @@ function buildStreamToolCalls() {
     current.errorCode = safeText(
       event?.data?.error_code || event?.data?.error_type,
     );
+    current.executionStatus = safeText(event?.data?.execution_status) ||
+      (event.type === "tool_call_failed" ? "failed" : "success");
+    current.dataStatus = safeText(event?.data?.data_status) || current.dataStatus || "";
+    current.fallbackUsed = event?.data?.fallback_used === true || current.fallbackUsed === true;
+    current.evidenceIDs = safeArray(event?.data?.evidence_ids).length
+      ? safeArray(event.data.evidence_ids).map((value) => safeText(value)).filter(Boolean)
+      : current.evidenceIDs || [];
+    current.deduplicated = event?.data?.deduplicated === true || current.deduplicated === true;
+    current.reusedResultFrom = safeNumber(event?.data?.reused_result_from) ?? current.reusedResultFrom ?? 0;
+    current.service = safeText(event?.data?.service) || current.service || "";
+    current.normalizedArgs = safeText(event?.data?.normalized_args) || current.normalizedArgs || "";
   });
 
   safeArray(state.latestStreamResponse?.tool_runs).forEach((run, index) => {
@@ -825,8 +884,25 @@ function buildStreamToolCalls() {
     current.warningCount = safeNumber(run?.warning_count) ??
       current.warningCount ?? 0;
     current.errorCode = safeText(run?.error_code) || current.errorCode || "";
+    current.executionStatus = safeText(run?.execution_status) || current.executionStatus || "";
+    current.dataStatus = safeText(run?.data_status) || current.dataStatus || "";
+    current.fallbackUsed = run?.fallback_used === true || current.fallbackUsed === true;
+    current.evidenceIDs = safeArray(run?.evidence_ids).length
+      ? safeArray(run.evidence_ids).map((value) => safeText(value)).filter(Boolean)
+      : current.evidenceIDs || [];
+    current.deduplicated = run?.deduplicated === true || current.deduplicated === true;
+    current.reusedResultFrom = safeNumber(run?.reused_result_from) ?? current.reusedResultFrom ?? 0;
+    current.service = safeText(run?.service) || current.service || "";
+    current.normalizedArgs = safeText(run?.normalized_args) || current.normalizedArgs || "";
   });
   return calls;
+}
+
+function evidenceForToolRun(call) {
+  const ids = new Set(safeArray(call?.evidenceIDs).map((value) => safeText(value)).filter(Boolean));
+  if (!ids.size) return [];
+  return safeArray(state.latestStreamResponse?.answer?.evidence).filter((item) =>
+    ids.has(safeText(item?.id)));
 }
 
 function evidenceForTool(toolName) {
@@ -895,6 +971,27 @@ function countCompletedToolEvents() {
     event.type === "tool_call_failed").length;
 }
 
+function metadataNumber(metadata, key, fallback = 0) {
+  const value = safeNumber(metadata?.[key]);
+  return value === null ? fallback : value;
+}
+
+function countToolRunsByDataStatus(toolRuns, status) {
+  return safeArray(toolRuns).filter((run) =>
+    safeText(run?.data_status || inferToolDataStatus(run)) === status).length;
+}
+
+function countEffectiveToolRuns(toolRuns) {
+  return safeArray(toolRuns).filter((run) => {
+    const status = safeText(run?.data_status || inferToolDataStatus(run));
+    return status === "available" || status === "partial" || status === "fallback";
+  }).length;
+}
+
+function countDedupedToolRuns(toolRuns) {
+  return safeArray(toolRuns).filter((run) => run?.deduplicated === true).length;
+}
+
 function elapsedStreamMilliseconds() {
   if (!state.streamStartedAt) return null;
   const end = state.streamEndedAt || new Date().toISOString();
@@ -918,6 +1015,7 @@ function streamStatusLabel(status) {
     running: "common.running",
     completed: "common.completed",
     degraded: "common.degraded_completed",
+    partial_evidence: "stream.partial_evidence",
     success: "common.completed",
     failed: "common.failed",
     untriggered: "stream.untriggered",
@@ -930,7 +1028,7 @@ function streamStatusLabel(status) {
 
 function statusTone(status) {
   if (status === "completed" || status === "success") return "success";
-  if (status === "degraded") return "warning";
+  if (status === "degraded" || status === "partial_evidence") return "warning";
   if (status === "failed") return "danger";
   if (status === "no_data" || status === "untriggered") return "warning";
   if (status === "running") return "info";
@@ -1083,6 +1181,7 @@ function renderMultiAgentSteps(response) {
     const llm = roleLLMDetails(role, metadata);
     const analysisMode = roleAnalysisLabel(role, llm);
     const output = safeText(step?.output);
+    const contextRows = roleContextRows(metadata);
     const llmExtraRows = [
       llm.timeoutMs !== null ?
         `<div><dt>${escapeHtml(t("multi.llm_timeout"))}</dt><dd>${escapeHtml(formatLatency(llm.timeoutMs))}</dd></div>` : "",
@@ -1138,9 +1237,24 @@ function renderMultiAgentSteps(response) {
           <div><dt>${escapeHtml(t("multi.fallback"))}</dt><dd>${escapeHtml(llm.fallback ? t("common.yes") : t("common.no"))}</dd></div>
           ${llmExtraRows}
         </dl>
+        ${contextRows}
         ${output ? `<details class="agent-output-details"><summary><span>${escapeHtml(t("multi.step_output"))}</span><span class="when-closed">${escapeHtml(t("multi.expand"))}</span><span class="when-open">${escapeHtml(t("multi.collapse"))}</span></summary><p>${escapeHtml(output)}</p></details>` : ""}
       </article>`;
   }).join("");
+}
+
+function roleContextRows(metadata) {
+  if (metadata?.session_context_used === undefined &&
+    metadata?.context_items_before_filter === undefined) {
+    return "";
+  }
+  return `<dl class="agent-role-runtime">
+    <div><dt>${escapeHtml(t("multi.session_context_used"))}</dt><dd>${escapeHtml(metadata.session_context_used ? t("common.yes") : t("common.no"))}</dd></div>
+    <div><dt>${escapeHtml(t("multi.context_before"))}</dt><dd>${escapeHtml(String(safeNumber(metadata.context_items_before_filter) ?? 0))}</dd></div>
+    <div><dt>${escapeHtml(t("multi.context_after"))}</dt><dd>${escapeHtml(String(safeNumber(metadata.context_items_after_filter) ?? 0))}</dd></div>
+    <div><dt>${escapeHtml(t("multi.rolling_summary_used"))}</dt><dd>${escapeHtml(metadata.rolling_summary_used ? t("common.yes") : t("common.no"))}</dd></div>
+    <div><dt>${escapeHtml(t("multi.role_context_scope"))}</dt><dd>${escapeHtml(safeText(metadata.role_context_scope) || "—")}</dd></div>
+  </dl>`;
 }
 
 function roleLLMDetails(role, metadata) {
@@ -1280,23 +1394,25 @@ function renderChatResponse(response) {
   const answer = response?.answer || {};
   const evidence = safeArray(answer.evidence);
   const toolRuns = safeArray(response?.tool_runs);
-  const inferences = safeArray(answer.inferences);
-  const limitations = safeArray(answer.limitations);
+  const finalDiagnosis = response?.metadata?.final_diagnosis;
+  const findings = safeArray(finalDiagnosis?.findings);
+  const limitations = safeArray(finalDiagnosis?.limitations).length ?
+    safeArray(finalDiagnosis?.limitations) : safeArray(answer.limitations);
   byId("response-summary").innerHTML = metricCards([
     [t("common.evidence"), evidence.length],
     [t("common.tool_runs"), toolRuns.length],
-    [t("common.inferences"), inferences.length],
+    [t("diagnosis.findings"), findings.length],
     [t("common.limitations"), limitations.length],
   ]);
 
   const sections = [
-    renderStructuredDiagnosis(response?.metadata?.final_diagnosis) ||
+    renderFinalDiagnosis(finalDiagnosis) ||
       [
         renderStatementSection(t("common.conclusions"), answer.conclusion, t("dynamic.no_conclusions")),
         renderCompactEvidence(evidence),
-        renderStatementSection(t("common.inferences"), inferences, t("dynamic.no_inferences")),
+        renderStatementSection(t("common.inferences"), answer.inferences, t("dynamic.no_inferences")),
         renderStatementSection(t("common.recommendations"), answer.recommendations, t("dynamic.no_recommendations")),
-        renderLimitationSection(limitations),
+        renderLimitationSection(answer.limitations),
       ].join(""),
     renderMetadata(response?.metadata),
   ];
@@ -1304,7 +1420,7 @@ function renderChatResponse(response) {
   byId("chat-response").innerHTML = sections.join("");
 }
 
-function renderStructuredDiagnosis(diagnosis) {
+function renderFinalDiagnosis(diagnosis) {
   if (!diagnosis || typeof diagnosis !== "object") return "";
   const incident = diagnosis.incident || {};
   const findings = safeArray(diagnosis.findings);
@@ -1312,6 +1428,7 @@ function renderStructuredDiagnosis(diagnosis) {
     .slice()
     .sort((left, right) => priorityRank(left?.priority) - priorityRank(right?.priority));
   const limitations = safeArray(diagnosis.limitations);
+  const executionWarnings = safeArray(diagnosis.execution_warnings);
   const evidenceRefs = safeArray(diagnosis.evidence_refs);
   const root = diagnosis.root_cause_assessment || {};
   return [
@@ -1319,9 +1436,9 @@ function renderStructuredDiagnosis(diagnosis) {
       <h4>${escapeHtml(t("diagnosis.overview"))}</h4>
       <div class="metric-grid compact">
         ${metricCard(t("diagnosis.service"), incident.service || "—")}
-        ${metricCard(t("diagnosis.incident_type"), incident.incident_type || "—")}
-        ${metricCard(t("diagnosis.severity"), incident.severity || "—")}
-        ${metricCard(t("diagnosis.status"), incident.status || "—")}
+        ${metricCard(t("diagnosis.incident_type"), formatIncidentType(incident.incident_type))}
+        ${metricCard(t("diagnosis.severity"), formatSeverity(incident.severity))}
+        ${metricCard(t("diagnosis.status"), formatIncidentStatus(incident.status))}
       </div>
       <p>${escapeHtml(diagnosis.summary || t("dynamic.no_detail"))}</p>
     </section>`,
@@ -1332,7 +1449,8 @@ function renderStructuredDiagnosis(diagnosis) {
           <h5>${escapeHtml(finding?.title || t("diagnosis.finding"))}</h5>
           <p>${escapeHtml(finding?.description || t("dynamic.no_detail"))}</p>
           <div class="evidence-meta">
-            <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(finding?.confidence || "low")}</span>
+            <span>${escapeHtml(t("diagnosis.kind"))}: ${escapeHtml(formatFindingKind(finding?.kind))}</span>
+            <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(formatConfidence(finding?.confidence))}</span>
             ${renderEvidenceTags(finding?.evidence_ids)}
           </div>
         </article>`).join("") : `<p class="subtle">${escapeHtml(t("diagnosis.no_findings"))}</p>`}
@@ -1341,7 +1459,8 @@ function renderStructuredDiagnosis(diagnosis) {
       <h4>${escapeHtml(t("diagnosis.root_cause"))}</h4>
       <p>${escapeHtml(root.conclusion || t("diagnosis.root_cause_insufficient"))}</p>
       <div class="evidence-meta">
-        <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(root.confidence || "low")}</span>
+        <span>${escapeHtml(t("diagnosis.status"))}: ${escapeHtml(formatRootCauseStatus(root.status))}</span>
+        <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(formatConfidence(root.confidence))}</span>
         ${renderEvidenceTags(root.evidence_ids)}
       </div>
       ${safeArray(root.alternatives).length ? `<ul class="response-list">${safeArray(root.alternatives).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
@@ -1354,17 +1473,123 @@ function renderStructuredDiagnosis(diagnosis) {
           <span class="evidence-refs">${escapeHtml(t("diagnosis.reason"))}: ${escapeHtml(item?.reason || "—")}</span>
           <span class="evidence-refs">${escapeHtml(t("diagnosis.risk"))}: ${escapeHtml(item?.risk || "—")}</span>
           <span class="evidence-refs">${escapeHtml(t("diagnosis.verification"))}: ${escapeHtml(item?.verification || "—")}</span>
+          ${renderEvidenceTags(item?.evidence_ids)}
         </li>`).join("")}</ul>` : `<p class="subtle">${escapeHtml(t("dynamic.no_recommendations"))}</p>`}
     </section>`,
     `<section class="response-section">
       <h4>${escapeHtml(t("common.limitations"))}</h4>
-      ${limitations.length ? `<ul class="response-list">${limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="subtle">${escapeHtml(t("dynamic.no_limitations"))}</p>`}
+      ${limitations.length ? `<ul class="response-list">${limitations.map(renderFinalLimitation).join("")}</ul>` : `<p class="subtle">${escapeHtml(t("dynamic.no_limitations"))}</p>`}
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("diagnosis.execution_warnings"))}</h4>
+      ${executionWarnings.length ? `<details open><summary>${escapeHtml(t("diagnosis.execution_warning_count", { count: executionWarnings.length }))}</summary><ul class="response-list">${executionWarnings.map(renderExecutionWarning).join("")}</ul></details>` : `<p class="subtle">${escapeHtml(t("diagnosis.no_execution_warnings"))}</p>`}
     </section>`,
     `<section class="response-section">
       <h4>${escapeHtml(t("diagnosis.evidence_refs"))}</h4>
-      ${evidenceRefs.length ? `<div class="evidence-meta">${renderEvidenceTags(evidenceRefs)}</div>` : `<p class="subtle">${escapeHtml(t("dynamic.no_evidence"))}</p>`}
+      ${evidenceRefs.length ? evidenceRefs.map(renderFinalEvidenceReference).join("") : `<p class="subtle">${escapeHtml(t("dynamic.no_evidence"))}</p>`}
     </section>`,
   ].join("");
+}
+
+function renderFinalLimitation(item) {
+  if (typeof item === "string") {
+    return `<li>${escapeHtml(item)}</li>`;
+  }
+  const code = item?.code || "LIMITATION";
+  const description = item?.description || item?.message || t("dynamic.no_detail");
+  return `<li class="warning-row">
+    <strong>${escapeHtml(code)}</strong> · ${escapeHtml(description)}
+    ${item?.source ? `<span class="evidence-refs">${escapeHtml(t("diagnosis.source"))}: ${escapeHtml(item.source)}</span>` : ""}
+  </li>`;
+}
+
+function renderExecutionWarning(item) {
+  if (typeof item === "string") {
+    return `<li>${escapeHtml(item)}</li>`;
+  }
+  return `<li class="warning-row">
+    <strong>${escapeHtml(item?.code || "EXECUTION_WARNING")}</strong> · ${escapeHtml(item?.description || t("dynamic.no_detail"))}
+    ${item?.source ? `<span class="evidence-refs">${escapeHtml(t("diagnosis.source"))}: ${escapeHtml(item.source)}</span>` : ""}
+  </li>`;
+}
+
+function renderFinalEvidenceReference(item) {
+  if (typeof item === "string") {
+    return `<div class="evidence-row"><div class="evidence-meta">${renderEvidenceTags([item])}</div></div>`;
+  }
+  return `<article class="evidence-row">
+    <div class="evidence-meta">
+      ${renderEvidenceTags([item?.id])}
+      <span>${escapeHtml(sourceLabel(item?.type))}</span>
+      ${item?.source_label ? `<span>${escapeHtml(item.source_label)}</span>` : ""}
+      ${item?.evidence_origin ? `<span>${escapeHtml(evidenceOriginLabel(item.evidence_origin))}</span>` : ""}
+      ${item?.data_status ? `<span>${escapeHtml(toolDataStatusLabel(item.data_status))}</span>` : ""}
+      ${item?.evidence_weight ? `<span>${escapeHtml(t("evidence.weight"))}: ${escapeHtml(item.evidence_weight)}</span>` : ""}
+    </div>
+    <h5>${escapeHtml(item?.title || item?.id || t("dynamic.no_evidence_id"))}</h5>
+    ${item?.interpretation ? `<p>${escapeHtml(item.interpretation)}</p>` : ""}
+    ${item?.raw_excerpt ? `<details><summary>${escapeHtml(t("diagnosis.raw_excerpt"))}</summary><pre>${escapeHtml(item.raw_excerpt)}</pre></details>` : ""}
+  </article>`;
+}
+
+function formatIncidentType(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    high_error_rate: t("diagnosis.incident_high_error_rate"),
+    payment_timeout: t("diagnosis.incident_payment_timeout"),
+    timeout: t("diagnosis.incident_timeout"),
+    latency: t("diagnosis.incident_latency"),
+    unknown: t("common.unknown"),
+  }[key] || value || "—";
+}
+
+function formatSeverity(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    high: t("diagnosis.severity_high"),
+    medium: t("diagnosis.severity_medium"),
+    low: t("diagnosis.severity_low"),
+    unknown: t("common.unknown"),
+  }[key] || value || "—";
+}
+
+function formatIncidentStatus(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    investigating: t("diagnosis.status_investigating"),
+    insufficient_evidence: t("diagnosis.status_insufficient_evidence"),
+    "证据不足": t("diagnosis.status_insufficient_evidence"),
+    "调查中": t("diagnosis.status_investigating"),
+  }[key] || value || "—";
+}
+
+function formatFindingKind(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    fact: t("diagnosis.kind_fact"),
+    correlation: t("diagnosis.kind_correlation"),
+    historical_match: t("diagnosis.kind_historical_match"),
+    hypothesis: t("diagnosis.kind_hypothesis"),
+  }[key] || value || t("diagnosis.kind_fact");
+}
+
+function formatConfidence(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    high: t("diagnosis.confidence_high"),
+    medium: t("diagnosis.confidence_medium"),
+    low: t("diagnosis.confidence_low"),
+  }[key] || value || t("diagnosis.confidence_low");
+}
+
+function formatRootCauseStatus(value) {
+  const key = safeText(value).toLowerCase();
+  return {
+    confirmed: t("diagnosis.root_status_confirmed"),
+    likely: t("diagnosis.root_status_likely"),
+    possible: t("diagnosis.root_status_possible"),
+    insufficient_evidence: t("diagnosis.root_status_insufficient_evidence"),
+  }[key] || value || t("diagnosis.root_status_insufficient_evidence");
 }
 
 function metricCard(label, value) {
@@ -1374,7 +1599,7 @@ function metricCard(label, value) {
 function renderEvidenceTags(ids) {
   const values = safeArray(ids).map((id) => safeText(id)).filter(Boolean);
   if (!values.length) return "";
-  return values.map((id) => `<button class="source-badge evidence-ref-button" type="button" data-evidence-id="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join("");
+  return `<span class="evidence-tag-list">${values.map((id) => `<button class="source-badge evidence-ref-button" type="button" data-evidence-id="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join("")}</span>`;
 }
 
 function priorityRank(priority) {
@@ -1434,19 +1659,29 @@ function renderToolRuns(toolRuns) {
     byId("tool-runs").innerHTML = `
       <div class="inline-note warning-note tool-fallback-note">${escapeHtml(t("tool.degraded_explanation"))}</div>
       <table>
-        <thead><tr><th>${escapeHtml(t("dynamic.tool"))}</th><th>${escapeHtml(t("common.status"))}</th><th>${escapeHtml(t("dynamic.latency"))}</th><th>${escapeHtml(t("common.evidence"))}</th><th>${escapeHtml(t("dynamic.fallback_error"))}</th></tr></thead>
+        <thead><tr><th>${escapeHtml(t("dynamic.tool"))}</th><th>${escapeHtml(t("tool.execution_status"))}</th><th>${escapeHtml(t("tool.data_status"))}</th><th>${escapeHtml(t("dynamic.latency"))}</th><th>${escapeHtml(t("common.evidence"))}</th><th>${escapeHtml(t("dynamic.fallback_error"))}</th></tr></thead>
         <tbody>${runs.map((run) => {
-          const failed = run?.success === false;
-          const fallback = toolRunUsedFallback(run) || Number(run?.warning_count || 0) > 0;
-          const status = failed ? t("tool.status_failed") :
-            fallback ? t("tool.status_degraded") : t("tool.status_success");
-          const tone = failed ? "danger" : fallback ? "warning" : "success";
+          const executionStatus = safeText(run?.execution_status) ||
+            (run?.success === false ? "failed" : "success");
+          const dataStatus = safeText(run?.data_status) || inferToolDataStatus(run);
+          const executionTone = executionStatus === "failed" ? "danger" :
+            executionStatus === "running" ? "info" : "success";
+          const dataTone = dataStatus === "available" ? "success" :
+            dataStatus === "fallback" || dataStatus === "partial" || dataStatus === "stale" ? "warning" :
+              dataStatus === "empty" ? "info" : "neutral";
+          const fallback = dataStatus === "fallback" || run?.fallback_used === true || toolRunUsedFallback(run);
           const detail = run?.error_code || (fallback ? t("dynamic.warning_count", {
             count: run.warning_count ?? 0,
-          }) : "—");
+          }) : (run?.deduplicated ? t("tool.reused_result", {
+            from: run?.reused_result_from || "—",
+          }) : "—"));
+          const toolLabel = run?.service
+            ? `${run.tool || t("common.unknown")} · ${run.service}`
+            : run?.tool || t("common.unknown");
           return `<tr>
-            <td><strong>${escapeHtml(run?.tool || t("common.unknown"))}</strong></td>
-            <td><span class="badge ${tone}">${status}</span></td>
+            <td><strong>${escapeHtml(toolLabel)}</strong>${run?.deduplicated ? ` <span class="badge neutral">${escapeHtml(t("tool.deduplicated"))}</span>` : ""}</td>
+            <td><span class="badge ${executionTone}">${escapeHtml(toolExecutionStatusLabel(executionStatus))}</span></td>
+            <td><span class="badge ${dataTone}">${escapeHtml(toolDataStatusLabel(dataStatus))}</span></td>
             <td>${escapeHtml(formatLatency(run?.duration_ms))}</td>
             <td>${escapeHtml(String(run?.evidence_count ?? 0))}</td>
             <td>${escapeHtml(detail)}</td>
@@ -1767,52 +2002,156 @@ function renderHistory(response) {
   state.latestHistorySessionId = safeText(response?.session_id);
   const summary = response?.summary || {};
   const messages = safeArray(response?.messages);
-  const summarySignals = [
-    [t("dynamic.goal"), summary.goal],
-    [t("dynamic.confirmed_facts"), safeArray(summary.confirmed_facts).join(" · ")],
-    [t("dynamic.open_questions"), safeArray(summary.open_questions).join(" · ")],
-  ].filter(([, value]) => safeText(value));
-  byId("history-summary").innerHTML = safeText(summary.content) || summarySignals.length
-    ? `<div class="session-summary-card">
-        <div><span>${escapeHtml(t("dynamic.rolling_summary"))}</span><strong>v${escapeHtml(String(summary.version ?? 0))}</strong></div>
-        ${summary.content ? `<p>${escapeHtml(summary.content)}</p>` : ""}
-        ${summarySignals.map(([label, value]) => `
-          <p><b>${escapeHtml(label)}:</b> ${escapeHtml(value)}</p>`).join("")}
-      </div>`
-    : `<div class="empty-state compact"><p>${escapeHtml(t("dynamic.no_rolling_summary"))}</p></div>`;
-
-  if (!messages.length) {
-    byId("history-messages").innerHTML =
-      `<div class="empty-state compact"><p>${escapeHtml(t("dynamic.no_recent_messages"))}</p></div>`;
-    return;
-  }
   const exchanges = buildHistoryExchanges(messages);
-  byId("history-messages").innerHTML = exchanges.map((exchange) => `
+  byId("history-summary").innerHTML = renderRollingSummary(summary);
+  byId("history-messages").innerHTML = `
+    <div class="history-tabs">
+      <section class="history-panel">
+        <h4>${escapeHtml(t("history.tab_session"))}</h4>
+        ${exchanges.length ? renderGroupedHistoryExchanges(exchanges) :
+          `<div class="empty-state compact"><p>${escapeHtml(t("dynamic.no_recent_messages"))}</p></div>`}
+      </section>
+      <section class="history-panel">
+        <h4>${escapeHtml(t("history.tab_long_term"))}</h4>
+        ${renderLongTermMemoryPanel()}
+      </section>
+      <section class="history-panel">
+        <h4>${escapeHtml(t("history.tab_diagnostics"))}</h4>
+        ${renderDiagnosticRecordPanel()}
+      </section>
+    </div>`;
+}
+
+function renderRollingSummary(summary) {
+  const rows = [
+    [t("history.summary_goal"), summary?.goal],
+    [t("history.summary_confirmed_facts"), safeArray(summary?.confirmed_facts).join(" · ")],
+    [t("history.summary_current_assessment"), conciseText(summary?.content, 220)],
+    [t("history.summary_open_questions"), safeArray(summary?.open_questions).join(" · ")],
+    [t("history.summary_actions"), safeArray(summary?.attempted_actions).join(" · ")],
+    [t("history.summary_key_entities"), safeArray(summary?.important_entities).join(" · ")],
+    [t("history.summary_next_step"), safeArray(summary?.open_questions)[0] || ""],
+    [t("history.summary_updated"), summary?.updated_at ? formatHistoryTime(summary.updated_at) : ""],
+  ].filter(([, value]) => safeText(value));
+  if (!rows.length) {
+    return `<div class="empty-state compact"><p>${escapeHtml(t("dynamic.no_rolling_summary"))}</p></div>`;
+  }
+  return `<div class="session-summary-card">
+    <div><span>${escapeHtml(t("history.tab_summary"))}</span><strong>v${escapeHtml(String(summary?.version ?? 0))}</strong></div>
+    <dl class="history-exchange-body">
+      ${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}
+    </dl>
+  </div>`;
+}
+
+function renderGroupedHistoryExchanges(exchanges) {
+  const groups = groupHistoryExchanges(exchanges);
+  return groups.map((group) => `
     <article class="history-exchange">
       <div class="history-message-head">
-        <strong>${escapeHtml(t("history.conversation"))}</strong>
-        <time>${escapeHtml(formatHistoryTime(exchange.created_at))}</time>
+        <strong>${escapeHtml(group.title)}</strong>
+        <span class="source-badge">${escapeHtml(t("history.run_count", { count: group.items.length }))}</span>
+        <time>${escapeHtml(formatHistoryTime(group.latest.created_at))}</time>
       </div>
       <dl class="history-exchange-body">
-        <div>
-          <dt>${escapeHtml(t("history.user_message"))}</dt>
-          <dd>${escapeHtml(exchange.user || t("dynamic.message_unavailable"))}</dd>
-        </div>
-        <div>
-          <dt>${escapeHtml(t("history.assistant_summary"))}</dt>
-          <dd>${escapeHtml(truncateText(exchange.assistant || t("dynamic.message_unavailable"), 360))}</dd>
-        </div>
-        <div>
-          <dt>request_id</dt>
-          <dd><code>${escapeHtml(exchange.request_id || "—")}</code></dd>
-        </div>
+        <div><dt>${escapeHtml(t("history.user_message"))}</dt><dd>${escapeHtml(truncateText(group.latest.user || t("dynamic.message_unavailable"), 180))}</dd></div>
+        <div><dt>${escapeHtml(t("history.assistant_summary"))}</dt><dd>${escapeHtml(conciseText(group.latest.assistant || t("dynamic.message_unavailable"), 240))}</dd></div>
+        <div><dt>${escapeHtml(t("stream.agent_mode"))}</dt><dd>${escapeHtml(historyExecutionMode(group.latest))}</dd></div>
+        <div><dt>request_id</dt><dd><code>${escapeHtml(group.latest.request_id || "—")}</code></dd></div>
       </dl>
-      ${exchange.metadata ? `
-        <details>
-          <summary>${escapeHtml(t("dynamic.message_metadata"))}</summary>
-          <pre>${escapeHtml(safeJson(exchange.metadata))}</pre>
-        </details>` : ""}
+      <details>
+        <summary>${escapeHtml(t("history.expand_runs"))}</summary>
+        ${group.items.map((exchange) => `
+          <div class="evidence-row">
+            <p>${escapeHtml(conciseText(exchange.assistant || exchange.user || t("dynamic.message_unavailable"), 220))}</p>
+            <div class="evidence-meta">
+              <span>${escapeHtml(formatHistoryTime(exchange.created_at))}</span>
+              <span>request_id: ${escapeHtml(exchange.request_id || "—")}</span>
+              <span>${escapeHtml(historyExecutionMode(exchange))}</span>
+            </div>
+          </div>`).join("")}
+      </details>
     </article>`).join("");
+}
+
+function groupHistoryExchanges(exchanges) {
+  const groups = new Map();
+  exchanges.forEach((exchange) => {
+    const key = normalizeHistoryQuestion(exchange.user);
+    if (!groups.has(key)) {
+      groups.set(key, { title: historyTitle(exchange.user), items: [], latest: exchange });
+    }
+    const group = groups.get(key);
+    group.items.push(exchange);
+    if ((parseHistoryDate(exchange.created_at) ?? 0) > (parseHistoryDate(group.latest.created_at) ?? 0)) {
+      group.latest = exchange;
+    }
+  });
+  return [...groups.values()].sort((a, b) =>
+    (parseHistoryDate(b.latest.created_at) ?? 0) - (parseHistoryDate(a.latest.created_at) ?? 0));
+}
+
+function normalizeHistoryQuestion(value) {
+  return safeText(value).toLowerCase().replace(/\s+/g, " ").replace(/[？?。.!]/g, "").trim() || "unknown";
+}
+
+function historyTitle(value) {
+  const text = safeText(value);
+  if (!text) return t("history.conversation");
+  if (text.includes("checkout") && (text.includes("错误率") || text.toLowerCase().includes("error rate"))) {
+    return currentLanguage() === "zh" ? "checkout 错误率升高" : "checkout error-rate increase";
+  }
+  return truncateText(text, 48);
+}
+
+function conciseText(value, limit = 240) {
+  return truncateText(stripTranscriptNoise(safeText(value)), limit);
+}
+
+function stripTranscriptNoise(value) {
+  return value
+    .replace(/\[(user|assistant)\]\[request_id=[^\]]+\]/gi, "")
+    .replace(/\[(user|assistant)\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function historyExecutionMode(exchange) {
+  const metadata = exchange?.metadata || {};
+  const mode = safeText(metadata.execution_mode || metadata.agent_mode);
+  if (mode === "multi_agent") return t("stream.multi_agent_mode");
+  if (mode === "single_agent" || mode === "eino_react") return t("stream.llm_mode");
+  if (mode === "deterministic") return t("stream.deterministic_mode");
+  return "—";
+}
+
+function renderLongTermMemoryPanel() {
+  const metadata = state.latestChatResponse?.metadata || {};
+  const count = safeNumber(metadata.long_term_memory_count) ?? 0;
+  const unavailable = metadata.long_term_memory_not_configured === true;
+  return `<div class="inline-note ${count > 0 ? "success-note" : "info-note"}">
+    ${escapeHtml(count > 0 ? t("memory.long_term_loaded", { count }) :
+      unavailable ? t("status.mysql_not_configured") : t("memory.no_long_term_match"))}
+  </div>
+  <p class="subtle">${escapeHtml(t("history.long_term_scope"))}</p>`;
+}
+
+function renderDiagnosticRecordPanel() {
+  const response = state.latestChatResponse || {};
+  const diagnosis = response?.metadata?.final_diagnosis || {};
+  if (!response?.request_id) {
+    return `<div class="empty-state compact"><p>${escapeHtml(t("history.no_diagnostic_record"))}</p></div>`;
+  }
+  return `<article class="evidence-row">
+    <p>${escapeHtml(diagnosis.summary || t("dynamic.no_detail"))}</p>
+    <div class="evidence-meta">
+      <span>request_id: ${escapeHtml(response.request_id)}</span>
+      <span>trace_id: ${escapeHtml(response.trace_id || "—")}</span>
+      <span>${escapeHtml(formatRootCauseStatus(diagnosis?.root_cause_assessment?.status))}</span>
+      <span>${escapeHtml(diagnosis.execution_mode || response?.metadata?.execution_mode || "—")}</span>
+    </div>
+  </article>
+  <p class="subtle">${escapeHtml(t("history.diagnostic_scope"))}</p>`;
 }
 
 function buildHistoryExchanges(messages) {
@@ -2131,7 +2470,7 @@ function renderRuntimeStatuses() {
     fallbackRun ? "fallback" :
       runs.length ? "active" : hasResponse ? "available" : "unknown";
   const toolLabel = toolState === "error" ? t("status.error") :
-    toolState === "fallback" ? t("status.fallback") :
+    toolState === "fallback" ? t("status.tool_partial_fallback") :
       runs.length ? t("status.tools_active", { count: runs.length }) :
         hasResponse ? t("status.tools_available") : t("status.unknown");
   setRuntimeStatus("status-tools", toolState, toolLabel);
@@ -2272,6 +2611,51 @@ function toolRunUsedFallback(run) {
   }
   const code = safeText(run?.error_code || run?.warning_code).toUpperCase();
   return code.includes("FALLBACK");
+}
+
+function inferToolDataStatus(run) {
+  const explicit = safeText(run?.data_status);
+  if (explicit) return explicit;
+  if (toolRunUsedFallback(run)) return "fallback";
+  if (run?.success === false || safeText(run?.error_code)) return "unknown";
+  const evidenceCount = safeNumber(run?.evidence_count) ?? 0;
+  const warningCount = safeNumber(run?.warning_count) ?? 0;
+  if (evidenceCount === 0) return "empty";
+  if (warningCount > 0) return "partial";
+  return "available";
+}
+
+function toolExecutionStatusLabel(status) {
+  const key = safeText(status).toLowerCase();
+  return {
+    pending: t("tool.execution_pending"),
+    running: t("tool.execution_running"),
+    success: t("tool.execution_success"),
+    failed: t("tool.execution_failed"),
+  }[key] || status || t("common.unknown");
+}
+
+function toolDataStatusLabel(status) {
+  const key = safeText(status).toLowerCase();
+  return {
+    available: t("tool.data_available"),
+    empty: t("tool.data_empty"),
+    fallback: t("tool.data_fallback"),
+    partial: t("tool.data_partial"),
+    stale: t("tool.data_stale"),
+    unknown: t("tool.data_unknown"),
+  }[key] || status || t("common.unknown");
+}
+
+function evidenceOriginLabel(origin) {
+  const key = safeText(origin).toLowerCase();
+  return {
+    live: t("evidence.origin_live"),
+    knowledge: t("evidence.origin_knowledge"),
+    historical_memory: t("evidence.origin_historical_memory"),
+    fallback: t("evidence.origin_fallback"),
+    inferred: t("evidence.origin_inferred"),
+  }[key] || t("evidence.origin_inferred");
 }
 
 function responseHasLimitation(response, code) {

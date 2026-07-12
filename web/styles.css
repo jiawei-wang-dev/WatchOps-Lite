@@ -1335,6 +1335,20 @@ select:focus {
   font-size: 0.68rem;
 }
 
+.evidence-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.evidence-ref-button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  text-align: left;
+}
+
 details {
   margin-top: 10px;
   border: 1px solid var(--border);

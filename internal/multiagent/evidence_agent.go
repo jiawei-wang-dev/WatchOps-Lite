@@ -74,6 +74,9 @@ func (a *EvidenceAgent) Analyze(
 			),
 		},
 	}
+	for key, value := range roleContextMetadata(plan.Metadata["session_context"], AgentRoleEvidence) {
+		finding.Metadata[key] = value
+	}
 	executedSources := []string{}
 	summaries := []string{}
 	if chunks := plan.RoleRAG.ChunksByRole[AgentRoleEvidence]; len(chunks) > 0 {
@@ -191,11 +194,18 @@ func (a *EvidenceAgent) invoke(
 	language string,
 ) (common.ToolResult, agenteino.ToolRun, *agenteino.Limitation) {
 	started := time.Now()
-	run := agenteino.ToolRun{Tool: toolName}
+	run := agenteino.ToolRun{
+		Tool:            toolName,
+		ExecutionStatus: "running",
+		DataStatus:      "unknown",
+		Metadata:        map[string]any{},
+	}
 	current, ok := a.tools[toolName]
 	if !ok {
 		run.DurationMS = time.Since(started).Milliseconds()
 		run.ErrorCode = common.ErrorCodeDependencyUnavailable
+		run.ErrorMessage = "tool is unavailable"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, &agenteino.Limitation{
 			Code: "EVIDENCE_TOOL_UNAVAILABLE",
 			Tool: toolName,
@@ -210,6 +220,8 @@ func (a *EvidenceAgent) invoke(
 	if err != nil {
 		run.DurationMS = time.Since(started).Milliseconds()
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = "tool arguments could not be encoded"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, evidenceToolLimitation(
 			toolName,
 			language,
@@ -226,6 +238,8 @@ func (a *EvidenceAgent) invoke(
 	run.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = err.Error()
+		run.ExecutionStatus = "failed"
 		agenteino.EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
 			"tool":       toolName,
 			"agent_role": string(AgentRoleEvidence),
@@ -241,6 +255,8 @@ func (a *EvidenceAgent) invoke(
 	var result common.ToolResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = "tool returned invalid JSON"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, evidenceToolLimitation(
 			toolName,
 			language,
@@ -251,8 +267,15 @@ func (a *EvidenceAgent) invoke(
 	run.DurationMS = result.DurationMS
 	run.EvidenceCount = len(result.Evidence)
 	run.WarningCount = len(result.Warnings)
+	run.EvidenceIDs = collectMultiAgentEvidenceIDs(result.Evidence)
+	run.Metadata = result.Metadata
+	run.FallbackUsed = agenteino.ToolResultFallbackUsed(result)
+	run.DataStatus = agenteino.ToolResultDataStatus(result)
+	run.ExecutionStatus = "success"
 	if result.Error != nil {
 		run.ErrorCode = result.Error.Code
+		run.ErrorMessage = result.Error.Message
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, evidenceToolLimitation(
 			toolName,
 			language,
@@ -260,11 +283,15 @@ func (a *EvidenceAgent) invoke(
 		)
 	}
 	agenteino.EmitStreamEvent(ctx, "tool_call_completed", map[string]any{
-		"tool":           toolName,
-		"agent_role":     string(AgentRoleEvidence),
-		"evidence_count": len(result.Evidence),
-		"warning_count":  len(result.Warnings),
-		"latency_ms":     run.DurationMS,
+		"tool":             toolName,
+		"agent_role":       string(AgentRoleEvidence),
+		"evidence_count":   len(result.Evidence),
+		"evidence_ids":     run.EvidenceIDs,
+		"warning_count":    len(result.Warnings),
+		"latency_ms":       run.DurationMS,
+		"execution_status": run.ExecutionStatus,
+		"data_status":      run.DataStatus,
+		"fallback_used":    run.FallbackUsed,
 	})
 	return result, run, nil
 }
@@ -303,6 +330,23 @@ func evidenceArguments(source string, plan TriagePlan) any {
 	default:
 		return map[string]any{}
 	}
+}
+
+func collectMultiAgentEvidenceIDs(items []common.EvidenceItem) []string {
+	ids := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func metricIntent(incidentType string) string {

@@ -1399,7 +1399,7 @@ func triageEvidencePlan(output triageLLMOutput, fallback []string) []string {
 	if len(normalized) == 0 {
 		return normalizeEvidencePlan(fallback)
 	}
-	return normalized
+	return normalizeEvidencePlan(append(normalized, fallback...))
 }
 
 func normalizeTriageLanguage(value string, fallback string) string {

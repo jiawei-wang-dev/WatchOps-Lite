@@ -58,6 +58,30 @@ func TestMergeAgentFindingsDeduplicatesEvidenceStably(t *testing.T) {
 	}
 }
 
+func TestMergeLimitationsDeduplicatesNoDataByCanonicalCodeAndTool(t *testing.T) {
+	got := mergeLimitations(
+		[]agenteino.Limitation{{
+			Code:    "QUERY_LOGS_NO_DATA",
+			Tool:    "query_logs",
+			Message: "本次未返回证据。",
+		}},
+		[]agenteino.Limitation{{
+			Code:    "LOGS_NO_DATA",
+			Tool:    "query_logs",
+			Message: "当前窗口未返回完整真实日志数据。",
+		}},
+	)
+	if len(got) != 1 {
+		t.Fatalf("limitation count = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].Code != "LOGS_NO_DATA" {
+		t.Fatalf("code = %s, want LOGS_NO_DATA", got[0].Code)
+	}
+	if got[0].Message != "当前窗口未返回完整真实日志数据。" {
+		t.Fatalf("message = %q, want longer message", got[0].Message)
+	}
+}
+
 type failingAnalyzer struct{}
 
 func (failingAnalyzer) Analyze(

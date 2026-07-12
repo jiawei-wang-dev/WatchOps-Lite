@@ -125,6 +125,10 @@ func TestLLMTriageAgentUsesValidLLMPlan(t *testing.T) {
 		plan.Metadata["triage_model"] != "test-model" {
 		t.Fatalf("plan = %#v", plan)
 	}
+	if !containsString(plan.EvidencePlan, "alerts") ||
+		!containsString(plan.EvidencePlan, "topology") {
+		t.Fatalf("EvidencePlan = %#v, want fallback alerts/topology merged", plan.EvidencePlan)
+	}
 	options := einomodel.GetCommonOptions(nil, llm.model.(*analysisModelStub).options...)
 	if options.MaxTokens == nil || *options.MaxTokens != 512 {
 		t.Fatalf("MaxTokens = %#v, want 512", options.MaxTokens)

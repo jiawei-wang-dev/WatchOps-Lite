@@ -2,12 +2,14 @@ package eino
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
+	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
@@ -50,6 +52,32 @@ func (m *scriptedToolCallingModel) WithTools(
 ) (model.ToolCallingChatModel, error) {
 	m.boundTools = tools
 	return m, nil
+}
+
+type countingInvokableTool struct {
+	name  string
+	calls int
+}
+
+func (t *countingInvokableTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{Name: t.name}, nil
+}
+
+func (t *countingInvokableTool) InvokableRun(context.Context, string, ...einotool.Option) (string, error) {
+	t.calls++
+	encoded, _ := json.Marshal(common.ToolResult{
+		Tool:    t.name,
+		Success: true,
+		Evidence: []common.EvidenceItem{{
+			ID:         "metric-evidence-001",
+			SourceType: "metrics",
+			SourceName: "test",
+			Content:    "checkout error rate is high",
+		}},
+		Warnings: []common.ToolWarning{},
+		Metadata: map[string]any{"data_status": "available"},
+	})
+	return string(encoded), nil
 }
 
 func TestReActRunnerCallsEinoToolAndMapsEvidence(t *testing.T) {
@@ -116,6 +144,119 @@ func TestReActRunnerCallsEinoToolAndMapsEvidence(t *testing.T) {
 	if output.Metadata["agent_mode"] != "eino_react" ||
 		output.Metadata["output_parse_success"] != true {
 		t.Fatalf("metadata = %#v", output.Metadata)
+	}
+}
+
+func TestAgentToolDeduplicatesIdenticalCallsBeforeExecution(t *testing.T) {
+	delegate := &countingInvokableTool{name: "query_metrics"}
+	wrapped := &agentTool{delegate: delegate, name: "query_metrics"}
+	ctx := context.WithValue(context.Background(), toolDedupeCacheContextKey{}, newToolDedupeCache())
+	args := `{"metric_name":"http_server_error_rate","service":"checkout","time_range":{"from":"2026-06-30T00:00:00Z","to":"2026-06-30T00:20:00Z"}}`
+
+	first, err := wrapped.InvokableRun(ctx, args)
+	if err != nil {
+		t.Fatalf("first InvokableRun() error = %v", err)
+	}
+	second, err := wrapped.InvokableRun(ctx, args)
+	if err != nil {
+		t.Fatalf("second InvokableRun() error = %v", err)
+	}
+	if delegate.calls != 1 {
+		t.Fatalf("delegate calls = %d, want 1", delegate.calls)
+	}
+
+	var firstResult, secondResult common.ToolResult
+	if err := json.Unmarshal([]byte(first), &firstResult); err != nil {
+		t.Fatalf("first result JSON error = %v", err)
+	}
+	if err := json.Unmarshal([]byte(second), &secondResult); err != nil {
+		t.Fatalf("second result JSON error = %v", err)
+	}
+	if len(firstResult.Evidence) != 1 {
+		t.Fatalf("first evidence count = %d, want 1", len(firstResult.Evidence))
+	}
+	if len(secondResult.Evidence) != 0 {
+		t.Fatalf("deduplicated evidence count = %d, want 0", len(secondResult.Evidence))
+	}
+	if deduplicated, _ := secondResult.Metadata["deduplicated"].(bool); !deduplicated {
+		t.Fatalf("deduplicated metadata = %#v", secondResult.Metadata)
+	}
+	if reused := metadataInt(secondResult.Metadata, "reused_result_from"); reused != 1 {
+		t.Fatalf("reused_result_from = %d, want 1", reused)
+	}
+}
+
+func TestToolCallMetadataNormalizesEquivalentArguments(t *testing.T) {
+	first := extractToolCallMetadata("query_logs", []byte(`{
+		"service":" Checkout ",
+		"query":" upstream    timeout ",
+		"limit":20,
+		"time_range":{"from":" 2026-06-30T00:00:00Z ","to":"2026-06-30T00:20:00Z"}
+	}`))
+	second := extractToolCallMetadata("query_logs", []byte(`{
+		"query":"UPSTREAM TIMEOUT",
+		"service":"checkout",
+		"time_range":{"from":"2026-06-30T00:00:00Z","to":"2026-06-30T00:20:00Z"}
+	}`))
+
+	if first.NormalizedArgs != second.NormalizedArgs ||
+		first.NormalizedArgsHash != second.NormalizedArgsHash {
+		t.Fatalf("normalized args differ:\nfirst=%s\nsecond=%s", first.NormalizedArgs, second.NormalizedArgs)
+	}
+	if first.Service != "checkout" {
+		t.Fatalf("service = %q, want checkout", first.Service)
+	}
+}
+
+func TestEvaluateProgressSequenceStopsAfterTwoNoProgressRounds(t *testing.T) {
+	stopped, rounds := evaluateProgressSequence([]iterationProgress{
+		{UniqueToolCallCount: 1, EvidenceCount: 1, HypothesisHash: "h1"},
+		{UniqueToolCallCount: 1, EvidenceCount: 1, HypothesisHash: "h1"},
+		{UniqueToolCallCount: 1, EvidenceCount: 1, HypothesisHash: "h1"},
+	})
+
+	if !stopped || rounds != 2 {
+		t.Fatalf("stopped=%v rounds=%d, want true/2", stopped, rounds)
+	}
+}
+
+func TestEvaluateProgressSequenceDoesNotStopWhenEvidenceChanges(t *testing.T) {
+	stopped, rounds := evaluateProgressSequence([]iterationProgress{
+		{UniqueToolCallCount: 1, EvidenceCount: 1, HypothesisHash: "h1"},
+		{UniqueToolCallCount: 1, EvidenceCount: 2, HypothesisHash: "h1"},
+		{UniqueToolCallCount: 2, EvidenceCount: 2, HypothesisHash: "h1"},
+	})
+
+	if stopped || rounds != 0 {
+		t.Fatalf("stopped=%v rounds=%d, want false/0", stopped, rounds)
+	}
+}
+
+func TestHashInferenceHypothesesNormalizesSortsAndDedupes(t *testing.T) {
+	first := hashInferenceHypotheses([]Inference{
+		{Text: "Checkout timeout may be caused by Payment latency."},
+		{Text: "Retry amplification needs verification"},
+	})
+	second := hashInferenceHypotheses([]Inference{
+		{Text: "retry   amplification needs verification!"},
+		{Text: "checkout timeout may be caused by payment latency"},
+		{Text: "Checkout timeout may be caused by Payment latency."},
+	})
+
+	if first == "" || first != second {
+		t.Fatalf("hash mismatch first=%q second=%q", first, second)
+	}
+}
+
+func TestEvaluateAgentProgressIgnoresDedupedCallsAsProgress(t *testing.T) {
+	evaluation := evaluateAgentProgress([]ToolRun{
+		{Tool: "query_metrics", EvidenceCount: 1, NormalizedArgsHash: "a"},
+		{Tool: "query_metrics", Deduplicated: true, EvidenceCount: 0, NormalizedArgsHash: "a"},
+		{Tool: "query_metrics", Deduplicated: true, EvidenceCount: 0, NormalizedArgsHash: "a"},
+	}, []Inference{{Text: "Checkout latency requires verification."}})
+
+	if !evaluation.StoppedNoProgress || evaluation.NoProgressRounds != 2 {
+		t.Fatalf("evaluation = %#v, want stopped after two no-progress rounds", evaluation)
 	}
 }
 

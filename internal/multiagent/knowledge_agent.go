@@ -88,6 +88,9 @@ func (a *KnowledgeAgent) Analyze(
 			),
 		},
 	}
+	for key, value := range roleContextMetadata(plan.Metadata["session_context"], AgentRoleKnowledge) {
+		finding.Metadata[key] = value
+	}
 	summaries := []string{}
 	retrievalCtx := ctx
 	cancelRetrieval := func() {}
@@ -258,10 +261,17 @@ func (a *KnowledgeAgent) invokeKnowledge(
 	plan TriagePlan,
 ) (common.ToolResult, agenteino.ToolRun, *agenteino.Limitation) {
 	started := time.Now()
-	run := agenteino.ToolRun{Tool: knowledge.Name}
+	run := agenteino.ToolRun{
+		Tool:            knowledge.Name,
+		ExecutionStatus: "running",
+		DataStatus:      "unknown",
+		Metadata:        map[string]any{},
+	}
 	if a.tool == nil {
 		run.DurationMS = time.Since(started).Milliseconds()
 		run.ErrorCode = common.ErrorCodeDependencyUnavailable
+		run.ErrorMessage = "tool is unavailable"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, &agenteino.Limitation{
 			Code: "KNOWLEDGE_TOOL_UNAVAILABLE",
 			Tool: knowledge.Name,
@@ -279,6 +289,8 @@ func (a *KnowledgeAgent) invokeKnowledge(
 	})
 	if err != nil {
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = "tool arguments could not be encoded"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, knowledgeToolLimitation(
 			plan.Language,
 			"KNOWLEDGE_ARGUMENTS_INVALID",
@@ -292,6 +304,8 @@ func (a *KnowledgeAgent) invokeKnowledge(
 	run.DurationMS = time.Since(started).Milliseconds()
 	if err != nil {
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = err.Error()
+		run.ExecutionStatus = "failed"
 		agenteino.EmitStreamEvent(ctx, "tool_call_failed", map[string]any{
 			"tool":       knowledge.Name,
 			"agent_role": string(AgentRoleKnowledge),
@@ -306,6 +320,8 @@ func (a *KnowledgeAgent) invokeKnowledge(
 	var result common.ToolResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		run.ErrorCode = common.ErrorCodeInternal
+		run.ErrorMessage = "tool returned invalid JSON"
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, knowledgeToolLimitation(
 			plan.Language,
 			"KNOWLEDGE_RESULT_INVALID",
@@ -315,19 +331,30 @@ func (a *KnowledgeAgent) invokeKnowledge(
 	run.DurationMS = result.DurationMS
 	run.EvidenceCount = len(result.Evidence)
 	run.WarningCount = len(result.Warnings)
+	run.EvidenceIDs = collectMultiAgentEvidenceIDs(result.Evidence)
+	run.Metadata = result.Metadata
+	run.FallbackUsed = agenteino.ToolResultFallbackUsed(result)
+	run.DataStatus = agenteino.ToolResultDataStatus(result)
+	run.ExecutionStatus = "success"
 	if result.Error != nil {
 		run.ErrorCode = result.Error.Code
+		run.ErrorMessage = result.Error.Message
+		run.ExecutionStatus = "failed"
 		return common.ToolResult{}, run, knowledgeToolLimitation(
 			plan.Language,
 			string(result.Error.Code),
 		)
 	}
 	agenteino.EmitStreamEvent(ctx, "tool_call_completed", map[string]any{
-		"tool":           knowledge.Name,
-		"agent_role":     string(AgentRoleKnowledge),
-		"evidence_count": len(result.Evidence),
-		"warning_count":  len(result.Warnings),
-		"latency_ms":     run.DurationMS,
+		"tool":             knowledge.Name,
+		"agent_role":       string(AgentRoleKnowledge),
+		"evidence_count":   len(result.Evidence),
+		"evidence_ids":     run.EvidenceIDs,
+		"warning_count":    len(result.Warnings),
+		"latency_ms":       run.DurationMS,
+		"execution_status": run.ExecutionStatus,
+		"data_status":      run.DataStatus,
+		"fallback_used":    run.FallbackUsed,
 	})
 	return result, run, nil
 }
@@ -415,10 +442,15 @@ func stableKnowledgeEvidence(
 			Content:    summary,
 			ResourceID: memory.Service,
 			Metadata: map[string]any{
-				"source_internal_id": memory.ID,
-				"stable_evidence_id": stableID,
-				"title":              memory.Title,
-				"service":            memory.Service,
+				"source_internal_id":       memory.ID,
+				"stable_evidence_id":       stableID,
+				"title":                    memory.Title,
+				"service":                  memory.Service,
+				"evidence_origin":          "historical_memory",
+				"evidence_weight":          "contextual",
+				"can_confirm_current_fact": false,
+				"can_support_hypothesis":   true,
+				"source_type":              memory.SourceType,
 			},
 		})
 		idMap[stableID] = memory.ID

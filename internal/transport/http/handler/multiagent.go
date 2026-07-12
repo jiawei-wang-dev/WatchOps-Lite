@@ -197,14 +197,7 @@ func mapMultiAgentResponse(result multiagent.Result) dto.MultiAgentResponse {
 	for _, step := range result.Output.Steps {
 		toolRuns := make([]dto.ToolRunDTO, 0, len(step.ToolRuns))
 		for _, run := range step.ToolRuns {
-			toolRuns = append(toolRuns, dto.ToolRunDTO{
-				Tool:          run.Tool,
-				Success:       run.Success,
-				DurationMS:    run.DurationMS,
-				ErrorCode:     string(run.ErrorCode),
-				EvidenceCount: run.EvidenceCount,
-				WarningCount:  run.WarningCount,
-			})
+			toolRuns = append(toolRuns, mapToolRun(run))
 		}
 		limitations := make(
 			[]dto.LimitationItem,
