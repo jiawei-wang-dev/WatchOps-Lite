@@ -126,7 +126,7 @@ type triageLLMOutput struct {
 	EvidencePlan      []string           `json:"evidence_plan"`
 	Hypotheses        []triageHypothesis `json:"hypotheses"`
 	Uncertainties     []string           `json:"uncertainties"`
-	Language          string             `json:"language,omitempty"`
+	Language          string             `json:"language"`
 }
 
 type triageHypothesis struct {
@@ -161,33 +161,25 @@ func (l *RoleLLM) planTriage(
 	input Input,
 	rulePlan TriagePlan,
 ) (TriagePlan, llmCallResult, error) {
+	constraints := BuildTriageConstraints(input, rulePlan)
 	payload := map[string]any{
 		"user_message":           boundedSummary(input.Message, 1000),
 		"time_context":           input.TimeContext,
-		"language":               rulePlan.Language,
-		"available_services":     supportedServices(),
+		"language":               constraints.RequestedLanguage,
+		"available_services":     constraints.AllowedServices,
+		"detected_services":      constraints.DetectedServices,
+		"allowed_incident_types": constraints.AllowedIncidentTypes,
 		"allowed_evidence_types": supportedEvidenceSources,
 	}
 	var output triageLLMOutput
 	call, err := l.callJSON(
 		ctx,
 		AgentRoleTriage,
-		`You are the Triage Agent.
-Produce a short investigation plan only.
-Do not provide final diagnosis, confirmed root cause, remediation, restart, rollback, scaling, or mitigation.
-Return JSON only. No Markdown. No explanation outside JSON.
-Allowed fields only: suspected_services, incident_type, evidence_plan, hypotheses, uncertainties, language.
-suspected_services: max 3 values from available_services.
-incident_type: one of high_error_rate, latency, timeout, dependency_failure, unknown.
-evidence_plan: max 6 values from allowed_evidence_types.
-hypotheses: max 3 items, each unverified with requires_verification=true.
-uncertainties: max 3 short strings.
-Example:
-{"suspected_services":["checkout"],"incident_type":"high_error_rate","evidence_plan":["metrics","logs","traces","knowledge"],"hypotheses":[{"statement":"Checkout may have elevated errors that require metrics and log verification.","requires_verification":true}],"uncertainties":["Root cause is not confirmed."],"language":"en"}`,
+		triageSystemPrompt(constraints),
 		payload,
 		&output,
 		func() error {
-			return validateTriageLLMOutput(output)
+			return validateTriageLLMOutput(output, constraints)
 		},
 	)
 	if err != nil {
@@ -200,11 +192,14 @@ Example:
 		Query:        strings.TrimSpace(input.Message),
 		Summary:      "",
 		TimeContext:  input.TimeContext,
-		Language:     normalizeTriageLanguage(output.Language, rulePlan.Language),
+		Language:     legacyLanguage(constraints.RequestedLanguage),
 		Limitations:  append([]agenteino.Limitation{}, rulePlan.Limitations...),
 		Metadata: map[string]any{
-			"triage_hypotheses":    boundedTriageHypotheses(output.Hypotheses),
-			"triage_uncertainties": boundedStringSlice(output.Uncertainties, 3, 160),
+			"triage_hypotheses":           boundedTriageHypotheses(output.Hypotheses),
+			"triage_uncertainties":        boundedStringSlice(output.Uncertainties, 3, 160),
+			"triage_constraints":          constraints,
+			"requested_language":          constraints.RequestedLanguage,
+			"structured_output_supported": false,
 		},
 	}
 	if plan.Summary == "" {
@@ -218,6 +213,65 @@ Example:
 	return plan, call, nil
 }
 
+func triageSystemPrompt(constraints TriageConstraints) string {
+	exampleService := ""
+	if len(constraints.DetectedServices) > 0 {
+		exampleService = constraints.DetectedServices[0]
+	} else if len(constraints.AllowedServices) > 0 {
+		exampleService = constraints.AllowedServices[0]
+	}
+	exampleServices := "[]"
+	if exampleService != "" {
+		exampleServices = jsonStringList([]string{exampleService})
+	}
+	return strings.Join([]string{
+		"You are the Triage Agent.",
+		"Produce a short investigation plan only.",
+		"Do not provide final diagnosis, confirmed root cause, remediation, restart, rollback, scaling, or mitigation.",
+		"",
+		"Allowed services:",
+		jsonStringList(constraints.AllowedServices),
+		"Detected services in the user request:",
+		jsonStringList(constraints.DetectedServices),
+		"Allowed incident types:",
+		jsonStringList(constraints.AllowedIncidentTypes),
+		"Allowed evidence types:",
+		jsonStringList(supportedEvidenceSources),
+		"",
+		"Rules:",
+		"- suspected_services may contain only values from Allowed services.",
+		"- If Detected services is non-empty, suspected_services should usually equal Detected services and must not add unrelated services.",
+		"- If no service is supported, return an empty suspected_services array.",
+		"- Do not invent services such as user, system, frontend, browser, host, or customer.",
+		"- incident_type must be one of Allowed incident types.",
+		"- evidence_plan may contain only values from Allowed evidence types.",
+		"- Every hypothesis must be unverified and set requires_verification=true.",
+		"- The JSON language field must be the exact literal \"" + constraints.RequestedLanguage + "\". Do not output zh, en, Chinese, or English.",
+		"- " + languageInstruction(constraints.RequestedLanguage),
+		"- Return JSON only. No Markdown. No explanation outside JSON.",
+		"",
+		"Required JSON shape:",
+		`{"suspected_services":` + exampleServices + `,"incident_type":"unknown","evidence_plan":["metrics","logs","knowledge"],"hypotheses":[{"statement":"` + triageExampleHypothesis(constraints.RequestedLanguage, exampleService) + `","requires_verification":true}],"uncertainties":["` + triageExampleUncertainty(constraints.RequestedLanguage) + `"],"language":"` + constraints.RequestedLanguage + `"}`,
+	}, "\n")
+}
+
+func triageExampleHypothesis(language string, service string) string {
+	if service == "" {
+		service = "the suspected service"
+	}
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return service + " 可能存在待验证的异常信号，需要继续收集 metrics、logs 和 traces。"
+	}
+	return service + " may have an unverified incident signal that requires metrics, logs, and traces."
+}
+
+func triageExampleUncertainty(language string) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return "根因尚未确认。"
+	}
+	return "Root cause is not confirmed."
+}
+
 func (l *RoleLLM) analyzeEvidence(
 	ctx context.Context,
 	plan TriagePlan,
@@ -228,7 +282,7 @@ func (l *RoleLLM) analyzeEvidence(
 		"triage_plan":      boundedPlanForPrompt(plan),
 		"evidence":         boundedEvidenceForPrompt(evidence),
 		"limitations":      limitations,
-		"language":         plan.Language,
+		"language":         requestedLanguageForPlan(plan),
 		"role_skill_cards": plan.AgentPlan.RoleSkillCards[AgentRoleEvidence],
 	}
 	var output evidenceAnalysis
@@ -238,7 +292,9 @@ func (l *RoleLLM) analyzeEvidence(
 		`You are the Evidence Agent in a service reliability investigation.
 Analyze only the supplied tool evidence. Do not invent observations or evidence IDs.
 Follow role_skill_cards to interpret metrics, logs, traces, alerts, and topology.
-Use the requested language. Keep the analysis concise and return JSON only with:
+Use the requested language for all user-visible analysis. Keep service names,
+metric names, log fields, trace/span IDs, API paths, commands, config keys,
+evidence IDs, and raw excerpts unchanged. Keep the analysis concise and return JSON only with:
 observation_summary, supported_signals, suspected_failure_pattern, missing_evidence, evidence_ids.
 suspected_failure_pattern must remain a hypothesis unless the evidence directly proves it.
 Every evidence_id must exactly match an ID in the input.`,
@@ -273,7 +329,7 @@ func (l *RoleLLM) analyzeKnowledge(
 		"memory":               boundedMemoryForPrompt(memories),
 		"allowed_evidence_ids": evidenceIDsForPrompt(evidence),
 		"limitations":          limitations,
-		"language":             plan.Language,
+		"language":             requestedLanguageForPlan(plan),
 		"role_skill_cards":     plan.AgentPlan.RoleSkillCards[AgentRoleKnowledge],
 	}
 	var output knowledgeAnalysis
@@ -284,7 +340,9 @@ func (l *RoleLLM) analyzeKnowledge(
 Summarize only the supplied runbook chunks and historical memory.
 Historical memory is prior experience, never proof of the current incident.
 Follow role_skill_cards when separating runbook guidance from current facts.
-Do not invent actions or evidence IDs. Use the requested language.
+Do not invent actions or evidence IDs. Use the requested language for all
+user-visible guidance. Keep service names, metric names, log fields, trace/span IDs,
+API paths, commands, config keys, evidence IDs, and raw excerpts unchanged.
 Return JSON only with: knowledge_summary, runbook_supported_actions,
 historical_patterns, unsafe_actions_to_avoid, evidence_ids.
 runbook_supported_actions must always be a JSON array of strings. Use [] when
@@ -335,7 +393,7 @@ func (l *RoleLLM) synthesize(
 		"evidence":         boundedEvidenceForPrompt(input.Evidence),
 		"hypotheses":       input.Hypotheses,
 		"limitations":      input.Limitations,
-		"language":         input.Plan.Language,
+		"language":         requestedLanguageForPlan(input.Plan),
 		"role_skill_cards": input.Plan.AgentPlan.RoleSkillCards[AgentRoleSynthesis],
 	}
 	var draft synthesisDraft
@@ -347,7 +405,9 @@ Produce the final bounded diagnosis using only the supplied evidence and role fi
 Follow role_skill_cards: consume existing findings and do not request or invent new evidence.
 Do not claim an observed root cause without direct evidence. Keep hypotheses in inferences.
 Every conclusion, inference, and recommendation must cite one or more exact supplied evidence IDs.
-Preserve limitations and use the requested language.
+Preserve limitations and use the requested language for all user-visible text.
+Keep service names, metric names, log fields, trace/span IDs, API paths, commands,
+code, config keys, evidence IDs, and model/product names unchanged.
 Return JSON only with: conclusions, inferences, recommendations, limitations.
 Each statement is {"text":"...","evidence_ids":["..."]}; each limitation is
 {"code":"...","message":"...","tool":"optional"}.`,
@@ -1065,7 +1125,7 @@ func repairReasonFor(role AgentRole, err error) string {
 	}
 	var contractErr RoleContractViolation
 	if errors.As(err, &contractErr) || role == AgentRoleTriage {
-		return "role_contract_violation"
+		return "primary_output_invalid"
 	}
 	return "json_parse_failed"
 }
@@ -1152,10 +1212,7 @@ func validateSynthesisDraft(
 	return nil
 }
 
-func validateTriageLLMOutput(output triageLLMOutput) error {
-	if len(output.SuspectedServices) == 0 {
-		return errors.New("triage LLM returned empty suspected_services")
-	}
+func validateTriageLLMOutput(output triageLLMOutput, constraints TriageConstraints) error {
 	if len(output.SuspectedServices) > 3 {
 		return RoleContractViolation{
 			Field:   "suspected_services",
@@ -1165,11 +1222,11 @@ func validateTriageLLMOutput(output triageLLMOutput) error {
 		}
 	}
 	for index, service := range output.SuspectedServices {
-		if !isSupportedService(service) {
+		if !stringInSet(strings.ToLower(strings.TrimSpace(service)), constraints.AllowedServices) {
 			return RoleContractViolation{
 				Field:   "suspected_services",
 				Index:   index,
-				Reason:  "unsupported service; use only available_services",
+				Reason:  "unsupported service " + fmt.Sprintf("%q", service) + "; allowed values: " + jsonStringList(constraints.AllowedServices),
 				Excerpt: service,
 			}
 		}
@@ -1183,8 +1240,21 @@ func validateTriageLLMOutput(output triageLLMOutput) error {
 		}
 	}
 	incidentType := normalizeTriageIncidentType(output.IncidentType)
-	if incidentType == "" {
-		return fmt.Errorf("triage LLM returned invalid incident_type %q", output.IncidentType)
+	if incidentType == "" || !stringInSet(incidentType, constraints.AllowedIncidentTypes) {
+		return RoleContractViolation{
+			Field:   "incident_type",
+			Index:   -1,
+			Reason:  "unsupported incident_type; allowed values: " + jsonStringList(constraints.AllowedIncidentTypes),
+			Excerpt: output.IncidentType,
+		}
+	}
+	if normalizeRequestedLanguage(output.Language) != constraints.RequestedLanguage {
+		return RoleContractViolation{
+			Field:   "language",
+			Index:   -1,
+			Reason:  "language must equal " + constraints.RequestedLanguage,
+			Excerpt: output.Language,
+		}
 	}
 	if len(triageEvidencePlan(output, nil)) == 0 {
 		return errors.New("triage LLM returned empty or unsupported evidence_plan")
@@ -1265,6 +1335,16 @@ func validateTriageLLMOutput(output triageLLMOutput) error {
 		}
 	}
 	return nil
+}
+
+func stringInSet(value string, allowed []string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range allowed {
+		if value == strings.ToLower(strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeTriageIncidentType(value string) string {
@@ -1507,7 +1587,7 @@ func boundedPlanForPrompt(plan TriagePlan) map[string]any {
 		"query":            boundedSummary(plan.Query, 600),
 		"summary":          boundedSummary(plan.Summary, 600),
 		"time_context":     plan.TimeContext,
-		"language":         plan.Language,
+		"language":         requestedLanguageForPlan(plan),
 		"limitations":      plan.Limitations,
 		"role_skill_cards": plan.AgentPlan.RoleSkillCards,
 		"session_context":  boundedSessionContextForPrompt(plan.Metadata["session_context"]),
@@ -1519,6 +1599,19 @@ func boundedPlanForPrompt(plan TriagePlan) map[string]any {
 			"metadata":          boundedPromptMetadata(plan.RoleRAG.Metadata),
 		},
 	}
+}
+
+func requestedLanguageForPlan(plan TriagePlan) string {
+	if language := normalizeRequestedLanguage(metadataString(plan.Metadata, "requested_language")); language != "" {
+		return language
+	}
+	if language := normalizeRequestedLanguage(plan.Language); language != "" {
+		return language
+	}
+	if plan.Language == "zh" {
+		return "zh-CN"
+	}
+	return "en-US"
 }
 
 func boundedPromptMetadata(metadata map[string]any) map[string]any {

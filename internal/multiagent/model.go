@@ -88,6 +88,47 @@ type MergedFindings struct {
 	Metadata         map[string]any         `json:"metadata,omitempty"`
 }
 
+type FinalDiagnosis struct {
+	Language        string                `json:"language"`
+	Summary         string                `json:"summary"`
+	Incident        IncidentOverview      `json:"incident"`
+	Findings        []FinalFinding        `json:"findings"`
+	RootCause       RootCauseAssessment   `json:"root_cause_assessment"`
+	Recommendations []FinalRecommendation `json:"recommendations"`
+	Limitations     []string              `json:"limitations"`
+	EvidenceRefs    []string              `json:"evidence_refs"`
+	Metadata        map[string]any        `json:"metadata,omitempty"`
+}
+
+type IncidentOverview struct {
+	Service      string `json:"service"`
+	IncidentType string `json:"incident_type"`
+	Severity     string `json:"severity"`
+	Status       string `json:"status"`
+}
+
+type FinalFinding struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	EvidenceIDs []string `json:"evidence_ids"`
+	Confidence  string   `json:"confidence"`
+}
+
+type RootCauseAssessment struct {
+	Conclusion   string   `json:"conclusion"`
+	Confidence   string   `json:"confidence"`
+	EvidenceIDs  []string `json:"evidence_ids"`
+	Alternatives []string `json:"alternatives"`
+}
+
+type FinalRecommendation struct {
+	Priority     string `json:"priority"`
+	Action       string `json:"action"`
+	Reason       string `json:"reason"`
+	Risk         string `json:"risk"`
+	Verification string `json:"verification"`
+}
+
 type MultiAgentResult struct {
 	Steps       []AgentStep           `json:"steps"`
 	Evidence    []common.EvidenceItem `json:"evidence"`

@@ -58,11 +58,17 @@ func (a *DeterministicTriageAgent) Plan(
 	input Input,
 ) (TriagePlan, error) {
 	query := strings.TrimSpace(input.Message)
-	language := detectLanguage(query)
+	language := legacyLanguage(metadataString(input.Metadata, "requested_language"))
+	if language == "en" && normalizeRequestedLanguage(metadataString(input.Metadata, "requested_language")) == "" {
+		language = detectLanguage(query)
+	}
 	service, serviceCertain := detectService(query)
 	limitations := []agenteino.Limitation{}
 	if !serviceCertain {
 		service = a.defaultService
+		if !isSupportedService(service) {
+			service = ""
+		}
 		limitations = append(limitations, agenteino.Limitation{
 			Code: "TRIAGE_SERVICE_UNCERTAIN",
 			Message: localizedTriageText(
@@ -97,6 +103,7 @@ func (a *DeterministicTriageAgent) Plan(
 			"triage_llm_duration_ms": int64(0),
 			"normalized_query":       query,
 			"service_confident":      serviceCertain,
+			"requested_language":     normalizeRequestedLanguage(metadataString(input.Metadata, "requested_language")),
 		},
 	}, nil
 }

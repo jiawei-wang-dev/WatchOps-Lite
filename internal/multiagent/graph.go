@@ -293,6 +293,14 @@ func (o *Orchestrator) normalizeInput(
 	if input.Metadata == nil {
 		input.Metadata = map[string]any{}
 	}
+	requestedLanguage := normalizeRequestedLanguage(metadataString(input.Metadata, "requested_language"))
+	if requestedLanguage == "" {
+		requestedLanguage = normalizeRequestedLanguage(metadataString(input.Metadata, "language"))
+	}
+	if requestedLanguage == "" {
+		requestedLanguage = detectRequestedLanguage(input.Message)
+	}
+	input.Metadata["requested_language"] = requestedLanguage
 	if input.SessionID == "" || input.Message == "" {
 		observability.MarkError(span, "multi-agent input is incomplete")
 		return normalizedInput{}, errors.New("session_id and message are required")
@@ -453,6 +461,8 @@ func (o *Orchestrator) runTriage(
 		input.Plan.RoleSkillCards[AgentRoleTriage]
 	triageInput.Metadata["session_context"] =
 		input.Input.Metadata["session_context"]
+	triageInput.Metadata["requested_language"] =
+		input.Input.Metadata["requested_language"]
 	plan, err := o.triage.Plan(ctx, triageInput)
 	if err != nil {
 		observability.MarkError(span, "Triage Agent failed")
@@ -472,6 +482,7 @@ func (o *Orchestrator) runTriage(
 	plan.Metadata["role_skill_names"] =
 		roleSkillNamesForRole(input.Plan.RoleSkillHints, AgentRoleTriage)
 	plan.Metadata["session_context"] = input.Input.Metadata["session_context"]
+	plan.Metadata["requested_language"] = input.Input.Metadata["requested_language"]
 	plan.Hypotheses = o.generateHypotheses(ctx, input.Input, plan)
 	plan.Metadata["hypothesis_count"] = len(plan.Hypotheses.Items)
 	plan.Metadata["hypothesis_enabled"] = len(plan.Hypotheses.Items) > 0
@@ -924,32 +935,36 @@ func (o *Orchestrator) buildResponse(
 		metadataBool(synthesisMetadata, "synthesis_fallback_used")
 	fallbackUsed := anyRoleFallback || finalAnswerFallback
 	metadata := map[string]any{
-		"agent_mode":                 "multi_agent",
-		"orchestrator":               "eino_graph",
-		"execution_status":           "completed",
-		"roles":                      RoleOrder(),
-		"selected_agents":            agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SelectedAgents),
-		"skipped_agents":             agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SkippedAgents),
-		"dynamic_routing_enabled":    input.Merged.Triage.Plan.AgentPlan.DynamicRoutingEnabled,
-		"role_tools":                 input.Merged.Triage.Plan.AgentPlan.RoleTools,
-		"role_rag_hints":             input.Merged.Triage.Plan.AgentPlan.RoleRAGHints,
-		"role_skill_names":           roleSkillNames(input.Merged.Triage.Plan.AgentPlan.RoleSkillHints),
-		"role_skill_cards":           input.Merged.Triage.Plan.AgentPlan.RoleSkillCards,
-		"intent_type":                string(input.Merged.Triage.Plan.Intent.Intent),
-		"intent_source":              input.Merged.Triage.Plan.Intent.Source,
-		"fallback_used":              fallbackUsed,
-		"any_role_fallback":          anyRoleFallback,
-		"final_answer_fallback":      finalAnswerFallback,
-		"synthesis_mode":             synthesisMode,
-		"multi_agent_llm_used":       len(llmRoles) > 0,
-		"multi_agent_llm_roles":      llmRoles,
-		"multi_agent_llm_call_count": llmCallCount,
-		"role_rag":                   input.Merged.Triage.Plan.RoleRAG.Metadata,
-		"role_rag_chunk_count":       roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
-		"hypotheses":                 input.Merged.Merged.Plan.Hypotheses,
-		"hypothesis_count":           len(input.Merged.Merged.Plan.Hypotheses.Items),
-		"long_term_memory_available": metadataBool(knowledgeMetadata, "long_term_memory_available"),
-		"long_term_memory_count":     metadataInt(knowledgeMetadata, "long_term_memory_count"),
+		"agent_mode":                     "multi_agent",
+		"orchestrator":                   "eino_graph",
+		"execution_status":               "completed",
+		"roles":                          RoleOrder(),
+		"selected_agents":                agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SelectedAgents),
+		"skipped_agents":                 agentRoleStrings(input.Merged.Triage.Plan.AgentPlan.SkippedAgents),
+		"dynamic_routing_enabled":        input.Merged.Triage.Plan.AgentPlan.DynamicRoutingEnabled,
+		"role_tools":                     input.Merged.Triage.Plan.AgentPlan.RoleTools,
+		"role_rag_hints":                 input.Merged.Triage.Plan.AgentPlan.RoleRAGHints,
+		"role_skill_names":               roleSkillNames(input.Merged.Triage.Plan.AgentPlan.RoleSkillHints),
+		"role_skill_cards":               input.Merged.Triage.Plan.AgentPlan.RoleSkillCards,
+		"intent_type":                    string(input.Merged.Triage.Plan.Intent.Intent),
+		"intent_source":                  input.Merged.Triage.Plan.Intent.Source,
+		"requested_language":             input.Merged.Triage.Plan.Metadata["requested_language"],
+		"triage_constraints":             input.Merged.Triage.Plan.Metadata["triage_constraints"],
+		"fallback_used":                  fallbackUsed,
+		"any_role_fallback":              anyRoleFallback,
+		"final_answer_fallback":          finalAnswerFallback,
+		"final_diagnosis":                input.Answer.Metadata["final_diagnosis"],
+		"final_diagnosis_schema_version": input.Answer.Metadata["final_diagnosis_schema_version"],
+		"synthesis_mode":                 synthesisMode,
+		"multi_agent_llm_used":           len(llmRoles) > 0,
+		"multi_agent_llm_roles":          llmRoles,
+		"multi_agent_llm_call_count":     llmCallCount,
+		"role_rag":                       input.Merged.Triage.Plan.RoleRAG.Metadata,
+		"role_rag_chunk_count":           roleRAGChunkCount(input.Merged.Triage.Plan.RoleRAG),
+		"hypotheses":                     input.Merged.Merged.Plan.Hypotheses,
+		"hypothesis_count":               len(input.Merged.Merged.Plan.Hypotheses.Items),
+		"long_term_memory_available":     metadataBool(knowledgeMetadata, "long_term_memory_available"),
+		"long_term_memory_count":         metadataInt(knowledgeMetadata, "long_term_memory_count"),
 		"long_term_memory_not_configured": metadataBool(
 			knowledgeMetadata,
 			"long_term_memory_not_configured",

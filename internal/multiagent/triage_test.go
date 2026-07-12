@@ -2,6 +2,7 @@ package multiagent
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,6 +131,82 @@ func TestLLMTriageAgentUsesValidLLMPlan(t *testing.T) {
 	}
 	if options.Temperature == nil || *options.Temperature != 0 {
 		t.Fatalf("Temperature = %#v, want 0", options.Temperature)
+	}
+}
+
+func TestLLMTriagePromptIncludesSharedConstraints(t *testing.T) {
+	model := &analysisModelStub{response: schema.AssistantMessage(`{
+		"suspected_services":["payment"],
+		"incident_type":"timeout",
+		"evidence_plan":["metrics","logs","traces"],
+		"hypotheses":[{"statement":"payment 可能存在待验证的 timeout 信号。","requires_verification":true}],
+		"uncertainties":["根因尚未确认。"],
+		"language":"zh-CN"
+	}`, nil)}
+	llm, err := NewRoleLLM(model, "test-model", time.Second)
+	if err != nil {
+		t.Fatalf("NewRoleLLM() error = %v", err)
+	}
+	plan, err := NewLLMTriageAgent("checkout", llm).Plan(context.Background(), Input{
+		Message: "请排查 payment timeout",
+		Metadata: map[string]any{
+			"requested_language": "zh-CN",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.Service != "payment" || plan.Metadata["requested_language"] != "zh-CN" {
+		t.Fatalf("plan = %#v", plan)
+	}
+	systemPrompt := model.messages[0].Content
+	if !strings.Contains(systemPrompt, `"payment"`) ||
+		!strings.Contains(systemPrompt, `exact literal "zh-CN"`) ||
+		!strings.Contains(systemPrompt, "Do not invent services") {
+		t.Fatalf("system prompt missing constraints:\n%s", systemPrompt)
+	}
+}
+
+func TestValidateTriageRejectsUnsupportedServiceFromConstraints(t *testing.T) {
+	err := validateTriageLLMOutput(triageLLMOutput{
+		SuspectedServices: []string{"user"},
+		IncidentType:      IncidentHighErrorRate,
+		EvidencePlan:      []string{"metrics"},
+		Hypotheses: []triageHypothesis{{
+			Statement:            "Checkout may have an unverified signal.",
+			RequiresVerification: true,
+		}},
+		Uncertainties: []string{"Root cause is not confirmed."},
+		Language:      "en-US",
+	}, TriageConstraints{
+		AllowedServices:      []string{"checkout"},
+		AllowedIncidentTypes: supportedIncidentTypes(),
+		RequestedLanguage:    "en-US",
+	})
+	var violation RoleContractViolation
+	if !errors.As(err, &violation) || violation.Field != "suspected_services" {
+		t.Fatalf("err = %v, want suspected_services contract violation", err)
+	}
+}
+
+func TestValidateTriageAllowsEmptyServiceWhenUnknown(t *testing.T) {
+	err := validateTriageLLMOutput(triageLLMOutput{
+		SuspectedServices: []string{},
+		IncidentType:      IncidentUnknown,
+		EvidencePlan:      []string{"metrics"},
+		Hypotheses: []triageHypothesis{{
+			Statement:            "The affected service is unknown and requires evidence review.",
+			RequiresVerification: true,
+		}},
+		Uncertainties: []string{"Service scope is not confirmed."},
+		Language:      "en-US",
+	}, TriageConstraints{
+		AllowedServices:      []string{},
+		AllowedIncidentTypes: supportedIncidentTypes(),
+		RequestedLanguage:    "en-US",
+	})
+	if err != nil {
+		t.Fatalf("validateTriageLLMOutput() error = %v", err)
 	}
 }
 

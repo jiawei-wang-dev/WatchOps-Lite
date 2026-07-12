@@ -303,7 +303,15 @@ function buildChatPayload(streamSuffix = "") {
       from: from.toISOString(),
       to: now.toISOString(),
     },
+    metadata: {
+      requested_language: requestedLanguageCode(),
+      language: currentLanguage(),
+    },
   };
+}
+
+function requestedLanguageCode() {
+  return currentLanguage() === "zh" ? "zh-CN" : "en-US";
 }
 
 async function sendChat() {
@@ -1282,15 +1290,95 @@ function renderChatResponse(response) {
   ]);
 
   const sections = [
-    renderStatementSection(t("common.conclusions"), answer.conclusion, t("dynamic.no_conclusions")),
-    renderCompactEvidence(evidence),
-    renderStatementSection(t("common.inferences"), inferences, t("dynamic.no_inferences")),
-    renderStatementSection(t("common.recommendations"), answer.recommendations, t("dynamic.no_recommendations")),
-    renderLimitationSection(limitations),
+    renderStructuredDiagnosis(response?.metadata?.final_diagnosis) ||
+      [
+        renderStatementSection(t("common.conclusions"), answer.conclusion, t("dynamic.no_conclusions")),
+        renderCompactEvidence(evidence),
+        renderStatementSection(t("common.inferences"), inferences, t("dynamic.no_inferences")),
+        renderStatementSection(t("common.recommendations"), answer.recommendations, t("dynamic.no_recommendations")),
+        renderLimitationSection(limitations),
+      ].join(""),
     renderMetadata(response?.metadata),
   ];
   byId("chat-response").className = "";
   byId("chat-response").innerHTML = sections.join("");
+}
+
+function renderStructuredDiagnosis(diagnosis) {
+  if (!diagnosis || typeof diagnosis !== "object") return "";
+  const incident = diagnosis.incident || {};
+  const findings = safeArray(diagnosis.findings);
+  const recommendations = safeArray(diagnosis.recommendations)
+    .slice()
+    .sort((left, right) => priorityRank(left?.priority) - priorityRank(right?.priority));
+  const limitations = safeArray(diagnosis.limitations);
+  const evidenceRefs = safeArray(diagnosis.evidence_refs);
+  const root = diagnosis.root_cause_assessment || {};
+  return [
+    `<section class="response-section structured-diagnosis">
+      <h4>${escapeHtml(t("diagnosis.overview"))}</h4>
+      <div class="metric-grid compact">
+        ${metricCard(t("diagnosis.service"), incident.service || "—")}
+        ${metricCard(t("diagnosis.incident_type"), incident.incident_type || "—")}
+        ${metricCard(t("diagnosis.severity"), incident.severity || "—")}
+        ${metricCard(t("diagnosis.status"), incident.status || "—")}
+      </div>
+      <p>${escapeHtml(diagnosis.summary || t("dynamic.no_detail"))}</p>
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("diagnosis.findings"))}</h4>
+      ${findings.length ? findings.map((finding) => `
+        <article class="evidence-row">
+          <h5>${escapeHtml(finding?.title || t("diagnosis.finding"))}</h5>
+          <p>${escapeHtml(finding?.description || t("dynamic.no_detail"))}</p>
+          <div class="evidence-meta">
+            <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(finding?.confidence || "low")}</span>
+            ${renderEvidenceTags(finding?.evidence_ids)}
+          </div>
+        </article>`).join("") : `<p class="subtle">${escapeHtml(t("diagnosis.no_findings"))}</p>`}
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("diagnosis.root_cause"))}</h4>
+      <p>${escapeHtml(root.conclusion || t("diagnosis.root_cause_insufficient"))}</p>
+      <div class="evidence-meta">
+        <span>${escapeHtml(t("diagnosis.confidence"))}: ${escapeHtml(root.confidence || "low")}</span>
+        ${renderEvidenceTags(root.evidence_ids)}
+      </div>
+      ${safeArray(root.alternatives).length ? `<ul class="response-list">${safeArray(root.alternatives).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("diagnosis.recommendations"))}</h4>
+      ${recommendations.length ? `<ul class="response-list">${recommendations.map((item) => `
+        <li>
+          <strong>${escapeHtml(item?.priority || "P2")}</strong> · ${escapeHtml(item?.action || t("dynamic.no_detail"))}
+          <span class="evidence-refs">${escapeHtml(t("diagnosis.reason"))}: ${escapeHtml(item?.reason || "—")}</span>
+          <span class="evidence-refs">${escapeHtml(t("diagnosis.risk"))}: ${escapeHtml(item?.risk || "—")}</span>
+          <span class="evidence-refs">${escapeHtml(t("diagnosis.verification"))}: ${escapeHtml(item?.verification || "—")}</span>
+        </li>`).join("")}</ul>` : `<p class="subtle">${escapeHtml(t("dynamic.no_recommendations"))}</p>`}
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("common.limitations"))}</h4>
+      ${limitations.length ? `<ul class="response-list">${limitations.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="subtle">${escapeHtml(t("dynamic.no_limitations"))}</p>`}
+    </section>`,
+    `<section class="response-section">
+      <h4>${escapeHtml(t("diagnosis.evidence_refs"))}</h4>
+      ${evidenceRefs.length ? `<div class="evidence-meta">${renderEvidenceTags(evidenceRefs)}</div>` : `<p class="subtle">${escapeHtml(t("dynamic.no_evidence"))}</p>`}
+    </section>`,
+  ].join("");
+}
+
+function metricCard(label, value) {
+  return `<div class="metric-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function renderEvidenceTags(ids) {
+  const values = safeArray(ids).map((id) => safeText(id)).filter(Boolean);
+  if (!values.length) return "";
+  return values.map((id) => `<button class="source-badge evidence-ref-button" type="button" data-evidence-id="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join("");
+}
+
+function priorityRank(priority) {
+  return { P0: 0, P1: 1, P2: 2 }[safeText(priority).toUpperCase()] ?? 3;
 }
 
 function renderStatementSection(title, items, emptyMessage) {

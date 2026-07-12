@@ -349,7 +349,213 @@ func normalizeSynthesisOutput(
 	if _, exists := output.Metadata["synthesis_mode"]; !exists {
 		output.Metadata["synthesis_mode"] = "primary"
 	}
+	finalDiagnosis := buildFinalDiagnosis(output, input)
+	output.Metadata["final_diagnosis"] = finalDiagnosis
+	output.Metadata["final_diagnosis_schema_version"] = "final_diagnosis_v1"
 	return output
+}
+
+func buildFinalDiagnosis(output agenteino.AgentOutput, input SynthesisInput) FinalDiagnosis {
+	language := requestedLanguageForPlan(input.Plan)
+	evidenceRefs := evidenceIDsFromItems(output.Evidence)
+	limitations := make([]string, 0, len(output.Limitations))
+	for _, limitation := range output.Limitations {
+		text := strings.TrimSpace(limitation.Message)
+		if text == "" {
+			text = strings.TrimSpace(limitation.Code)
+		}
+		if text != "" {
+			limitations = append(limitations, text)
+		}
+	}
+	findings := make([]FinalFinding, 0, len(output.Conclusions)+len(output.Inferences))
+	for index, conclusion := range output.Conclusions {
+		findings = append(findings, FinalFinding{
+			Title:       localizedIndexedTitle(language, "结论", "Finding", index+1),
+			Description: conclusion.Text,
+			EvidenceIDs: validEvidenceIDs(conclusion.EvidenceIDs, output.Evidence),
+			Confidence:  confidenceForEvidence(conclusion.EvidenceIDs),
+		})
+	}
+	for index, inference := range output.Inferences {
+		findings = append(findings, FinalFinding{
+			Title:       localizedIndexedTitle(language, "推断", "Inference", index+1),
+			Description: inference.Text,
+			EvidenceIDs: validEvidenceIDs(inference.EvidenceIDs, output.Evidence),
+			Confidence:  "medium",
+		})
+	}
+	recommendations := make([]FinalRecommendation, 0, len(output.Recommendations))
+	for index, recommendation := range output.Recommendations {
+		recommendations = append(recommendations, FinalRecommendation{
+			Priority:     priorityForIndex(index),
+			Action:       recommendation.Text,
+			Reason:       localizedEvidenceReason(language, validEvidenceIDs(recommendation.EvidenceIDs, output.Evidence)),
+			Risk:         localizedRecommendationRisk(language),
+			Verification: localizedRecommendationVerification(language),
+		})
+	}
+	root := RootCauseAssessment{
+		Conclusion:   localizedInsufficientRootCause(language),
+		Confidence:   "low",
+		EvidenceIDs:  []string{},
+		Alternatives: []string{},
+	}
+	if len(output.Conclusions) > 0 {
+		root.Conclusion = output.Conclusions[0].Text
+		root.EvidenceIDs = validEvidenceIDs(output.Conclusions[0].EvidenceIDs, output.Evidence)
+		root.Confidence = confidenceForEvidence(root.EvidenceIDs)
+	}
+	for _, inference := range output.Inferences {
+		text := strings.TrimSpace(inference.Text)
+		if text != "" {
+			root.Alternatives = append(root.Alternatives, text)
+		}
+	}
+	summary := localizedFinalSummary(language, input.Plan.Service, input.Plan.IncidentType, len(evidenceRefs))
+	if len(output.Conclusions) > 0 && strings.TrimSpace(output.Conclusions[0].Text) != "" {
+		summary = output.Conclusions[0].Text
+	}
+	return FinalDiagnosis{
+		Language: language,
+		Summary:  summary,
+		Incident: IncidentOverview{
+			Service:      input.Plan.Service,
+			IncidentType: input.Plan.IncidentType,
+			Severity:     severityForIncident(input.Plan.IncidentType),
+			Status:       statusForEvidence(language, len(evidenceRefs)),
+		},
+		Findings:        findings,
+		RootCause:       root,
+		Recommendations: recommendations,
+		Limitations:     limitations,
+		EvidenceRefs:    evidenceRefs,
+		Metadata: map[string]any{
+			"schema_version": "final_diagnosis_v1",
+			"fallback_used":  output.Metadata["fallback_used"],
+		},
+	}
+}
+
+func evidenceIDsFromItems(items []common.EvidenceItem) []string {
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func validEvidenceIDs(ids []string, evidence []common.EvidenceItem) []string {
+	valid := evidenceIDSet(evidence)
+	result := []string{}
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if _, ok := valid[id]; !ok {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+func localizedIndexedTitle(language, zhPrefix, enPrefix string, index int) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return zhPrefix + " " + fmt.Sprint(index)
+	}
+	return enPrefix + " " + fmt.Sprint(index)
+}
+
+func confidenceForEvidence(ids []string) string {
+	switch {
+	case len(ids) >= 2:
+		return "high"
+	case len(ids) == 1:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func priorityForIndex(index int) string {
+	if index == 0 {
+		return "P0"
+	}
+	if index == 1 {
+		return "P1"
+	}
+	return "P2"
+}
+
+func localizedEvidenceReason(language string, ids []string) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		if len(ids) == 0 {
+			return "当前建议缺少直接证据引用，执行前需要补充验证。"
+		}
+		return "该建议由引用证据支持，执行前仍需结合实时状态确认。"
+	}
+	if len(ids) == 0 {
+		return "This recommendation has no direct evidence reference and needs validation before action."
+	}
+	return "This recommendation is supported by cited evidence and should still be checked against live state."
+}
+
+func localizedRecommendationRisk(language string) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return "未验证前直接操作可能扩大影响面。"
+	}
+	return "Acting before validation may increase blast radius."
+}
+
+func localizedRecommendationVerification(language string) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return "执行前后对比 metrics、logs、traces 与告警状态。"
+	}
+	return "Compare metrics, logs, traces, and alert state before and after action."
+}
+
+func localizedInsufficientRootCause(language string) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return "证据不足，当前不能确认已观察到根因。"
+	}
+	return "Evidence is insufficient to confirm an observed root cause."
+}
+
+func localizedFinalSummary(language, service, incidentType string, evidenceCount int) string {
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return fmt.Sprintf("已对 service=%s 的 %s 信号完成证据约束分析，当前证据数=%d。", service, incidentType, evidenceCount)
+	}
+	return fmt.Sprintf("Evidence-bound analysis completed for service=%s, incident_type=%s, evidence_count=%d.", service, incidentType, evidenceCount)
+}
+
+func severityForIncident(incidentType string) string {
+	switch incidentType {
+	case IncidentHighErrorRate, IncidentPaymentTimeout:
+		return "high"
+	case IncidentLatency:
+		return "medium"
+	default:
+		return "unknown"
+	}
+}
+
+func statusForEvidence(language string, evidenceCount int) string {
+	if evidenceCount == 0 {
+		if normalizeRequestedLanguage(language) == "zh-CN" {
+			return "证据不足"
+		}
+		return "insufficient_evidence"
+	}
+	if normalizeRequestedLanguage(language) == "zh-CN" {
+		return "调查中"
+	}
+	return "investigating"
 }
 
 func mergeSynthesisMetadata(target map[string]any, source map[string]any) {
