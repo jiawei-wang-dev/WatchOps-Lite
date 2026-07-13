@@ -13,6 +13,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/config"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/eval"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/feedback"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/mcp"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/redisstore"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/multiagent"
@@ -135,6 +136,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	var metricsStore retrievalmetrics.Store
 	var metricsSearcher *retrievalmetrics.Service
+	metricsProvider := "http"
 	if strings.EqualFold(cfg.Metrics.Backend, "prometheus") {
 		store, err := retrievalmetrics.NewPrometheusClient(
 			cfg.Metrics.BaseURL,
@@ -147,7 +149,17 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			return nil, err
 		}
 		metricsStore = store
-		metricsSearcher, err = retrievalmetrics.NewService(metricsStore, cfg.Metrics.Queries)
+		metricsSearchStore := metricsStore
+		if cfg.MCP.Enabled {
+			client, err := mcp.NewHTTPClient(cfg.MCP.ServerURL, cfg.MCP.Timeout.Value())
+			if err != nil {
+				logger.Warn("MCP metrics client is not ready; Prometheus HTTP metrics path will be used", "error", err)
+			} else {
+				metricsProvider = "mcp"
+				metricsSearchStore = retrievalmetrics.NewMCPStore(client)
+			}
+		}
+		metricsSearcher, err = retrievalmetrics.NewService(metricsSearchStore, cfg.Metrics.Queries)
 		if err != nil {
 			if elasticsearchClient != nil {
 				_ = elasticsearchClient.Close(context.Background())
@@ -185,6 +197,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		LogsSearcher:          logsSearcher,
 		MetricsBackend:        cfg.Metrics.Backend,
 		MetricsBaseURL:        cfg.Metrics.BaseURL,
+		MetricsProvider:       metricsProvider,
 		MetricsFallbackToMock: cfg.Metrics.FallbackToMock,
 		MetricsTimeout:        cfg.Metrics.RequestTimeout.Value(),
 		MetricsSearcher:       metricsSearcher,

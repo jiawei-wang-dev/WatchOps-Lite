@@ -147,6 +147,16 @@ func TestDefaultMetricsConfigurationUsesMock(t *testing.T) {
 	}
 }
 
+func TestDefaultMCPConfigurationIsDisabled(t *testing.T) {
+	cfg := Default()
+
+	if cfg.MCP.Enabled ||
+		cfg.MCP.ServerURL != "http://localhost:8081" ||
+		cfg.MCP.Timeout.Value() != 10*time.Second {
+		t.Fatalf("MCP config = %#v", cfg.MCP)
+	}
+}
+
 func TestLoadAppliesMetricsEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
@@ -158,6 +168,10 @@ func TestLoadAppliesMetricsEnvironment(t *testing.T) {
 	t.Setenv("WATCHOPS_METRICS_DEFAULT_STEP", "15s")
 	t.Setenv("WATCHOPS_METRICS_REQUEST_TIMEOUT", "750ms")
 	t.Setenv("WATCHOPS_METRICS_QUERY_CHECKOUT_ERROR_RATE", "custom_checkout_error_rate")
+	t.Setenv("WATCHOPS_MCP_ENABLED", "true")
+	t.Setenv("WATCHOPS_MCP_SERVER_URL", "http://prometheus-mcp:8081")
+	t.Setenv("WATCHOPS_MCP_TIMEOUT", "2s")
+	t.Setenv("MCP_SERVER_URL", "http://unprefixed-prometheus-mcp:8081")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -170,6 +184,11 @@ func TestLoadAppliesMetricsEnvironment(t *testing.T) {
 		cfg.Metrics.RequestTimeout.Value() != 750*time.Millisecond ||
 		cfg.Metrics.Queries["checkout_error_rate"] != "custom_checkout_error_rate" {
 		t.Fatalf("Metrics config = %#v", cfg.Metrics)
+	}
+	if !cfg.MCP.Enabled ||
+		cfg.MCP.ServerURL != "http://unprefixed-prometheus-mcp:8081" ||
+		cfg.MCP.Timeout.Value() != 2*time.Second {
+		t.Fatalf("MCP config = %#v", cfg.MCP)
 	}
 }
 

@@ -27,6 +27,7 @@ type MockToolsConfig struct {
 	LogsSearcher          logs.Searcher
 	MetricsBackend        string
 	MetricsBaseURL        string
+	MetricsProvider       string
 	MetricsFallbackToMock bool
 	MetricsTimeout        time.Duration
 	MetricsSearcher       metrics.Searcher
@@ -76,6 +77,7 @@ func BuildMockToolsWithConfig(config MockToolsConfig) ([]einotool.InvokableTool,
 		metricsRuntime = metrics.NewSearchTool(config.MetricsSearcher, metrics.SearchToolConfig{
 			Backend:        config.MetricsBackend,
 			BaseURL:        config.MetricsBaseURL,
+			Provider:       config.MetricsProvider,
 			FallbackToMock: config.MetricsFallbackToMock,
 			Timeout:        config.MetricsTimeout,
 		}).Runtime()

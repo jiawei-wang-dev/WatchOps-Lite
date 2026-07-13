@@ -47,13 +47,15 @@ func TestSearchToolMapsPrometheusSamplesToEvidence(t *testing.T) {
 	if len(result.Evidence) != 1 ||
 		result.Evidence[0].SourceName != "prometheus" ||
 		result.Evidence[0].ResourceID != "checkout" ||
-		result.Metadata["fallback_used"] != false {
+		result.Metadata["fallback_used"] != false ||
+		result.Metadata["metric_provider"] != "http" {
 		t.Fatalf("result = %#v", result)
 	}
 	metadata := result.Evidence[0].Metadata
 	if metadata["metric_name"] != "watchops_checkout_error_rate" ||
 		metadata["value"] != 0.062 ||
-		metadata["query"] != "watchops_checkout_error_rate" {
+		metadata["query"] != "watchops_checkout_error_rate" ||
+		metadata["metric_provider"] != "http" {
 		t.Fatalf("evidence metadata = %#v", metadata)
 	}
 	if searcher.request.Service != "checkout" ||
@@ -77,9 +79,36 @@ func TestSearchToolFallsBackToMockWhenPrometheusIsUnavailable(t *testing.T) {
 	}
 	if result.Metadata["mode"] != "mock_fallback" ||
 		result.Metadata["fallback_used"] != true ||
+		result.Metadata["metric_provider"] != "http" ||
 		len(result.Warnings) != 1 ||
 		result.Warnings[0].Code != "METRICS_FALLBACK" ||
 		result.Evidence[0].SourceName != "mock-metrics" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSearchToolRecordsMCPProvider(t *testing.T) {
+	timestamp := time.Date(2026, 6, 30, 0, 20, 0, 0, time.UTC)
+	searcher := &searcherStub{samples: []retrievalmetrics.Sample{{
+		Name:      "watchops_checkout_error_rate",
+		Value:     0.062,
+		Timestamp: timestamp,
+		Service:   "checkout",
+		Query:     "watchops_checkout_error_rate",
+	}}}
+	tool := NewSearchTool(searcher, SearchToolConfig{
+		Backend:        "prometheus",
+		BaseURL:        "http://localhost:9090",
+		Provider:       "mcp",
+		FallbackToMock: true,
+	})
+
+	result, err := tool.Execute(context.Background(), validMetricsInput())
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Metadata["metric_provider"] != "mcp" ||
+		result.Evidence[0].Metadata["metric_provider"] != "mcp" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -98,7 +127,8 @@ func TestSearchToolReportsEmptyPrometheusResultWithoutMockingData(t *testing.T) 
 	if len(result.Evidence) != 0 ||
 		len(result.Warnings) != 1 ||
 		result.Warnings[0].Code != "METRICS_NO_DATA" ||
-		result.Metadata["mode"] != "prometheus" {
+		result.Metadata["mode"] != "prometheus" ||
+		result.Metadata["metric_provider"] != "http" {
 		t.Fatalf("result = %#v", result)
 	}
 }

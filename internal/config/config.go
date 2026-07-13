@@ -50,6 +50,7 @@ type Config struct {
 	Rerank         RerankConfig         `json:"rerank"`
 	Logs           LogsConfig           `json:"logs"`
 	Metrics        MetricsConfig        `json:"metrics"`
+	MCP            MCPConfig            `json:"mcp"`
 	Traces         TracesConfig         `json:"traces"`
 	MySQL          MySQLConfig          `json:"mysql"`
 	LongTermMemory LongTermMemoryConfig `json:"long_term_memory"`
@@ -151,6 +152,12 @@ type MetricsConfig struct {
 	DefaultStep    Duration          `json:"default_step"`
 	RequestTimeout Duration          `json:"request_timeout"`
 	Queries        map[string]string `json:"queries"`
+}
+
+type MCPConfig struct {
+	Enabled   bool     `json:"enabled"`
+	ServerURL string   `json:"server_url"`
+	Timeout   Duration `json:"timeout"`
 }
 
 type TracesConfig struct {
@@ -309,6 +316,11 @@ func Default() Config {
 				"payment_dependency_latency": "watchops_payment_dependency_latency_seconds",
 			},
 		},
+		MCP: MCPConfig{
+			Enabled:   false,
+			ServerURL: "http://localhost:8081",
+			Timeout:   Duration(10 * time.Second),
+		},
 		Traces: TracesConfig{
 			Backend:        "mock",
 			BaseURL:        "http://localhost:16686",
@@ -442,6 +454,8 @@ func applyEnvironment(cfg *Config) error {
 	setString("LOGS_INDEX", &cfg.Logs.Index)
 	setString("METRICS_BACKEND", &cfg.Metrics.Backend)
 	setString("METRICS_BASE_URL", &cfg.Metrics.BaseURL)
+	setString("MCP_SERVER_URL", &cfg.MCP.ServerURL)
+	setUnprefixedString("MCP_SERVER_URL", &cfg.MCP.ServerURL)
 	setString("TRACES_BACKEND", &cfg.Traces.Backend)
 	setString("TRACES_BASE_URL", &cfg.Traces.BaseURL)
 	setString("TRACES_DEFAULT_SERVICE", &cfg.Traces.DefaultService)
@@ -476,6 +490,7 @@ func applyEnvironment(cfg *Config) error {
 		{"RERANK_TIMEOUT", &cfg.Rerank.Timeout},
 		{"METRICS_DEFAULT_STEP", &cfg.Metrics.DefaultStep},
 		{"METRICS_REQUEST_TIMEOUT", &cfg.Metrics.RequestTimeout},
+		{"MCP_TIMEOUT", &cfg.MCP.Timeout},
 		{"TRACES_REQUEST_TIMEOUT", &cfg.Traces.RequestTimeout},
 		{"MYSQL_CONN_MAX_LIFETIME", &cfg.MySQL.ConnMaxLifetime},
 		{"MYSQL_REQUEST_TIMEOUT", &cfg.MySQL.RequestTimeout},
@@ -495,6 +510,9 @@ func applyEnvironment(cfg *Config) error {
 		if err := setDuration(item.name, item.target); err != nil {
 			return err
 		}
+	}
+	if err := setUnprefixedDuration("MCP_TIMEOUT", &cfg.MCP.Timeout); err != nil {
+		return err
 	}
 
 	integerValues := []struct {
@@ -582,6 +600,20 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sMETRICS_FALLBACK_TO_MOCK must be a boolean: %w", envPrefix, err)
 		}
 		cfg.Metrics.FallbackToMock = parsed
+	}
+	if value, ok := lookup("MCP_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%sMCP_ENABLED must be a boolean: %w", envPrefix, err)
+		}
+		cfg.MCP.Enabled = parsed
+	}
+	if value, ok := lookupUnprefixed("MCP_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("MCP_ENABLED must be a boolean: %w", err)
+		}
+		cfg.MCP.Enabled = parsed
 	}
 	if value, ok := lookup("TRACES_FALLBACK_TO_MOCK"); ok {
 		parsed, err := strconv.ParseBool(value)
@@ -707,6 +739,12 @@ func setString(name string, target *string) {
 	}
 }
 
+func setUnprefixedString(name string, target *string) {
+	if value, ok := lookupUnprefixed(name); ok {
+		*target = value
+	}
+}
+
 func setDuration(name string, target *Duration) error {
 	value, ok := lookup(name)
 	if !ok {
@@ -716,6 +754,20 @@ func setDuration(name string, target *Duration) error {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return fmt.Errorf("%s%s must be a duration: %w", envPrefix, name, err)
+	}
+	*target = Duration(parsed)
+	return nil
+}
+
+func setUnprefixedDuration(name string, target *Duration) error {
+	value, ok := lookupUnprefixed(name)
+	if !ok {
+		return nil
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("%s must be a duration: %w", name, err)
 	}
 	*target = Duration(parsed)
 	return nil
@@ -737,6 +789,11 @@ func setInteger(name string, target *int) error {
 
 func lookup(name string) (string, bool) {
 	value, ok := os.LookupEnv(envPrefix + name)
+	return strings.TrimSpace(value), ok
+}
+
+func lookupUnprefixed(name string) (string, bool) {
+	value, ok := os.LookupEnv(name)
 	return strings.TrimSpace(value), ok
 }
 
@@ -919,6 +976,12 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(name) == "" || strings.TrimSpace(query) == "" {
 			return errors.New("metrics.queries must not contain empty names or expressions")
 		}
+	}
+	if strings.TrimSpace(cfg.MCP.ServerURL) == "" {
+		return errors.New("mcp.server_url is required")
+	}
+	if cfg.MCP.Timeout <= 0 {
+		return errors.New("mcp.timeout must be greater than zero")
 	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Traces.Backend)) {
 	case "mock", "jaeger":

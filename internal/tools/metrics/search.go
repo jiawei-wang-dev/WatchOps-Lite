@@ -22,6 +22,7 @@ type Searcher interface {
 type SearchToolConfig struct {
 	Backend        string
 	BaseURL        string
+	Provider       string
 	FallbackToMock bool
 	Timeout        time.Duration
 }
@@ -38,6 +39,7 @@ func NewSearchTool(searcher Searcher, config SearchToolConfig) *SearchTool {
 	if backend == "" {
 		backend = "prometheus"
 	}
+	provider := metricProvider(config.Provider)
 	runtimeConfig := toolruntime.Config{
 		ToolName:   Name,
 		SourceType: toolruntime.SourceMetrics,
@@ -60,6 +62,7 @@ func NewSearchTool(searcher Searcher, config SearchToolConfig) *SearchTool {
 			"mode":               "mock_fallback",
 			"backend":            "mock",
 			"configured_backend": backend,
+			"metric_provider":    provider,
 		}
 	}
 	tool.runtime = mustRuntime(runtimeConfig)
@@ -82,6 +85,7 @@ func (t *SearchTool) search(
 	if backend == "" {
 		backend = "prometheus"
 	}
+	provider := metricProvider(t.config.Provider)
 	queryName := strings.TrimSpace(input.MetricName)
 	if queryName == "" {
 		queryName = strings.TrimSpace(input.Symptom)
@@ -90,6 +94,7 @@ func (t *SearchTool) search(
 		ctx,
 		"metrics.query",
 		attribute.String("metrics.backend", backend),
+		attribute.String("metric.provider", provider),
 		attribute.String("prometheus.base_url", t.config.BaseURL),
 		attribute.String("query_name", queryName),
 		attribute.Int("query_length", len(queryName)),
@@ -147,11 +152,12 @@ func (t *SearchTool) search(
 			),
 			ResourceID: service,
 			Metadata: map[string]any{
-				"metric_name": sample.Name,
-				"value":       sample.Value,
-				"labels":      sample.Labels,
-				"query":       sample.Query,
-				"timestamp":   timestamp,
+				"metric_name":     sample.Name,
+				"value":           sample.Value,
+				"labels":          sample.Labels,
+				"query":           sample.Query,
+				"timestamp":       timestamp,
+				"metric_provider": provider,
 			},
 		})
 	}
@@ -169,8 +175,9 @@ func (t *SearchTool) search(
 			"returned_count": len(evidenceItems),
 		},
 		Metadata: map[string]any{
-			"mode":    "prometheus",
-			"backend": backend,
+			"mode":            "prometheus",
+			"backend":         backend,
+			"metric_provider": provider,
 		},
 	}, nil
 }
@@ -206,4 +213,12 @@ func evidenceIDPart(value string) string {
 		return "metric"
 	}
 	return builder.String()
+}
+
+func metricProvider(value string) string {
+	provider := strings.ToLower(strings.TrimSpace(value))
+	if provider == "" {
+		return "http"
+	}
+	return provider
 }

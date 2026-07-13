@@ -85,6 +85,11 @@
       "payment_dependency_latency": "watchops_payment_dependency_latency_seconds"
     }
   },
+  "mcp": {
+    "enabled": false,
+    "server_url": "http://localhost:8081",
+    "timeout": "10s"
+  },
   "traces": {
     "backend": "mock",
     "base_url": "http://localhost:16686",
