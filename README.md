@@ -144,12 +144,15 @@ The default Chat API uses one Eino ReAct Agent. It sees the full context and dec
 
 ```mermaid
 flowchart TB
-    U["User"] --> I["Intent"]
-    I --> S["Skill Selection\nbounded diagnostic guidance"]
-    S --> R["Hybrid RAG\npre-retrieved context"]
-    R --> T["Tool Calling\nmetrics / logs / traces / knowledge"]
-    T --> M["Memory\nRedis + MySQL"]
-    M --> A["Answer\nevidence + recommendation + limitations"]
+    U["User"] --> I["Intent Recognition"]
+    I --> C["Context Builder\nskill cards + memory + time range"]
+    C --> R["Hybrid RAG\npre-retrieved context"]
+    R --> A["Eino ReAct Agent\nreasoning + tool decision"]
+    A --> TR["Tool Runtime\ntimeout / fallback / guardrails"]
+    TR --> T["Tools\nmetrics / logs / traces / knowledge"]
+    T --> TR
+    TR --> A
+    A --> O["Final Answer\nevidence + recommendation + limitations"]
 ```
 
 Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
