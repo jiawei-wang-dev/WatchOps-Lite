@@ -889,6 +889,9 @@ func TestNativeEinoGraphLoadsConfirmedLongTermMemory(t *testing.T) {
 	if result.Agent.Metadata["long_term_memory_count"] != 1 {
 		t.Fatalf("metadata = %#v", result.Agent.Metadata)
 	}
+	if result.Agent.Metadata["long_term_memory_loaded_count"] != 1 {
+		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
 }
 
 func TestNativeEinoGraphContinuesWhenNoLongTermMemoriesAreFound(t *testing.T) {
@@ -910,7 +913,8 @@ func TestNativeEinoGraphContinuesWhenNoLongTermMemoriesAreFound(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if len(runner.lastInput.ConfirmedLongTermMemories) != 0 ||
-		result.Agent.Metadata["long_term_memory_count"] != 0 {
+		result.Agent.Metadata["long_term_memory_count"] != 0 ||
+		result.Agent.Metadata["long_term_memory_loaded_count"] != 0 {
 		t.Fatalf(
 			"input=%#v metadata=%#v",
 			runner.lastInput,

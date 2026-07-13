@@ -267,6 +267,7 @@ func TestOrchestratorPromotesKnowledgeMemoryMetadata(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if result.Metadata["long_term_memory_available"] != true ||
+		result.Metadata["long_term_memory_loaded_count"] != 0 ||
 		result.Metadata["long_term_memory_count"] != 0 ||
 		result.Metadata["long_term_memory_not_configured"] != false {
 		t.Fatalf("metadata = %#v", result.Metadata)

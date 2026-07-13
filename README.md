@@ -1,298 +1,261 @@
-# WatchOps-Lite｜OnCall 智能排障 Agent
+# WatchOps-Lite
 
-> A Go + Agent project for OnCall troubleshooting. It turns an incident question into a structured investigation with metrics, logs, traces, alerts, topology, runbooks, evidence citations, and runtime observability.
+> An evidence-driven Agentic RAG console for OnCall troubleshooting, built with Go, Eino, Gin, Redis, MySQL, Elasticsearch, Prometheus, Jaeger, Grafana, OpenTelemetry, and optional MCP-backed metrics.
 
-WatchOps-Lite 是一个面向 OnCall 排障场景的智能辅助系统。用户用自然语言描述线上问题后，系统会自动查询指标、日志、链路追踪、告警、服务拓扑和知识库 Runbook，整理故障证据，并生成排查结论、处理建议和当前证据不足的局限性。
+WatchOps-Lite turns an incident question into a structured reliability investigation. It can inspect metrics, logs, traces, alerts, service topology, runbooks, short-term session context, and long-term troubleshooting memory, then produce an answer with evidence, recommendations, and explicit limitations.
 
-它不是单纯聊天机器人，也不是普通监控面板，而是一套可以本地复现、可以演示、可以观测的 Agent 排障后端系统。
-
----
-
-## 1. 项目展示重点
-
-| 展示内容 | 说明 |
-|---|---|
-| Agent Console | 展示自然语言提问、诊断结论、证据、工具调用和 limitations |
-| Docker Compose | 展示 Redis、MySQL、Elasticsearch、Prometheus、Grafana、Jaeger 等依赖如何一键启动 |
-| Prometheus Targets | 展示 `watchops-lite` 和 `watchops-demo` 均为 UP，证明后端 metrics 和 demo 指标可采集 |
-| Grafana Dashboard | 展示请求量、工具调用次数、工具耗时、错误和降级情况 |
-| Jaeger Trace | 展示一次请求中 intent、RAG、tool call、LLM call、evidence processing 等链路耗时 |
-| E2E Demo | 展示健康检查、知识库 seed、日志 seed、Chat、SSE、Eval、Benchmark 均可通过 |
+It is designed as a GitHub showcase and interview-friendly project: small enough to understand, complete enough to run locally, and observable enough to explain how the Agent behaves.
 
 ---
 
-## 2. 项目解决什么问题
+## Table of Contents
 
-传统排障通常需要人工在多个平台之间切换：
+- [Project Overview](#project-overview)
+- [Architecture](#architecture)
+- [Core Features](#core-features)
+- [System Workflow](#system-workflow)
+- [Single-Agent Workflow](#single-agent-workflow)
+- [Multi-Agent Workflow](#multi-agent-workflow)
+- [Hybrid RAG Pipeline](#hybrid-rag-pipeline)
+- [Memory Architecture](#memory-architecture)
+- [MCP Integration](#mcp-integration)
+- [Observability](#observability)
+- [Docker Compose](#docker-compose)
+- [Quick Start](#quick-start)
+- [Screenshots](#screenshots)
+- [Project Structure](#project-structure)
+- [Future Roadmap](#future-roadmap)
+- [License](#license)
+
+---
+
+## Project Overview
+
+During an incident, an on-call engineer often has to jump between Prometheus, Elasticsearch, Jaeger, runbooks, previous cases, and chat history. WatchOps-Lite compresses that workflow into one controlled Agent pipeline:
 
 ```text
-Prometheus 看指标
-  ↓
-Elasticsearch 查日志
-  ↓
-Jaeger 看 Trace
-  ↓
-翻 Runbook / 历史文档
-  ↓
-人工对齐时间窗口和证据
-  ↓
-整理结论和处理建议
+Incident question
+  -> intent recognition
+  -> context and memory loading
+  -> hybrid knowledge retrieval
+  -> read-only tool calls
+  -> evidence normalization
+  -> evidence-bound final answer
 ```
 
-WatchOps-Lite 把这些步骤整合成一条可追踪的 Agent 诊断链路：
-
-```text
-用户描述问题
-  ↓
-识别问题类型
-  ↓
-查询指标 / 日志 / Trace / 告警 / 拓扑 / 知识库
-  ↓
-整理多源证据
-  ↓
-输出诊断结论、建议和 limitations
-  ↓
-通过 Grafana / Jaeger 观察 Agent 运行过程
-```
-
-核心目标是减少人工在多个系统之间反复检索和对比信息的成本，同时避免 Agent 在缺少证据时直接下结论。
+The project intentionally avoids auto-remediation. Every tool is read-only, every answer is expected to cite evidence, and missing data is surfaced as a limitation instead of being hidden behind a confident guess.
 
 ---
 
-## 3. 技术栈
+## Architecture
 
-Go、Gin、CloudWeGo Eino、Redis、MySQL、Elasticsearch、Prometheus、Grafana、Jaeger、OpenTelemetry、Docker Compose。
-
-这些组件不是为了堆技术栈，而是围绕排障链路各司其职：
-
-| 组件 | 在项目中的作用 |
-|---|---|
-| Go / Gin | 提供 Chat API、SSE、健康检查、metrics 和本地 Web Console |
-| CloudWeGo Eino | 编排 Agent Graph、ReAct tool calling 和 Prompt 渲染 |
-| Redis | 保存当前会话的近期消息和滚动摘要 |
-| MySQL | 保存长期记忆、用户画像、反馈和评估用例 |
-| Elasticsearch | 支撑日志检索和知识库 Runbook 检索 |
-| Prometheus | 提供业务指标查询，并采集后端 runtime metrics |
-| Grafana | 展示请求量、工具调用、延迟、错误和降级情况 |
-| Jaeger | 展示单次请求的 OpenTelemetry Trace |
-| Docker Compose | 一键启动完整本地演示环境 |
-
----
-
-## 4. 总体架构
+### Overall Architecture
 
 ```mermaid
 flowchart LR
-    U["用户 / 浏览器"] --> API["Gin HTTP API\n/chat / stream / metrics"]
-    API --> CG["Eino Chat Graph"]
+    UI["Web Console\nvanilla HTML/CSS/JS"] --> API["Gin API\nchat / stream / eval / feedback"]
+    API --> INTENT["Intent Recognition"]
+    INTENT --> SELECT["Tool Selection\nEino ReAct + skill cards"]
 
-    CG --> INT["Intent Recognition\n识别问题类型"]
-    CG --> MEM["Memory Context\nRedis + MySQL"]
-    CG --> RAG["Knowledge Retrieval\nRunbook / Incident Docs"]
-    CG --> AG["Agent Runtime\nSingle-Agent / Multi-Agent"]
+    SELECT --> SA["Single-Agent\nEino ReAct Agent"]
+    SELECT --> MA["Multi-Agent\nrole orchestration"]
 
-    AG --> TOOLS["Read-only Tools"]
-    TOOLS --> MET["Prometheus\nmetrics / alerts"]
-    TOOLS --> LOG["Elasticsearch\nlogs"]
-    TOOLS --> TR["Jaeger\ntraces"]
-    TOOLS --> KB["Elasticsearch\nknowledge"]
-    TOOLS --> TP["Service Topology"]
+    SA --> RAG["Hybrid RAG"]
+    MA --> RAG
 
-    AG --> EV["Evidence Processor\ndedupe / score / cite / group"]
-    EV --> OUT["Answer\nconclusion / evidence / recommendations / limitations"]
+    SA --> TOOL["Tool Runtime\nvalidation / timeout / fallback"]
+    MA --> TOOL
 
-    API --> FB["Feedback / Eval / Benchmark"]
-    FB --> DB[("MySQL")]
+    TOOL --> METRIC["Metric Tool"]
+    METRIC --> PROM["Prometheus HTTP API"]
+    METRIC -. optional .-> MCP["MCP Client"]
+    MCP -. optional .-> MCPPROM["Prometheus MCP Server"]
+    MCPPROM -.-> PROM
 
-    API -. "/metrics" .-> PROM["Prometheus"]
-    PROM --> GF["Grafana"]
-    API -. "OTel spans" .-> JAE["Jaeger"]
+    TOOL --> LOGS["Log Tool"]
+    LOGS --> ESLOG["Elasticsearch Logs"]
+
+    TOOL --> TRACES["Trace Tool"]
+    TRACES --> JAEGER["Jaeger"]
+
+    RAG --> ESKB["Elasticsearch Knowledge"]
+
+    API --> REDIS["Redis\nrecent messages + summary"]
+    API --> MYSQL["MySQL\nlong-term memory / feedback / eval"]
+
+    API -. runtime metrics .-> PROM
+    PROM --> GRAFANA["Grafana"]
+    API -. OpenTelemetry .-> JAEGER
+```
+
+Key design boundary:
+
+- The Agent sees stable tool names such as `query_metrics`, `query_logs`, `query_traces`, and `search_knowledge`.
+- Tool implementation details, including Prometheus HTTP vs MCP, stay below the Tool Runtime layer.
+- Logs, traces, knowledge, Redis, and MySQL remain local Go integrations in the current project.
+
+---
+
+## Core Features
+
+| Feature | User Value |
+|---|---|
+| Evidence-driven diagnosis | The Agent explains what it observed, what it inferred, and what still needs verification. |
+| Hybrid Retrieval | Combines keyword retrieval, optional vector retrieval, fusion, and reranking to improve runbook recall. |
+| Role-aware Multi-Agent | Triage, Evidence, Knowledge, and Synthesis roles focus on different parts of the investigation. |
+| Short-term and long-term memory | Redis keeps session context while MySQL stores reusable feedback, cases, profiles, and memory. |
+| MCP-based Metrics | The Metric Tool can use either native Prometheus HTTP or a Prometheus MCP provider without changing the Agent contract. |
+| Tool Runtime safety | Tool calls use schema validation, timeouts, fallback, structured errors, output normalization, and tracing. |
+| Local observability stack | OpenTelemetry, Jaeger, Prometheus, and Grafana make Agent execution inspectable. |
+| Demo-ready workflow | Docker Compose and scripts seed knowledge, logs, metrics, traces, feedback, eval cases, and benchmark data. |
+
+---
+
+## System Workflow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Web Console
+    participant API as Gin API
+    participant Intent
+    participant Agent
+    participant RAG as Hybrid RAG
+    participant Tools as Tool Runtime
+    participant Obs as Observability
+
+    User->>UI: Ask an incident question
+    UI->>API: POST /api/v1/chat or SSE stream
+    API->>Intent: Classify query and extract hints
+    API->>RAG: Retrieve relevant runbooks and memories
+    API->>Agent: Build prompt with context and skill cards
+    Agent->>Tools: Call read-only tools
+    Tools-->>Agent: Normalized evidence or structured errors
+    Agent->>API: Evidence-bound diagnosis
+    API->>Obs: Emit spans and runtime metrics
+    API-->>UI: Answer, evidence, tool runs, limitations
 ```
 
 ---
 
-## 5. Docker Compose 本地环境
+## Single-Agent Workflow
 
-项目通过 Docker Compose 编排完整本地依赖环境，方便面试或 Review 时一键复现。
+The default Chat API uses one Eino ReAct Agent. It sees the full context and decides which tools to call while staying behind the Tool Runtime guardrails.
 
 ```mermaid
 flowchart TB
-    DEV["Developer Machine"] --> GO["WatchOps-Lite Backend\nlocalhost:8080"]
+    U["User"] --> I["Intent"]
+    I --> S["Skill Selection\nbounded diagnostic guidance"]
+    S --> R["Hybrid RAG\npre-retrieved context"]
+    R --> T["Tool Calling\nmetrics / logs / traces / knowledge"]
+    T --> M["Memory\nRedis + MySQL"]
+    M --> A["Answer\nevidence + recommendation + limitations"]
+```
 
-    subgraph COMPOSE["Docker Compose Services"]
-        REDIS["Redis\n6379"]
-        MYSQL["MySQL\n3306"]
-        ES["Elasticsearch\n9200"]
-        PROM["Prometheus\n9090"]
-        GRAF["Grafana\n3000"]
-        JAEGER["Jaeger\n16686"]
-        DEMO["demo-metrics\n9108"]
+Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
+
+---
+
+## Multi-Agent Workflow
+
+Multi-Agent mode keeps the same tool contracts but splits the reasoning work by role. Each role receives different role skill cards, so the system can demonstrate clear responsibility boundaries without adding a heavy planner or policy engine.
+
+```mermaid
+flowchart TB
+    U["User"] --> I["Intent"]
+    I --> P["Role Plan\nselected roles + role skill cards"]
+    P --> T["Triage Agent\nscope / hypotheses / evidence plan"]
+    T --> E["Evidence Agent\nmetrics / logs / traces / alerts / topology"]
+    T --> K["Knowledge Agent\nrunbooks / historical memory"]
+    E --> S["Synthesis Agent\nevidence-bound final answer"]
+    K --> S
+    S --> F["Final Answer"]
+```
+
+Role boundaries:
+
+- Triage does not claim the final root cause.
+- Evidence analyzes observed signals.
+- Knowledge treats runbooks and memory as guidance, not current facts.
+- Synthesis combines findings and must preserve evidence boundaries.
+
+---
+
+## Hybrid RAG Pipeline
+
+Knowledge retrieval is centered on `HybridRetrieve()`. It is the main knowledge path for both pre-RAG context and `search_knowledge` tool calls.
+
+```mermaid
+flowchart LR
+    Q["User Query"] --> I["Intent"]
+    I --> RW["Query Rewrite"]
+    RW --> BM25["Keyword Search\nBM25"]
+    RW --> VEC["Vector Search\nElasticsearch dense_vector / kNN"]
+    BM25 --> FUSE["RRF Fusion"]
+    VEC --> FUSE
+    FUSE --> DEDUPE["Deduplication"]
+    DEDUPE --> RR["Rerank\nrule today, external/cross-encoder-ready"]
+    RR --> TOPK["Top-K Context"]
+    TOPK --> LLM["LLM / Agent"]
+```
+
+The current implementation supports:
+
+- BM25-only mode.
+- Optional vector search when embeddings are configured.
+- Hybrid fusion with reciprocal-rank-style scoring.
+- Deduplication at retrieval time to handle historical duplicate chunks.
+- Reranking with a rule-based default and extension points for stronger rerankers.
+- BM25 fallback when embeddings or vector search are unavailable.
+
+---
+
+## Memory Architecture
+
+WatchOps-Lite keeps short-lived conversation state and durable troubleshooting memory separate.
+
+```mermaid
+flowchart TB
+    subgraph RedisMemory["Redis session memory"]
+        R1["Recent Messages"] --> R2["Rolling Conversation Summary"]
+        R2 --> R3["Role Context"]
+        R3 --> R4["Agent Prompt"]
     end
 
-    GO --> REDIS
-    GO --> MYSQL
-    GO --> ES
-    GO --> PROM
-    GO --> JAEGER
-    PROM --> GO
-    PROM --> DEMO
-    GRAF --> PROM
+    subgraph MySQLMemory["MySQL durable memory"]
+        M1["Long-term Memory"] --> M2["Knowledge Injection"]
+        M3["Feedback"] --> M4["Eval Candidates"]
+        M5["User Profile"] --> M2
+    end
+
+    R4 --> P["Prompt Context"]
+    M2 --> P
 ```
 
-| 服务 | 端口 | 作用 |
-|---|---:|---|
-| WatchOps-Lite Backend | 8080 | Chat API、Web Console、`/healthz`、`/metrics` |
-| Redis | 6379 | 短期会话记忆 |
-| MySQL | 3306 | 长期记忆、用户画像、feedback、eval |
-| Elasticsearch | 9200 | 日志和知识库检索 |
-| Prometheus | 9090 | 指标采集和查询 |
-| Grafana | 3000 | 运行时监控看板 |
-| Jaeger | 16686 | Trace 可视化 |
-| demo-metrics | 9108 | checkout/payment 模拟业务指标 |
-
-启动依赖：
-
-```bash
-docker compose up -d --wait
-docker compose ps
-```
-
-创建本地配置：
-
-```bash
-cp configs/config.example.json configs/config.local.json
-```
-
-启动后端：
-
-```bash
-make run CONFIG=configs/config.local.json
-```
-
-健康检查：
-
-```bash
-curl --fail-with-body http://localhost:8080/healthz
-```
-
-检查后端 Prometheus metrics：
-
-```bash
-curl http://localhost:8080/metrics | head
-```
-
-停止依赖：
-
-```bash
-docker compose down
-```
+Redis is optimized for bounded session continuity. MySQL stores durable records such as long-term memory, feedback, eval seeds, user profiles, and audit-friendly metadata.
 
 ---
-
-## 6. Agent 调用链路
-
-### 6.1 Single-Agent 主链路
-
-默认 `/api/v1/chat` 使用 Single-Agent 链路。一个 ReAct Agent 会在完整上下文中选择工具、收集证据并生成回答。
-
-```mermaid
-flowchart TB
-    Q["User Question"] --> N["normalize input"]
-    N --> I["recognize intent"]
-    I --> S1["load Redis session context"]
-    I --> S2["load MySQL long-term memory"]
-    I --> S3["load user profile"]
-    I --> S4["prepare diagnostic skills"]
-    I --> S5["multi-query pre-RAG"]
-
-    S1 --> M["merge context"]
-    S2 --> M
-    S3 --> M
-    S4 --> M
-    S5 --> M
-
-    M --> P["render prompt"]
-    P --> A["ReAct Agent"]
-    A --> T["query metrics / logs / traces / knowledge / alerts / topology"]
-    T --> E["collect and process evidence"]
-    E --> W["persist session memory"]
-    W --> R["build response"]
-```
-
-这个链路适合普通对话和快速排障。它的重点是：一个 Agent 看到较完整的上下文，并通过工具调用拿到真实证据。
-
-### 6.2 Multi-Agent 诊断链路
-
-复杂排障可以切换到 Multi-Agent 模式，把任务拆成多个角色。
-
-```mermaid
-flowchart TB
-    Q["User Question"] --> I["Intent Recognition"]
-    I --> PLAN["Agent Planning\nselected roles + role tools + role skill cards"]
-
-    PLAN --> TRI["Triage\n生成排查计划和候选原因"]
-    TRI --> EV["Evidence\n收集 metrics / logs / traces / alerts / topology"]
-    TRI --> KN["Knowledge\n检索 Runbook / 历史文档"]
-
-    EV --> MERGE["merge findings"]
-    KN --> MERGE
-    MERGE --> H["hypothesis evaluation\nsupported / weak / rejected"]
-    H --> SYN["Synthesis\n综合证据输出结论"]
-```
-
-Multi-Agent 当前支持 per-role skill cards。不同角色不会看到完全一样的工具提示，而是根据职责获得不同指导：
-
-| 角色 | 看到的重点 |
-|---|---|
-| Triage | 服务、症状、时间窗口、排查计划、候选原因 |
-| Evidence | 指标、日志、Trace、告警、拓扑证据 |
-| Knowledge | Runbook、历史文档、缓解建议 |
-| Synthesis | findings、processed evidence、hypothesis evaluation、limitations |
-
----
-
-## 7. 核心能力说明
-
-### 问题意图识别
-
-系统会先判断用户是在查指标、查日志、查 Trace、查知识库，还是在做综合故障排查。识别结果会影响后续工具选择、知识检索和 Multi-Agent 角色路由。
-
-例如用户问“checkout 服务错误率为什么升高”，系统会优先推荐查询指标、日志、告警和 Runbook，而不是盲目调用所有工具。
-
-### 工具调用与真实观测数据
-
-项目将常见排障动作封装成只读工具：
-
-- `query_metrics`：查询错误率、延迟、超时数等指标。
-- `query_logs`：查询 timeout、context deadline exceeded、error 等日志。
-- `query_traces`：查询慢 span 和依赖调用路径。
-- `search_knowledge`：检索 Runbook 和历史排障文档。
-- `query_alerts`：读取当前告警。
-- `get_service_topology`：获取上下游服务依赖关系。
-
-这些工具统一经过参数校验、超时控制、只读边界、错误标准化和敏感字段处理，避免 Agent 随意访问后端资源。
 
 ## MCP Integration
 
-WatchOps-Lite now supports a hybrid tool architecture for metrics:
+MCP is currently introduced only for metrics. The Metric Tool can route to either the existing local Prometheus HTTP implementation or an MCP-backed Prometheus provider.
 
 ```mermaid
-graph LR
-    A[User] --> B[Agent]
-    B --> C[Tool Registry]
-    C --> D[Metric Tool]
-    D --> E[MCP Client]
-    E --> F[Prometheus MCP Server]
-    F --> G[Prometheus]
+flowchart LR
+    MT["Metric Tool\nquery_metrics"] --> MC["MCP Client"]
+    MC --> PMS["Prometheus MCP Server"]
+    PMS --> P["Prometheus"]
+
+    LT["Log Tool"] --> LG["Local Go Tool\nElasticsearch"]
+    TT["Trace Tool"] --> JG["Local Go Tool\nJaeger"]
+    KT["Knowledge Tool"] --> KG["Local Go Tool\nElasticsearch RAG"]
 ```
 
-MCP is introduced only as an implementation path under the existing Metric Tool. The Agent still sees one `query_metrics` tool, while the tool can route to either the local Prometheus HTTP client or a Prometheus MCP Server.
+Why MCP is useful:
 
-Why MCP is useful here:
-
-- It decouples the Agent-facing tool contract from the monitoring platform integration.
-- It keeps the Tool Registry stable while allowing local Go tools and MCP-backed tools to coexist.
-- It prepares the project for future MCP integrations such as Grafana, Kubernetes, Jira, or incident-management systems.
+- It decouples the Agent-facing tool contract from monitoring platform integrations.
+- It allows local Go tools and MCP tools to coexist.
+- It prepares the project for future providers such as Grafana, Kubernetes, Jira, or incident-management systems.
 
 Configuration:
 
@@ -302,145 +265,196 @@ WATCHOPS_MCP_SERVER_URL=http://localhost:8081
 WATCHOPS_MCP_TIMEOUT=10s
 ```
 
-For convenience, the unprefixed aliases `MCP_ENABLED`, `MCP_SERVER_URL`, and `MCP_TIMEOUT` are also accepted.
+Unprefixed aliases are also accepted:
 
-When `WATCHOPS_MCP_ENABLED=false`, metrics keep using the existing local Go Prometheus HTTP implementation. When enabled, `query_metrics` calls the MCP tool `query_prometheus`; responses include `metric_provider: "mcp"` or `metric_provider: "http"` metadata so the UI can show the active metric source.
-
-All other integrations remain local Go tools in this phase:
-
-- Logs: Elasticsearch-backed local Go tool.
-- Traces: Jaeger-backed local Go tool.
-- Knowledge: Elasticsearch RAG local Go tool.
-- Redis and MySQL: local Go storage adapters.
-
-### 知识库辅助排障
-
-同一个故障可能被描述成“500 增多”“错误率升高”“支付超时”“checkout 不稳定”。项目会对用户问题生成多种查询表达，从知识库中召回相关 Runbook，再对结果进行去重、加权和排序，提升命中率。
-
-知识库提供排查步骤和处理建议，但不会替代真实证据。最终结论仍需要结合指标、日志、告警或 Trace。
-
-### 证据链整理
-
-工具结果不会直接拼进回答。系统会对 metrics、logs、alerts、topology、knowledge 等证据进行统一处理：
-
-- 去重。
-- 打分和排序。
-- 编号为 E1、E2、E3。
-- 按来源分组。
-- 在证据不足时输出 limitations。
-
-这样最终回答能够说明“结论基于哪些证据，还有哪些证据缺失”。
-
-### 记忆与数据分层
-
-项目把不同类型数据分开存储：
-
-- Redis：当前会话近期消息和滚动摘要，支持 TTL 自动过期。
-- MySQL：长期记忆、用户画像、反馈和评估用例。
-- Elasticsearch：日志和知识库文档。
-
-这样可以避免把会话、文档、日志和评估数据混在一起，后续维护和扩展更清晰。
-
----
-
-## 8. 演示入口
-
-启动 Compose 和后端后，可以打开：
-
-| 页面 | 地址 | 演示重点 |
-|---|---|---|
-| Agent Console | `http://localhost:8080/` | 对话、证据、工具调用、limitations、Single/Multi-Agent 切换 |
-| Prometheus Targets | `http://localhost:9090/targets` | `watchops-lite` 和 `watchops-demo` 是否为 UP |
-| Grafana Dashboard | `http://localhost:3000/d/watchops-lite/watchops-lite-runtime` | 请求量、工具调用、延迟、错误、fallback |
-| Jaeger | `http://localhost:16686` | 单次请求 Trace |
-
-推荐演示问题：
-
-```text
-checkout 服务错误率为什么升高？请结合指标、日志、告警和 runbook 给出有证据的诊断。
+```bash
+MCP_ENABLED=false
+MCP_SERVER_URL=http://localhost:8081
+MCP_TIMEOUT=10s
 ```
 
-演示顺序建议：
-
-1. 打开 README，看总体架构图和 Docker Compose 环境。
-2. 运行 `docker compose ps`，展示依赖服务已启动。
-3. 打开 Agent Console，发送推荐问题。
-4. 展示回答里的 evidence、tool runs、limitations、trace_id。
-5. 打开 Prometheus Targets，展示 `watchops-lite` 和 `watchops-demo` 为 UP。
-6. 打开 Grafana，展示请求量、工具调用和延迟。
-7. 打开 Jaeger，用 trace_id 查看单次请求链路。
-8. 展示 `make e2e-demo-zh` 的 PASS 输出。
+When MCP is disabled, behavior is identical to the native Prometheus HTTP path. When MCP is enabled, `query_metrics` calls MCP tool `query_prometheus`. Tool metadata includes `metric_provider: "mcp"` or `metric_provider: "http"` so the UI and traces can show the active provider.
 
 ---
 
-## 9. 一键 Demo 验证
+## Observability
 
-英文演示链路：
+The project is observable by design. A normal Chat request emits both distributed traces and runtime metrics.
+
+```mermaid
+flowchart LR
+    C["chat"] --> I["intent"]
+    I --> R["rag"]
+    R --> T["tool"]
+    T --> M["mcp.call\nwhen MCP metrics are enabled"]
+    T --> A["answer"]
+
+    C -. OpenTelemetry .-> J["Jaeger"]
+    C -. Prometheus metrics .-> P["Prometheus"]
+    P --> G["Grafana"]
+```
+
+Observability stack:
+
+- OpenTelemetry records spans for chat, intent, retrieval, tool execution, MCP calls, model calls, memory, eval, and fallback boundaries.
+- Jaeger visualizes request-level traces and role/tool timing.
+- Prometheus scrapes WatchOps-Lite runtime metrics from `/metrics`.
+- Grafana provides a starter dashboard for HTTP, chat, tool, RAG, memory, fallback, summary, and eval metrics.
+- Metric provider metadata distinguishes native HTTP metrics from MCP-backed metrics.
+
+---
+
+## Docker Compose
+
+### Architecture via Docker Compose
+
+The default Docker Compose environment starts the local infrastructure needed for the showcase demo:
+
+```mermaid
+flowchart TB
+    DEV["Developer Machine"] --> W["watchops\nGo backend + Web Console"]
+
+    subgraph Compose["Docker Compose"]
+        REDIS["redis"]
+        MYSQL["mysql"]
+        ES["elasticsearch"]
+        PROM["prometheus"]
+        GRAF["grafana"]
+        JAEGER["jaeger"]
+        DEMO["demo-metrics"]
+    end
+
+    W --> REDIS
+    W --> MYSQL
+    W --> ES
+    W --> PROM
+    W --> JAEGER
+    PROM --> DEMO
+    GRAF --> PROM
+
+    PMCP["prometheus-mcp\noptional external service"] -. MCP_ENABLED=true .-> W
+    PMCP -.-> PROM
+```
+
+Ports:
+
+| Service | URL | Purpose |
+|---|---|---|
+| WatchOps-Lite | `http://localhost:8080` | Web Console, Chat API, SSE, health, runtime metrics |
+| Redis | `localhost:6379` | Short-term session memory |
+| MySQL | `localhost:3306` | Long-term memory, feedback, eval cases |
+| Elasticsearch | `http://localhost:9200` | Knowledge and logs |
+| Prometheus | `http://localhost:9090` | Metrics backend and runtime metric scraping |
+| Grafana | `http://localhost:3000` | Runtime dashboard |
+| Jaeger | `http://localhost:16686` | Trace visualization |
+| demo-metrics | `http://localhost:9108` | Demo checkout/payment metrics |
+| Prometheus MCP Server | `http://localhost:8081` | Optional metrics provider when MCP is enabled |
+
+The current compose file includes the core local stack. A Prometheus MCP Server can be run beside it and enabled through MCP configuration.
+
+---
+
+## Quick Start
+
+### 1. Start local infrastructure
+
+```bash
+docker compose up -d --wait
+docker compose ps
+```
+
+### 2. Prepare local configuration
+
+```bash
+cp configs/config.example.json configs/config.local.json
+```
+
+Set an LLM key only when you want live LLM execution:
+
+```bash
+export WATCHOPS_LLM_API_KEY=your_api_key
+```
+
+### 3. Run the backend and Web Console
+
+```bash
+make run CONFIG=configs/config.local.json
+```
+
+Open:
+
+```text
+http://localhost:8080/
+```
+
+### 4. Seed demo data
+
+```bash
+./scripts/demo_seed_knowledge.sh
+./scripts/demo_seed_logs.sh
+./scripts/demo_metrics.sh
+```
+
+### 5. Run demo checks
 
 ```bash
 make e2e-demo
-```
-
-中文演示链路：
-
-```bash
 make e2e-demo-zh
-```
-
-Multi-Agent 演示链路：
-
-```bash
 make e2e-demo-multi
 make e2e-demo-multi-zh
 ```
 
-这些命令会验证：
-
-- 依赖服务和端口。
-- 后端健康检查。
-- 知识库 seed。
-- 日志 seed。
-- Prometheus demo metrics。
-- 普通 Chat。
-- SSE Chat。
-- Retrieval Eval。
-- Agent Eval。
-- Agent Benchmark。
-
-演示通过时会看到类似结果：
-
-```text
-End-to-end demo check passed
-Retrieval eval: passed
-Agent eval: passed
-Agent benchmark: successful
-```
-
----
-
-## 10. Grafana 演示流量
-
-如果 Grafana 上请求太少，可以运行一段轻量 demo load，用来制造可观测流量。它不是生产压测，只是为了让 request rate、tool calls 和 latency 图表更明显。
+### 6. Run developer verification
 
 ```bash
-for i in {1..10}; do
-  echo "request $i"
-  curl -s http://localhost:8080/api/v1/chat \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"message\":\"checkout 服务错误率为什么升高？请结合指标、日志、告警和 runbook 给出有证据的诊断。\",
-      \"session_id\":\"grafana-demo-session-$i\",
-      \"user_id\":\"demo-user\"
-    }" > /tmp/watchops-chat-$i.json
-  sleep 2
-done
+make fmt
+go mod tidy
+go test ./...
+go vet ./...
+git diff --check
+make verify
 ```
 
-展示 Grafana 时建议把右上角时间范围调成 `Last 15 minutes` 或 `Last 30 minutes`。
+Recommended demo question:
+
+```text
+Why did the checkout service error rate increase in the last 20 minutes?
+Use metrics, logs, traces, alerts, and runbook evidence.
+```
 
 ---
 
-## 11. API 示例
+## Screenshots
+
+The screenshots below were captured from the local demo environment. They focus on the main engineering story: console readiness, evidence-bound diagnosis, multi-agent collaboration, observability, and the feedback/eval loop.
+
+### Console Overview
+
+![Console Overview](docs/images/console-overview.png)
+
+### Single-Agent Diagnosis
+
+![Single-Agent Diagnosis](docs/images/single-agent-diagnosis.png)
+
+### Multi-Agent Workflow
+
+![Multi-Agent Workflow](docs/images/multi-agent-workflow.png)
+
+### Evidence Panel
+
+![Evidence Panel](docs/images/evidence-panel.png)
+
+### Jaeger Trace
+
+![Jaeger Trace](docs/images/jaeger-trace.png)
+
+### Feedback and Eval Loop
+
+![Feedback and Eval Loop](docs/images/feedback-eval-loop.png)
+
+---
+
+## API Examples
 
 ### Chat
 
@@ -464,24 +478,6 @@ curl -N --fail-with-body http://localhost:8080/api/v1/chat/stream \
     "message": "Why did checkout errors increase? Check metrics, logs, alerts, and the runbook."
   }'
 ```
-
-SSE 会返回受控的执行进度，例如图节点状态、工具调用状态、证据数量和最终结构化回答。它不会暴露 chain-of-thought、原始 Prompt、原始工具参数或未脱敏工具输出。
-
-### Chat History
-
-```bash
-curl --fail-with-body \
-  'http://localhost:8080/api/v1/chat/history?session_id=demo-checkout-session&limit=20'
-```
-
-清理当前 Redis 会话历史：
-
-```bash
-curl --fail-with-body -X DELETE \
-  'http://localhost:8080/api/v1/chat/history?session_id=demo-checkout-session'
-```
-
-这不会删除 MySQL 长期记忆、Elasticsearch 知识库、反馈或评估数据。
 
 ### Knowledge Search
 
@@ -511,112 +507,124 @@ curl --fail-with-body http://localhost:8080/api/v1/feedback \
 
 ---
 
-## 12. 开发与验证
-
-```bash
-make fmt
-go mod tidy
-go test ./...
-go vet ./...
-git diff --check
-```
-
-组合验证：
-
-```bash
-make verify
-```
-
-本地 Agent benchmark：
-
-```bash
-make benchmark-agent
-```
-
-benchmark 用于本地回归观察延迟、工具调用次数、证据数量和 fallback 信号，不代表生产容量压测。
-
----
-
-## 13. 项目结构
+## Project Structure
 
 ```text
 .
 ├── cmd/
-│   ├── server/                 # 服务入口
-│   ├── demo-metrics/           # 本地 Prometheus 模拟指标源
-│   └── agent-benchmark/        # 本地 Agent benchmark CLI
-├── configs/                    # 配置、Prometheus、Grafana provisioning
-├── demo/                       # 演示 Runbook 和日志数据
-├── docs/                       # 架构、API、ADR、Roadmap
-├── scripts/                    # Demo、seed、验证脚本
-├── web/                        # 无构建本地演示控制台
+│   ├── server/                 # Application entrypoint
+│   ├── demo-metrics/           # Demo Prometheus metric exporter
+│   ├── log-generator/          # Demo log generator
+│   ├── retrieval-eval/         # Retrieval eval CLI
+│   └── agent-benchmark/        # Local Agent benchmark CLI
+├── configs/                    # App config, Prometheus config, Grafana provisioning
+├── demo/                       # Demo runbooks and log data
+├── docs/                       # Architecture docs, ADRs, API docs, verification notes
+├── scripts/                    # Seed, demo, eval, and verification scripts
+├── web/                        # Vanilla Web Console served by the Go backend
 └── internal/
-    ├── transport/http/         # Gin 路由、中间件、DTO、Handler
-    ├── application/chat/       # Chat Graph 编排
-    ├── agent/eino/             # ReAct、Prompt、工具适配、fallback
-    ├── intent/                 # 意图识别、skills、RAG hints、工具建议
-    ├── multiagent/             # Triage / Evidence / Knowledge / Synthesis
-    ├── diagnosis/              # 假设生成与证据评估
-    ├── evidence/               # 证据去重、打分、编号、分组
-    ├── tools/                  # 工具契约和实现
-    ├── retrieval/              # 知识、日志、指标、Trace 检索
-    ├── memory/                 # Redis 短期记忆和 MySQL 长期记忆
-    ├── profile/                # 用户画像
-    ├── feedback/               # 用户反馈
-    ├── eval/                   # 评估用例和执行
-    ├── observability/          # OpenTelemetry 和日志
-    ├── platform/               # MySQL、Elasticsearch 等基础设施适配
-    ├── bootstrap/              # 依赖装配和生命周期
-    └── config/                 # 配置加载与校验
+    ├── transport/http/         # Gin router, middleware, DTOs, handlers
+    ├── application/chat/       # Chat workflow and graph orchestration
+    ├── agent/                  # Eino ReAct Agent, prompts, fallback, skills
+    ├── multiagent/             # Triage, Evidence, Knowledge, Synthesis roles
+    ├── intent/                 # Hybrid intent recognition and tool hints
+    ├── diagnosis/              # Hypothesis and evidence evaluation helpers
+    ├── evidence/               # Evidence normalization, dedupe, scoring, grouping
+    ├── tool/                   # Tool Runtime and guardrails
+    ├── tools/                  # Domain tools: metrics, logs, traces, knowledge, alerts, topology
+    ├── retrieval/              # Knowledge, logs, metrics, traces, embeddings, rerank
+    ├── memory/                 # Redis session memory and MySQL long-term memory
+    ├── mcp/                    # MCP client abstraction for optional provider integrations
+    ├── observability/          # OpenTelemetry tracing and Prometheus runtime metrics
+    ├── platform/               # Infrastructure adapters such as MySQL and Elasticsearch
+    ├── feedback/               # Feedback storage and API support
+    ├── eval/                   # Eval cases, runner, and result persistence
+    ├── profile/                # User profile context
+    ├── bootstrap/              # Composition root and lifecycle wiring
+    └── config/                 # Config loading, environment overrides, validation
 ```
 
----
+Module responsibilities:
 
-## 14. 当前边界
-
-- 这是本地面试和项目演示环境，不是生产级 AIOps 平台。
-- 不包含自动修复、自动扩缩容、生产告警派单或权限系统。
-- 工具调用保持只读边界，不执行变更操作。
-- Grafana dashboard 偏演示用途，不是完整生产 SRE 看板。
-- Trace、日志、指标后端在不可用时会给出明确 fallback 或 limitation。
-- Eval 当前偏规则化回归验证，LLM-as-judge 和大规模 A/B 评估未作为当前目标。
-- MCP 当前只作为 Metric Tool 的可选底层实现；动态插件发现、自动策略学习不是当前项目范围。
-
----
-
-## 15. Roadmap
-
-- 扩充检索评估集和更多 Runbook 场景。
-- 增强 Trace 关键路径分析和服务依赖图分析。
-- 增加 Eval 对比报告和可选 LLM judge。
-- 优化 Grafana dashboard，增加更多工具延迟、fallback 和 evidence 指标。
-- 将 Multi-Agent per-role skill cards 与前端角色卡展示进一步打通。
+- `internal/agent`: Agent-facing orchestration, prompts, skills, ReAct runner, and deterministic fallback.
+- `internal/multiagent`: Role-based diagnostic flow with bounded responsibilities.
+- `internal/intent`: Query classification, hints, and role/tool routing signals.
+- `internal/retrieval`: Search and retrieval backends, including Hybrid RAG.
+- `internal/memory`: Redis short-term memory and MySQL durable memory.
+- `internal/mcp`: Provider-neutral MCP client abstraction.
+- `internal/observability`: Tracing and runtime metrics.
+- `web`: Build-free console for demo and interview walkthroughs.
 
 ---
 
-## 16. Design Documents
+## Demo Checklist
+
+For a polished walkthrough:
+
+1. Open the Web Console at `http://localhost:8080/`.
+2. Ask the recommended checkout incident question.
+3. Show Single-Agent output: evidence, tool calls, limitations, and trace ID.
+4. Switch to Multi-Agent and show role-level execution.
+5. Open Prometheus targets and verify `watchops-lite` and `watchops-demo`.
+6. Open Grafana and show HTTP/chat/tool/RAG/fallback metrics.
+7. Open Jaeger and inspect the request trace.
+8. Mention MCP metrics as an optional provider path under the same `query_metrics` tool.
+
+---
+
+## Current Boundaries
+
+- This is a local showcase and interview project, not a production AIOps platform.
+- Tool calls are read-only. The system does not restart, scale, deploy, rollback, or mutate external systems.
+- MCP is currently optional and only implemented for metrics.
+- Logs, traces, knowledge, Redis, and MySQL remain local Go integrations.
+- Grafana dashboards are starter dashboards for demos, not production SRE dashboards.
+- Rule-based eval is included; LLM-as-judge and large-scale A/B testing are future work.
+
+---
+
+## Future Roadmap
+
+- Kubernetes Deployment: add manifests or Helm charts for a realistic deployment story.
+- Streaming Response: further polish front-end streaming summaries and role progress.
+- Multi-modal Incident Analysis: support screenshots, charts, and incident artifacts as future inputs.
+- More MCP Providers: add optional Grafana, Kubernetes, Jira, or incident-management MCP integrations.
+- Auto Evaluation Pipeline: expand feedback-to-eval automation and regression reporting.
+- Stronger Reranking: plug in external/cross-encoder rerankers when model access is available.
+
+---
+
+## Design Documents
 
 - [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [HTTP API](docs/API.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Project Structure](docs/STRUCTURE.md)
+- [Demo Verification](docs/demo-verification.md)
+- [Retrieval Evaluation](docs/retrieval-evaluation.md)
+- [Performance Report](docs/performance-report.md)
+
+Key ADRs:
+
+- [ADR 0001: Framework and Stack](docs/adr/0001-framework-and-stack.md)
 - [ADR 0008: Eino ReAct Agent](docs/adr/0008-eino-react-agent.md)
-- [ADR 0009: MVP Demo Packaging](docs/adr/0009-mvp-demo-packaging.md)
 - [ADR 0010: Elasticsearch-backed Logs Tool](docs/adr/0010-elasticsearch-logs-tool.md)
 - [ADR 0011: Prometheus-backed Metrics Tool](docs/adr/0011-prometheus-metrics-tool.md)
 - [ADR 0012: Jaeger-backed Traces Tool](docs/adr/0012-jaeger-traces-tool.md)
-- [ADR 0013: LLM Session Summary](docs/adr/0013-llm-session-summary.md)
 - [ADR 0014: Hybrid Knowledge Retrieval](docs/adr/0014-hybrid-knowledge-retrieval.md)
 - [ADR 0015: Rule-based Eval Runner](docs/adr/0015-eval-runner.md)
 - [ADR 0016: Runtime Prometheus Metrics](docs/adr/0016-runtime-prometheus-metrics.md)
 - [ADR 0017: Grafana Dashboard](docs/adr/0017-grafana-dashboard.md)
+- [ADR 0018: Eino Multi-Agent Demo](docs/adr/0018-eino-multi-agent-demo.md)
 
 ---
 
 ## Originality
 
 WatchOps-Lite is independently designed from its product requirements. It does not copy Pilot or training-camp project source code, structure, prompts, comments, or documentation.
+
+---
 
 ## License
 

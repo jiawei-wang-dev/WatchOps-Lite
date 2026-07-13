@@ -81,6 +81,44 @@ func TestMapChatResponseAddsFinalDiagnosisForSingleAgent(t *testing.T) {
 	}
 }
 
+func TestSingleAgentFinalDiagnosisKeepsLongTermLoadedAndEvidenceCountsSeparate(t *testing.T) {
+	response := mapChatResponse(applicationchat.Result{
+		RequestID: "req-memory",
+		SessionID: "session-memory",
+		Agent: agenteino.AgentOutput{
+			Evidence: []common.EvidenceItem{{
+				ID:         "metrics-1",
+				SourceType: "metrics",
+				SourceName: "prometheus",
+				Content:    "watchops_checkout_error_rate=0.062",
+				ResourceID: "checkout",
+			}},
+			Metadata: map[string]any{
+				"requested_language":              "en-US",
+				"long_term_memory_available":      true,
+				"long_term_memory_loaded_count":   2,
+				"long_term_memory_count":          2,
+				"long_term_memory_not_configured": false,
+			},
+		},
+	})
+
+	if response.Metadata["long_term_memory_loaded_count"] != 2 ||
+		response.Metadata["long_term_memory_count"] != 2 {
+		t.Fatalf("loaded metadata = %#v", response.Metadata)
+	}
+	if response.Metadata["long_term_memory_evidence_count"] != 0 {
+		t.Fatalf("evidence count = %v, want 0", response.Metadata["long_term_memory_evidence_count"])
+	}
+	diagnosis, ok := response.Metadata["final_diagnosis"].(multiagent.FinalDiagnosis)
+	if !ok {
+		t.Fatalf("final_diagnosis type = %T", response.Metadata["final_diagnosis"])
+	}
+	if diagnosis.Metadata["long_term_memory_evidence_count"] != 0 {
+		t.Fatalf("diagnosis metadata = %#v", diagnosis.Metadata)
+	}
+}
+
 func TestSingleAgentFinalDiagnosisUsesResponseLanguage(t *testing.T) {
 	response := mapChatResponse(applicationchat.Result{
 		RequestID: "req-zh",

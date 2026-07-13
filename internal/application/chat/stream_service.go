@@ -55,9 +55,10 @@ func (s *Service) Stream(
 	traceID := result.TraceID
 	if traceID != "" {
 		safeEmit("memory_loaded", map[string]any{
-			"trace_id":                 traceID,
-			"session_memory_available": result.Agent.Metadata["session_memory_available"],
-			"long_term_memory_count":   result.Agent.Metadata["long_term_memory_count"],
+			"trace_id":                      traceID,
+			"session_memory_available":      result.Agent.Metadata["session_memory_available"],
+			"long_term_memory_loaded_count": result.Agent.Metadata["long_term_memory_loaded_count"],
+			"long_term_memory_count":        result.Agent.Metadata["long_term_memory_count"],
 		})
 	}
 	safeEmit("evidence_collected", map[string]any{

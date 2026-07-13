@@ -519,6 +519,9 @@ func (s *Service) collectToolEvidenceGraphNode(
 		s.longTermMemory != nil && !state.longTermMemoryUnavailable
 	state.agentOutput.Metadata["long_term_memory_not_configured"] =
 		s.longTermMemory == nil
+	state.agentOutput.Metadata["long_term_memory_loaded_count"] = len(state.longTermMemories)
+	// Keep the legacy key as the prompt-loaded memory count. Final diagnosis
+	// evidence usage is tracked separately as long_term_memory_evidence_count.
 	state.agentOutput.Metadata["long_term_memory_count"] = len(state.longTermMemories)
 	state.agentOutput.Metadata["pre_rag_used"] = state.agentInput.PreRAGAvailable
 	state.agentOutput.Metadata["pre_rag_chunk_count"] = len(state.agentInput.PreRetrievedKnowledge)

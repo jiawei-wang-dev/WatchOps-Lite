@@ -1926,7 +1926,8 @@ function renderMemoryContext(response) {
   const sessionAvailable = metadata.session_memory_available;
   const longTermAvailable = metadata.long_term_memory_available;
   const longTermNotConfigured = metadata.long_term_memory_not_configured === true;
-  const longTermCount = safeNumber(metadata.long_term_memory_count) ?? memoryEvidence.length;
+  const longTermCount = longTermMemoryLoadedCount(metadata) ?? memoryEvidence.length;
+  const longTermEvidenceCount = safeNumber(metadata.long_term_memory_evidence_count) ?? memoryEvidence.length;
   const memoryMatchMessage = longTermCount > 0 ?
     t("memory.long_term_loaded", { count: longTermCount }) :
     longTermNotConfigured ? t("status.mysql_not_configured") : t("memory.no_long_term_match");
@@ -1937,7 +1938,7 @@ function renderMemoryContext(response) {
       <article><span>${escapeHtml(t("dynamic.long_term_memory"))}</span><strong>${escapeHtml(longTermNotConfigured ? t("status.mysql_not_configured") : availabilityLabel(longTermAvailable))}</strong></article>
     </div>
     <div class="inline-note ${longTermCount > 0 ? "success-note" : "info-note"}">${escapeHtml(memoryMatchMessage)}</div>
-    ${memoryEvidence.length
+    ${longTermEvidenceCount > 0 && memoryEvidence.length
       ? memoryEvidence.map((item) => `<div class="evidence-row"><p>${escapeHtml(item?.content || t("dynamic.memory_unavailable"))}</p><div class="evidence-meta"><span>${escapeHtml(item?.id || "memory")}</span></div></div>`).join("")
       : `<div class="inline-note">${escapeHtml(t("dynamic.no_memory_evidence"))}</div>`}
     <details><summary>${escapeHtml(t("dynamic.visible_chat_metadata"))}</summary><pre>${escapeHtml(safeJson(metadata))}</pre></details>`;
@@ -2127,7 +2128,7 @@ function historyExecutionMode(exchange) {
 
 function renderLongTermMemoryPanel() {
   const metadata = state.latestChatResponse?.metadata || {};
-  const count = safeNumber(metadata.long_term_memory_count) ?? 0;
+  const count = longTermMemoryLoadedCount(metadata) ?? 0;
   const unavailable = metadata.long_term_memory_not_configured === true;
   return `<div class="inline-note ${count > 0 ? "success-note" : "info-note"}">
     ${escapeHtml(count > 0 ? t("memory.long_term_loaded", { count }) :
@@ -2433,7 +2434,7 @@ function updateRuntimeContext() {
 
   const metadata = response?.metadata || {};
   const recentCount = safeNumber(metadata.recent_message_count);
-  const longTermCount = safeNumber(metadata.long_term_memory_count);
+  const longTermCount = longTermMemoryLoadedCount(metadata);
   byId("memory-pills").innerHTML = [
     memoryPill("Redis", metadata.session_memory_available, recentCount),
     memoryPill(
@@ -2488,7 +2489,7 @@ function renderRuntimeStatuses() {
         t("status.unknown");
   setRuntimeStatus("status-redis", redisState, redisLabel);
 
-  const longTermCount = safeNumber(metadata.long_term_memory_count);
+  const longTermCount = longTermMemoryLoadedCount(metadata);
   const longTermKnown = metadata.long_term_memory_available !== undefined ||
     metadata.long_term_memory_not_configured !== undefined ||
     longTermCount !== null;
@@ -2750,6 +2751,11 @@ function safeNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function longTermMemoryLoadedCount(metadata) {
+  return safeNumber(metadata?.long_term_memory_loaded_count) ??
+    safeNumber(metadata?.long_term_memory_count);
 }
 
 function safeJson(value) {

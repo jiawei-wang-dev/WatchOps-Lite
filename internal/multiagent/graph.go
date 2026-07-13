@@ -973,6 +973,7 @@ func (o *Orchestrator) buildResponse(
 		"hypotheses":                     input.Merged.Merged.Plan.Hypotheses,
 		"hypothesis_count":               len(input.Merged.Merged.Plan.Hypotheses.Items),
 		"long_term_memory_available":     metadataBool(knowledgeMetadata, "long_term_memory_available"),
+		"long_term_memory_loaded_count":  metadataInt(knowledgeMetadata, "long_term_memory_count"),
 		"long_term_memory_count":         metadataInt(knowledgeMetadata, "long_term_memory_count"),
 		"long_term_memory_not_configured": metadataBool(
 			knowledgeMetadata,
@@ -988,7 +989,7 @@ func (o *Orchestrator) buildResponse(
 			"limitation_count",
 			"live_evidence_count",
 			"knowledge_evidence_count",
-			"long_term_memory_count",
+			"long_term_memory_evidence_count",
 			"fallback_evidence_count",
 			"total_evidence_count",
 		} {
