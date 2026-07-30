@@ -5,19 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Case struct {
-	ID                 string   `json:"id"`
-	Query              string   `json:"query"`
-	Service            string   `json:"service,omitempty"`
-	ExpectedDocID      string   `json:"expected_doc_id,omitempty"`
-	ExpectedChunkID    string   `json:"expected_chunk_id,omitempty"`
-	ExpectedKeywords   []string `json:"expected_keywords"`
-	ExpectedSourceType string   `json:"expected_source_type"`
-	Notes              string   `json:"notes,omitempty"`
+	ID                  string   `json:"id"`
+	Query               string   `json:"query"`
+	Service             string   `json:"service,omitempty"`
+	ExpectedDocID       string   `json:"expected_doc_id,omitempty"`
+	ExpectedChunkID     string   `json:"expected_chunk_id,omitempty"`
+	RelevantDocumentIDs []string `json:"relevant_document_ids,omitempty"`
+	RelevantChunkIDs    []string `json:"relevant_chunk_ids,omitempty"`
+	ExpectedKeywords    []string `json:"expected_keywords"`
+	ExpectedSourceType  string   `json:"expected_source_type"`
+	Notes               string   `json:"notes,omitempty"`
 }
 
 type SearchResult struct {
@@ -54,14 +58,26 @@ type CaseResult struct {
 	Error                string         `json:"error,omitempty"`
 	Notes                string         `json:"notes,omitempty"`
 	Metadata             map[string]any `json:"metadata,omitempty"`
+	LatencyMS            float64        `json:"latency_ms"`
+	RelevantFound        int            `json:"relevant_found"`
+	RelevantTotal        int            `json:"relevant_total"`
+	ReciprocalRank       float64        `json:"reciprocal_rank"`
+	NDCG                 float64        `json:"ndcg"`
 }
 
 type Report struct {
-	Total    int          `json:"total"`
-	Passed   int          `json:"passed"`
-	Failed   int          `json:"failed"`
-	PassRate float64      `json:"pass_rate"`
-	Cases    []CaseResult `json:"cases"`
+	Total            int          `json:"total"`
+	Passed           int          `json:"passed"`
+	Failed           int          `json:"failed"`
+	PassRate         float64      `json:"pass_rate"`
+	HitRateAtK       float64      `json:"hit_rate_at_k"`
+	RecallAtK        float64      `json:"recall_at_k"`
+	MRR              float64      `json:"mrr"`
+	NDCGAtK          float64      `json:"ndcg_at_k"`
+	AverageLatencyMS float64      `json:"average_latency_ms"`
+	P95LatencyMS     float64      `json:"p95_latency_ms"`
+	EmptyRecallCount int          `json:"empty_recall_count"`
+	Cases            []CaseResult `json:"cases"`
 }
 
 func LoadCases(reader io.Reader) ([]Case, error) {
@@ -93,6 +109,8 @@ func Evaluate(
 		topK = 5
 	}
 	report := Report{Total: len(cases), Cases: make([]CaseResult, 0, len(cases))}
+	latencies := make([]float64, 0, len(cases))
+	relevantFound, relevantTotal := 0, 0
 	for _, current := range cases {
 		result := evaluateCase(ctx, searcher, current, topK)
 		if result.Hit {
@@ -101,9 +119,30 @@ func Evaluate(
 			report.Failed++
 		}
 		report.Cases = append(report.Cases, result)
+		report.MRR += result.ReciprocalRank
+		report.NDCGAtK += result.NDCG
+		report.AverageLatencyMS += result.LatencyMS
+		relevantFound += result.RelevantFound
+		relevantTotal += result.RelevantTotal
+		latencies = append(latencies, result.LatencyMS)
+		if result.EmptyRecall {
+			report.EmptyRecallCount++
+		}
 	}
 	if report.Total > 0 {
 		report.PassRate = float64(report.Passed) / float64(report.Total)
+		report.HitRateAtK = report.PassRate
+		report.MRR /= float64(report.Total)
+		report.NDCGAtK /= float64(report.Total)
+		report.AverageLatencyMS /= float64(report.Total)
+	}
+	if relevantTotal > 0 {
+		report.RecallAtK = float64(relevantFound) / float64(relevantTotal)
+	}
+	sort.Float64s(latencies)
+	if len(latencies) > 0 {
+		index := int(math.Ceil(float64(len(latencies))*0.95)) - 1
+		report.P95LatencyMS = latencies[index]
 	}
 	return report
 }
@@ -113,8 +152,9 @@ func evaluateCase(
 	searcher Searcher,
 	current Case,
 	topK int,
-) CaseResult {
-	result := CaseResult{
+) (result CaseResult) {
+	started := time.Now()
+	result = CaseResult{
 		ID:                 current.ID,
 		Query:              current.Query,
 		ExpectedSourceType: current.ExpectedSourceType,
@@ -123,6 +163,7 @@ func evaluateCase(
 		MatchedKeywords:    []string{},
 		Metadata:           map[string]any{},
 	}
+	defer func() { result.LatencyMS = float64(time.Since(started).Nanoseconds()) / 1e6 }()
 	if searcher == nil {
 		result.Error = "searcher is unavailable"
 		result.EmptyRecall = true
@@ -160,6 +201,8 @@ func evaluateCase(
 		"rerank_fallback_reason",
 	)
 	result.Metadata["top_score"] = results[0].Score
+	result.RelevantFound, result.RelevantTotal, result.ReciprocalRank, result.NDCG =
+		relevanceMetrics(current, results)
 	result.Hit = isHit(current, results, result.MatchedKeywords)
 	return result
 }
@@ -189,6 +232,10 @@ func MatchKeywords(expected []string, results []SearchResult) []string {
 }
 
 func isHit(current Case, results []SearchResult, matchedKeywords []string) bool {
+	if len(current.RelevantChunkIDs)+len(current.RelevantDocumentIDs) > 0 {
+		found, _, _, _ := relevanceMetrics(current, results)
+		return found > 0
+	}
 	if current.ExpectedChunkID != "" || current.ExpectedDocID != "" {
 		for _, result := range results {
 			if current.ExpectedChunkID != "" && result.ChunkID == current.ExpectedChunkID {
@@ -204,6 +251,60 @@ func isHit(current Case, results []SearchResult, matchedKeywords []string) bool 
 		return len(results) > 0
 	}
 	return len(matchedKeywords) == len(uniqueKeywords(current.ExpectedKeywords))
+}
+
+func relevanceMetrics(current Case, results []SearchResult) (int, int, float64, float64) {
+	relevant := map[string]struct{}{}
+	for _, value := range append(
+		append([]string{}, current.RelevantChunkIDs...),
+		current.RelevantDocumentIDs...,
+	) {
+		if value = strings.TrimSpace(value); value != "" {
+			relevant[value] = struct{}{}
+		}
+	}
+	if current.ExpectedChunkID != "" {
+		relevant[current.ExpectedChunkID] = struct{}{}
+	}
+	if current.ExpectedDocID != "" {
+		relevant[current.ExpectedDocID] = struct{}{}
+	}
+	if len(relevant) == 0 {
+		return 0, 0, 0, 0
+	}
+	found, firstRank, dcg := 0, 0, 0.0
+	seen := map[string]struct{}{}
+	for index, result := range results {
+		matched := false
+		for _, id := range []string{result.ChunkID, result.DocumentID} {
+			if _, ok := relevant[id]; ok {
+				if _, duplicate := seen[id]; !duplicate {
+					seen[id] = struct{}{}
+					found++
+					matched = true
+				}
+			}
+		}
+		if matched {
+			if firstRank == 0 {
+				firstRank = index + 1
+			}
+			dcg += 1 / math.Log2(float64(index+2))
+		}
+	}
+	rr := 0.0
+	if firstRank > 0 {
+		rr = 1 / float64(firstRank)
+	}
+	ideal := 0.0
+	for index := 0; index < min(len(relevant), len(results)); index++ {
+		ideal += 1 / math.Log2(float64(index+2))
+	}
+	ndcg := 0.0
+	if ideal > 0 {
+		ndcg = dcg / ideal
+	}
+	return found, len(relevant), rr, ndcg
 }
 
 func topKIDs(results []SearchResult) []string {

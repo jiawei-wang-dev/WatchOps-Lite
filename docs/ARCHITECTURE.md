@@ -91,20 +91,43 @@ The application compiles and invokes `compose.Graph[chat.Command, chat.Result]`.
 ```text
 workflow.chat
 ├── graph.normalize_chat_input
-├── fan-out
+├── graph.load_session_focus
+├── graph.recognize_intent
+├── graph.validate_slots
+├── clarify
+│   ├── graph.build_clarification_response
+│   ├── graph.persist_clarification_state
+│   └── END
+├── proceed / fan-out
 │   ├── graph.load_session_context
 │   ├── graph.load_long_term_memory
 │   ├── graph.prepare_diagnostic_skills
-│   └── graph.load_user_profile
+│   ├── graph.load_user_profile
+│   └── graph.pre_retrieve_knowledge
 ├── graph.merge_context
 ├── graph.render_prompt_template
 ├── graph.run_react_agent
 ├── graph.collect_tool_evidence
 ├── graph.persist_session_memory
+├── graph.persist_session_focus
 └── graph.build_chat_response
 ```
 
-After input normalization, Eino fans out the independent context branches and schedules them eagerly. `graph.merge_context` uses native fan-in with `AllPredecessor`, so prompt rendering starts only after all branch outputs are available. This is a native Eino DAG, not a custom workflow wrapper, and production code does not add goroutines to simulate graph concurrency.
+After input normalization, `graph.load_session_focus` loads only bounded,
+intent-safe state: confirmed slots, pending question, candidates, turn status,
+short summary, evidence IDs, and at most six non-tool messages of 300 runes.
+`graph.recognize_intent` receives this typed Focus, then
+`graph.validate_slots` uses deterministic `SlotRule` policy. Eino's formal
+branch routes incomplete or ambiguous requests to a tool-free clarification
+response and persists `TurnStatus=clarify`; otherwise it fans out the existing
+independent context branches. `graph.merge_context` uses native fan-in with
+`AllPredecessor`.
+
+Slot precedence is current user input, structured Chat command, confirmed
+Session Focus, then explicitly allowed defaults. Service, Trace ID, identity,
+tenant, production scope, and write targets have no defaults. Redis Focus
+failure records `SESSION_FOCUS_*` telemetry, reuses the memory-unavailable
+metric, and continues recognition with the current message.
 
 `graph.render_prompt_template` calls the native Eino `DefaultChatTemplate`. `graph.run_react_agent` delegates to the configured Eino ReAct runner or deterministic fallback. Evidence normalization still belongs to the runners and unified evidence layer. Session failures retain the existing single-turn degradation behavior.
 
@@ -194,14 +217,20 @@ A context write failure must not be hidden. If an answer was generated but short
 ```text
 session:{id}:recent   LIST/JSON   Recent messages with TTL
 session:{id}:summary  HASH/JSON   Summary, version, covered sequence with TTL
+session:{id}:focus    HASH/JSON   Versioned bounded intent slots and TurnState with TTL
 session:{id}:lock     STRING      Short-lived summary update lock
 ```
 
 Each message contains role, content, timestamp, sequence, and request ID. Summary updates use compare-and-set semantics. A version conflict causes one reload and merge attempt, never unbounded retries.
 
+Session Focus writes also use Redis `WATCH` plus a monotonically increasing
+version. A request that loaded an older Focus cannot overwrite a newer
+concurrent write; the stale write is treated as non-blocking persistence
+degradation so an already generated response is preserved.
+
 ### 5.2 Session History API
 
-`GET /api/v1/chat/history` reads the bounded recent-message window and rolling summary through the Chat application service. `DELETE /api/v1/chat/history` deletes only `session:{id}:recent` and `session:{id}:summary`. Both operations use the existing Redis Store; no second conversation database is introduced.
+`GET /api/v1/chat/history` reads the bounded recent-message window and rolling summary through the Chat application service. `DELETE /api/v1/chat/history` deletes `session:{id}:recent`, `session:{id}:summary`, and `session:{id}:focus`. Both operations use the existing Redis Store; no second conversation database is introduced.
 
 The API never exposes prompts or private reasoning. It returns only persisted session messages, their bounded operational metadata, and the structured summary. Clearing a session cannot reach the MySQL long-term-memory Store, Elasticsearch knowledge, feedback, or eval data. The embedded console uses these endpoints to load, render, and clear history and refreshes the panel after normal or streaming Chat completes.
 

@@ -5,12 +5,18 @@ import (
 	"fmt"
 
 	"github.com/cloudwego/eino/compose"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 )
 
 const (
 	graphName                = "watchops_chat"
 	nodeNormalizeChatInput   = "normalize_chat_input"
+	nodeLoadSessionFocus     = "load_session_focus"
 	nodeRecognizeIntent      = "recognize_intent"
+	nodeValidateSlots        = "validate_slots"
+	nodeProceedIntent        = "proceed_after_slot_validation"
+	nodeBuildClarification   = "build_clarification_response"
+	nodePersistClarification = "persist_clarification_state"
 	nodeLoadSessionContext   = "load_session_context"
 	nodeLoadLongTermMemory   = "load_long_term_memory"
 	nodeLoadUserProfile      = "load_user_profile"
@@ -21,6 +27,7 @@ const (
 	nodeRunReActAgent        = "run_react_agent"
 	nodeCollectToolEvidence  = "collect_tool_evidence"
 	nodePersistSessionMemory = "persist_session_memory"
+	nodePersistSessionFocus  = "persist_session_focus"
 	nodeBuildChatResponse    = "build_chat_response"
 )
 
@@ -46,8 +53,28 @@ func compileChatGraph(
 			node: compose.InvokableLambda(normalizeChatInputGraphNode),
 		},
 		{
+			key:  nodeLoadSessionFocus,
+			node: compose.InvokableLambda(service.loadSessionFocusGraphNode),
+		},
+		{
 			key:  nodeRecognizeIntent,
 			node: compose.InvokableLambda(service.recognizeIntentGraphNode),
+		},
+		{
+			key:  nodeValidateSlots,
+			node: compose.InvokableLambda(service.validateSlotsGraphNode),
+		},
+		{
+			key:  nodeProceedIntent,
+			node: compose.InvokableLambda(proceedIntentGraphNode),
+		},
+		{
+			key:  nodeBuildClarification,
+			node: compose.InvokableLambda(buildClarificationGraphNode),
+		},
+		{
+			key:  nodePersistClarification,
+			node: compose.InvokableLambda(service.persistClarificationGraphNode),
 		},
 		{
 			key: nodeLoadSessionContext,
@@ -98,6 +125,12 @@ func compileChatGraph(
 			),
 		},
 		{
+			key: nodePersistSessionFocus,
+			node: compose.InvokableLambda(
+				service.persistSessionFocusGraphNode,
+			),
+		},
+		{
 			key:  nodeBuildChatResponse,
 			node: compose.InvokableLambda(buildChatResponseGraphNode),
 		},
@@ -105,8 +138,8 @@ func compileChatGraph(
 	for _, current := range nodes {
 		options := []compose.GraphAddNodeOpt{compose.WithNodeName(current.key)}
 		switch current.key {
-		case nodeRecognizeIntent:
-			options = append(options, compose.WithOutputKey(nodeRecognizeIntent))
+		case nodeProceedIntent:
+			options = append(options, compose.WithOutputKey(nodeProceedIntent))
 		case nodeLoadSessionContext:
 			options = append(options, compose.WithOutputKey(nodeLoadSessionContext))
 		case nodeLoadLongTermMemory:
@@ -125,13 +158,15 @@ func compileChatGraph(
 
 	edges := [][2]string{
 		{compose.START, nodeNormalizeChatInput},
-		{nodeNormalizeChatInput, nodeRecognizeIntent},
-		{nodeRecognizeIntent, nodeLoadSessionContext},
-		{nodeRecognizeIntent, nodeLoadLongTermMemory},
-		{nodeRecognizeIntent, nodePrepareSkills},
-		{nodeRecognizeIntent, nodeLoadUserProfile},
-		{nodeRecognizeIntent, nodePreRetrieveKnowledge},
-		{nodeRecognizeIntent, nodeMergeContext},
+		{nodeNormalizeChatInput, nodeLoadSessionFocus},
+		{nodeLoadSessionFocus, nodeRecognizeIntent},
+		{nodeRecognizeIntent, nodeValidateSlots},
+		{nodeProceedIntent, nodeLoadSessionContext},
+		{nodeProceedIntent, nodeLoadLongTermMemory},
+		{nodeProceedIntent, nodePrepareSkills},
+		{nodeProceedIntent, nodeLoadUserProfile},
+		{nodeProceedIntent, nodePreRetrieveKnowledge},
+		{nodeProceedIntent, nodeMergeContext},
 		{nodeLoadSessionContext, nodeMergeContext},
 		{nodeLoadLongTermMemory, nodeMergeContext},
 		{nodePrepareSkills, nodeMergeContext},
@@ -141,8 +176,11 @@ func compileChatGraph(
 		{nodeRenderPromptTemplate, nodeRunReActAgent},
 		{nodeRunReActAgent, nodeCollectToolEvidence},
 		{nodeCollectToolEvidence, nodePersistSessionMemory},
-		{nodePersistSessionMemory, nodeBuildChatResponse},
+		{nodePersistSessionMemory, nodePersistSessionFocus},
+		{nodePersistSessionFocus, nodeBuildChatResponse},
 		{nodeBuildChatResponse, compose.END},
+		{nodeBuildClarification, nodePersistClarification},
+		{nodePersistClarification, compose.END},
 	}
 	for _, edge := range edges {
 		if err := graph.AddEdge(edge[0], edge[1]); err != nil {
@@ -153,6 +191,23 @@ func compileChatGraph(
 				err,
 			)
 		}
+	}
+	if err := graph.AddBranch(
+		nodeValidateSlots,
+		compose.NewGraphBranch(
+			func(_ context.Context, branch decisionBranch) (string, error) {
+				if branch.decision.Decision == intent.DecisionClarify {
+					return nodeBuildClarification, nil
+				}
+				return nodeProceedIntent, nil
+			},
+			map[string]bool{
+				nodeProceedIntent:      true,
+				nodeBuildClarification: true,
+			},
+		),
+	); err != nil {
+		return nil, fmt.Errorf("add slot validation branch: %w", err)
 	}
 
 	runnable, err := graph.Compile(

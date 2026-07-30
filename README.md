@@ -130,16 +130,18 @@ The default Chat API uses one fixed Eino Graph around an Eino ReAct Agent. The g
 ```mermaid
 flowchart TB
     U["User"] --> N["Normalize Input"]
+    N --> SF["Load Session Focus<br/>bounded slots + at most 6 messages"]
+    SF --> I["Context-aware Intent Recognition<br/>rule + optional LLM<br/>current input wins"]
+    I --> VS["Validate Slots<br/>deterministic SlotRule"]
+    VS -->|"clarify"| CR["Build Clarification Response<br/>persist TurnState → END"]
 
-    N --> I["Hybrid Intent Recognition<br/>rule + optional LLM<br/>normalize + safe fallback"]
+    VS -->|"proceed"| SC["Load Redis Session Context<br/>recent messages + rolling summary"]
+    VS -->|"proceed"| LM["Load Confirmed Long-term Memory<br/>MySQL"]
+    VS -->|"proceed"| PF["Load User Profile"]
+    VS -->|"proceed"| SK["Prepare Diagnostic Skill Cards<br/>intent-aware selection"]
+    VS -->|"proceed"| RAG["Intent-aware Multi-Query Pre-RAG<br/>HybridRetrieve / optional<br/>single-query fallback"]
 
-    I --> SC["Load Redis Session Context<br/>recent messages + rolling summary"]
-    I --> LM["Load Confirmed Long-term Memory<br/>MySQL"]
-    I --> PF["Load User Profile"]
-    I --> SK["Prepare Diagnostic Skill Cards<br/>intent-aware selection"]
-    I --> RAG["Intent-aware Multi-Query Pre-RAG<br/>HybridRetrieve / optional<br/>single-query fallback"]
-
-    I --> MC["Merge Context"]
+    VS -->|"proceed"| MC["Merge Context"]
     SC --> MC
     LM --> MC
     PF --> MC
@@ -169,7 +171,9 @@ flowchart TB
     BR --> F["Final Answer<br/>conclusions / evidence / inferences<br/>recommendations / limitations / tool runs / metadata"]
 ```
 
-Single-Agent uses a fixed Eino Graph. After hybrid intent recognition, session memory, confirmed long-term memory, user profile, diagnostic skill cards, and optional Multi-Query Pre-RAG are loaded as parallel context branches. The graph then merges the context and renders the prompt before invoking the Eino ReAct Agent.
+Single-Agent uses a fixed Eino Graph. Before recognition it loads only a bounded Redis Session Focus: confirmed slots, pending clarification, status, a short summary, and at most six recent non-tool messages (300 runes each). Full session context, confirmed long-term memory, user profile, diagnostic skill cards, and optional Multi-Query Pre-RAG remain after intent and slot validation as parallel branches.
+
+Slot validation is deterministic. Current-turn values override structured command values, which override confirmed Focus values. Missing services and Trace IDs are never guessed. A clarification response uses the existing public result shape, contains no tool runs or evidence, persists `TurnStatus=clarify`, and ends the graph before RAG, ReAct, or tools. Redis Focus load/write failures are safe degradations and never replace an already generated answer.
 
 The ReAct Agent selects tools dynamically, but every Tool Call is executed through an Eino Tool and the unified Tool Runtime. The tool harness applies read-only validation, timeout and cancellation handling, fallback, error normalization, output sanitization, and tracing before accessing Prometheus, Elasticsearch, Jaeger, MCP, or deterministic mock providers. Tool observations are returned to the Agent for the next controlled iteration.
 
@@ -184,6 +188,17 @@ Execution boundaries:
 - Failure Controller governs the overall Agent loop with iteration and tool-call limits, consecutive-failure and repeated-call detection, a total execution deadline, one bounded JSON repair attempt, and Agent-level deterministic fallback.
 - Evidence Processor runs inside `collect_tool_evidence`; it formalizes tool results and attaches `citation_id` metadata without replacing original evidence IDs.
 - The system performs diagnosis only and does not automatically restart services, change configuration, or execute remediation.
+
+### Node-level evaluation
+
+`make eval-nodes` runs the versioned, deterministic dataset in
+`testdata/node_eval_cases.json` and writes
+`tmp/node_eval_report.json` plus `tmp/node_eval_report.md`. The report evaluates
+Intent, Slot/Clarification, multi-turn Context, Multi-Agent Routing, Retrieval,
+and Fallback separately. The first five stages execute their local production
+boundaries; the 15 Fallback rows remain explicitly labelled `contract_only`
+and are excluded from the executed-verification total. Default execution uses
+no network or paid LLM and only fails on configured thresholds.
 
 Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
 

@@ -53,6 +53,9 @@ func (s *Service) Stream(
 		return Result{}, err
 	}
 	traceID := result.TraceID
+	if status, _ := result.Agent.Metadata["status"].(string); status == "clarification_required" {
+		return result, nil
+	}
 	if traceID != "" {
 		safeEmit("memory_loaded", map[string]any{
 			"trace_id":                      traceID,

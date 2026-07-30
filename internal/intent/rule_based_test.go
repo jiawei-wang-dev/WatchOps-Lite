@@ -94,6 +94,21 @@ func TestRuleBasedUnknownMessageUsesGeneralChat(t *testing.T) {
 	}
 }
 
+func TestRuleBasedRecognizesCheckoutRecentErrorRate(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "查看 checkout 最近 10 分钟错误率",
+		Now:     time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Recognize() error = %v", err)
+	}
+	if result.Service != "checkout" ||
+		(result.Intent != IntentMetricsQuery && result.Intent != IntentIncidentTriage) ||
+		result.TimeRange == nil || result.TimeRange.Relative != "last_10_minutes" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func hasTool(result IntentResult, tool ToolName) bool {
 	for _, current := range result.SuggestedTools {
 		if current == tool {

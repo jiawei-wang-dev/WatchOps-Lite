@@ -28,12 +28,14 @@ type fakeRunner struct {
 	output    agenteino.AgentOutput
 	err       error
 	lastInput agenteino.AgentInput
+	calls     int
 }
 
 func (f *fakeRunner) Run(
 	_ context.Context,
 	input agenteino.AgentInput,
 ) (agenteino.AgentOutput, error) {
+	f.calls++
 	f.lastInput = input
 	return f.output, f.err
 }
@@ -48,6 +50,10 @@ type fakeSessionStore struct {
 	appended        []session.Message
 	updatedSummary  session.Summary
 	expectedVersion int64
+	focus           session.SessionFocus
+	focusLoadErr    error
+	focusSaveErr    error
+	savedFocus      session.SessionFocus
 }
 
 type fakeKnowledgeRetriever struct {
@@ -170,6 +176,31 @@ func (f *fakeSessionStore) ClearHistory(context.Context, string) error {
 	}
 	f.cleared = true
 	f.snapshot = emptySessionSnapshot()
+	return nil
+}
+
+func (f *fakeSessionStore) LoadFocus(
+	context.Context,
+	string,
+) (session.SessionFocus, error) {
+	if f.focusLoadErr != nil {
+		return session.SessionFocus{}, f.focusLoadErr
+	}
+	if f.focus.KnownSlots == nil {
+		return session.EmptyFocus(), nil
+	}
+	return f.focus, nil
+}
+
+func (f *fakeSessionStore) SaveFocus(
+	_ context.Context,
+	_ string,
+	focus session.SessionFocus,
+) error {
+	if f.focusSaveErr != nil {
+		return f.focusSaveErr
+	}
+	f.savedFocus = focus
 	return nil
 }
 

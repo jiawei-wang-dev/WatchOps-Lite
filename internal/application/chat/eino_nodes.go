@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
@@ -32,15 +33,34 @@ type graphState struct {
 	promptRenderFailed        bool
 	agentOutput               agenteino.AgentOutput
 	intentResult              intent.IntentResult
+	intentDecision            intent.IntentDecision
+	sessionFocus              session.SessionFocus
+	sessionFocusAvailable     bool
 }
 
 type normalizedChatInput struct {
 	command Command
 }
 
+type sessionFocusBranch struct {
+	command   Command
+	focus     session.SessionFocus
+	available bool
+}
+
 type intentBranch struct {
-	command Command
-	result  intent.IntentResult
+	command        Command
+	result         intent.IntentResult
+	focus          session.SessionFocus
+	focusAvailable bool
+	decision       intent.IntentDecision
+}
+
+type decisionBranch struct {
+	command        Command
+	decision       intent.IntentDecision
+	focus          session.SessionFocus
+	focusAvailable bool
 }
 
 type sessionContextBranch struct {
@@ -80,24 +100,47 @@ func normalizeChatInputGraphNode(
 	return normalizedChatInput{command: command}, nil
 }
 
-func (s *Service) recognizeIntentGraphNode(
+func (s *Service) loadSessionFocusGraphNode(
 	ctx context.Context,
 	input normalizedChatInput,
+) (sessionFocusBranch, error) {
+	focus, available := s.loadSessionFocus(ctx, input.command.SessionID)
+	return sessionFocusBranch{
+		command: input.command, focus: focus, available: available,
+	}, nil
+}
+
+func (s *Service) recognizeIntentGraphNode(
+	ctx context.Context,
+	input sessionFocusBranch,
 ) (intentBranch, error) {
 	if s.intentRecognizer == nil {
 		return intentBranch{
-			command: input.command,
+			command:        input.command,
+			focus:          input.focus,
+			focusAvailable: input.available,
 			result: intent.SafeDefault(input.command.Message, intent.IntentLimitation{
 				Code:    "INTENT_RECOGNIZER_UNAVAILABLE",
 				Message: "Intent recognizer is unavailable; safe default intent was used.",
 			}),
 		}, nil
 	}
+	focusView := intentFocusView(input.focus, input.available)
+	recent := focusRecentMessages(input.focus.RecentMessages)
 	result, err := s.intentRecognizer.Recognize(ctx, intent.RecognitionInput{
 		Message:        input.command.Message,
 		SessionID:      input.command.SessionID,
 		UserID:         input.command.UserID,
 		Now:            s.now(),
+		RecentMessages: intent.BoundedMessages(recent),
+		Focus:          focusView,
+		Metadata: map[string]any{
+			"session_focus_available": input.available,
+			"last_intent":             input.focus.LastIntent,
+			"known_slots":             cloneStringMap(input.focus.KnownSlots),
+			"pending_question":        input.focus.PendingQuestion,
+			"turn_status":             input.focus.TurnStatus,
+		},
 		AvailableTools: []string{"query_metrics", "query_logs", "query_traces", "search_knowledge"},
 		AvailableSkills: []string{
 			"metric_inspection",
@@ -114,6 +157,7 @@ func (s *Service) recognizeIntentGraphNode(
 		})
 	}
 	result = intent.Normalize(result)
+	result.Metadata["session_focus_available"] = input.available
 	agenteino.EmitStreamEvent(ctx, "intent_recognized", map[string]any{
 		"intent":           result.Intent,
 		"confidence":       result.Confidence,
@@ -122,7 +166,77 @@ func (s *Service) recognizeIntentGraphNode(
 		"suggested_agents": result.SuggestedAgents,
 		"fallback_used":    result.Metadata["fallback_used"],
 	})
-	return intentBranch{command: input.command, result: result}, nil
+	return intentBranch{
+		command:        input.command,
+		result:         result,
+		focus:          input.focus,
+		focusAvailable: input.available,
+	}, nil
+}
+
+func (s *Service) validateSlotsGraphNode(
+	ctx context.Context,
+	branch intentBranch,
+) (decisionBranch, error) {
+	commandSlots := map[string]string{}
+	if branch.command.TimeContext.From != "" || branch.command.TimeContext.To != "" {
+		commandSlots["time_range"] = branch.command.TimeContext.From + "/" +
+			branch.command.TimeContext.To
+	}
+	decision := intent.ValidateSlots(
+		branch.command.Message,
+		branch.result,
+		commandSlots,
+		intentFocusView(branch.focus, branch.focusAvailable),
+		s.intentConfidenceMin,
+	)
+	agenteino.EmitStreamEvent(ctx, "slot_validation_completed", map[string]any{
+		"decision":               decision.Decision,
+		"reason_code":            decision.ReasonCode,
+		"missing_required_slots": decision.MissingRequired,
+		"known_slots":            decision.KnownSlots,
+	})
+	return decisionBranch{
+		command:        branch.command,
+		decision:       decision,
+		focus:          branch.focus,
+		focusAvailable: branch.focusAvailable,
+	}, nil
+}
+
+func proceedIntentGraphNode(
+	_ context.Context,
+	branch decisionBranch,
+) (intentBranch, error) {
+	return intentBranch{
+		command:        branch.command,
+		result:         branch.decision.Result,
+		focus:          branch.focus,
+		focusAvailable: branch.focusAvailable,
+		decision:       branch.decision,
+	}, nil
+}
+
+func buildClarificationGraphNode(
+	ctx context.Context,
+	branch decisionBranch,
+) (graphState, error) {
+	output := emptyClarificationOutput(branch)
+	agenteino.EmitStreamEvent(ctx, "clarification_required", map[string]any{
+		"intent_type":            branch.decision.Result.Intent,
+		"confidence":             branch.decision.Result.Confidence,
+		"missing_required_slots": branch.decision.MissingRequired,
+		"reason_code":            branch.decision.ReasonCode,
+		"pending_question":       branch.decision.ClarifyQuestion,
+	})
+	return graphState{
+		command:               branch.command,
+		agentOutput:           output,
+		intentResult:          branch.decision.Result,
+		intentDecision:        branch.decision,
+		sessionFocus:          branch.focus,
+		sessionFocusAvailable: branch.focusAvailable,
+	}, nil
 }
 
 func (s *Service) loadUserProfileGraphNode(
@@ -416,7 +530,7 @@ func mergeContextGraphNode(
 	if !ok {
 		return graphState{}, fmt.Errorf("%w: pre-rag branch output is unavailable", ErrExecution)
 	}
-	intentBranch, ok := input[nodeRecognizeIntent].(intentBranch)
+	intentBranch, ok := input[nodeProceedIntent].(intentBranch)
 	if !ok {
 		return graphState{}, fmt.Errorf("%w: intent branch output is unavailable", ErrExecution)
 	}
@@ -427,6 +541,9 @@ func mergeContextGraphNode(
 		longTermMemories:          memoryBranch.memories,
 		longTermMemoryUnavailable: memoryBranch.unavailable,
 		intentResult:              intentBranch.result,
+		intentDecision:            intentBranch.decision,
+		sessionFocus:              intentBranch.focus,
+		sessionFocusAvailable:     intentBranch.focusAvailable,
 		agentInput: agenteino.AgentInput{
 			SessionSummary: sessionBranch.snapshot.Summary,
 			RecentMessages: sessionBranch.snapshot.RecentMessages,
@@ -451,7 +568,7 @@ func mergeContextGraphNode(
 }
 
 func intentBranchFromInput(input map[string]any) (intentBranch, error) {
-	branch, ok := input[nodeRecognizeIntent].(intentBranch)
+	branch, ok := input[nodeProceedIntent].(intentBranch)
 	if !ok {
 		return intentBranch{}, fmt.Errorf("%w: intent branch output is unavailable", ErrExecution)
 	}
@@ -529,6 +646,7 @@ func (s *Service) collectToolEvidenceGraphNode(
 	state.agentOutput.Metadata["intent"] = state.intentResult
 	state.agentOutput.Metadata["intent_type"] = string(state.intentResult.Intent)
 	state.agentOutput.Metadata["intent_source"] = state.intentResult.Source
+	state.agentOutput.Metadata["session_focus_available"] = state.sessionFocusAvailable
 	for _, code := range state.agentInput.PreRAGLimitations {
 		state.agentOutput.Limitations = append(
 			state.agentOutput.Limitations,
@@ -609,6 +727,29 @@ func (s *Service) persistSessionMemoryGraphNode(
 	return state, nil
 }
 
+func (s *Service) persistSessionFocusGraphNode(
+	ctx context.Context,
+	state graphState,
+) (graphState, error) {
+	if err := s.persistSessionFocus(ctx, state, session.TurnStatusCompleted); err != nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
+		state.agentOutput.Metadata["session_focus_persistence_failed"] = true
+	}
+	return state, nil
+}
+
+func (s *Service) persistClarificationGraphNode(
+	ctx context.Context,
+	state graphState,
+) (Result, error) {
+	if err := s.persistSessionFocus(ctx, state, session.TurnStatusClarify); err != nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
+		state.agentOutput.Metadata["persistence_failed"] = true
+		state.agentOutput.Metadata["session_focus_persistence_failed"] = true
+	}
+	return buildChatResponseGraphNode(ctx, state)
+}
+
 func buildChatResponseGraphNode(
 	ctx context.Context,
 	state graphState,
@@ -623,6 +764,75 @@ func buildChatResponseGraphNode(
 		Agent:     state.agentOutput,
 		TraceID:   traceID,
 	}, nil
+}
+
+func emptyClarificationOutput(branch decisionBranch) agenteino.AgentOutput {
+	metadata := map[string]any{
+		"status":                  "clarification_required",
+		"intent_type":             string(branch.decision.Result.Intent),
+		"confidence":              branch.decision.Result.Confidence,
+		"missing_required_slots":  branch.decision.MissingRequired,
+		"known_slots":             branch.decision.KnownSlots,
+		"reason_code":             branch.decision.ReasonCode,
+		"pending_question":        branch.decision.ClarifyQuestion,
+		"session_focus_available": branch.focusAvailable,
+	}
+	return agenteino.AgentOutput{
+		Conclusions: []agenteino.Conclusion{{
+			Text:        branch.decision.ClarifyQuestion,
+			EvidenceIDs: []string{},
+		}},
+		Evidence:        []common.EvidenceItem{},
+		Inferences:      []agenteino.Inference{},
+		Recommendations: []agenteino.Recommendation{},
+		Limitations: []agenteino.Limitation{{
+			Code:    "CLARIFICATION_REQUIRED",
+			Message: "关键信息不足，本轮未执行诊断或工具调用。",
+		}},
+		ToolRuns: []agenteino.ToolRun{},
+		Metadata: metadata,
+	}
+}
+
+func intentFocusView(focus session.SessionFocus, available bool) intent.FocusView {
+	return intent.FocusView{
+		LastIntent:      focus.LastIntent,
+		KnownSlots:      cloneStringMap(focus.KnownSlots),
+		PendingQuestion: focus.PendingQuestion,
+		Candidates:      append([]string{}, focus.Candidates...),
+		TurnStatus:      focus.TurnStatus,
+		Summary:         focus.Summary,
+		Available:       available,
+	}
+}
+
+func focusRecentMessages(messages []session.Message) []intent.MessageView {
+	result := make([]intent.MessageView, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == session.RoleTool || message.Role == session.RoleSystem {
+			continue
+		}
+		result = append(result, intent.MessageView{
+			Role:      string(message.Role),
+			Content:   redactFocusText(message.Content),
+			CreatedAt: message.CreatedAt,
+		})
+	}
+	return result
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+var focusSecretPattern = regexp.MustCompile(`(?i)(api[_-]?key|password|secret|token|redis://|mysql://|postgres://)\s*[:=]?\s*\S+`)
+
+func redactFocusText(value string) string {
+	return focusSecretPattern.ReplaceAllString(strings.TrimSpace(value), "[REDACTED]")
 }
 
 func diagnosticSkillCards() []string {

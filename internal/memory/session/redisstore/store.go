@@ -16,6 +16,8 @@ import (
 const (
 	summaryDataField    = "data"
 	summaryVersionField = "version"
+	focusDataField      = "data"
+	focusVersionField   = "version"
 )
 
 type Store struct {
@@ -187,6 +189,73 @@ func (s *Store) LoadContext(ctx context.Context, sessionID string) (session.Cont
 	}, nil
 }
 
+func (s *Store) LoadFocus(ctx context.Context, sessionID string) (session.SessionFocus, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return session.SessionFocus{}, err
+	}
+	value, err := s.client.HGet(ctx, focusKey(sessionID), focusDataField).Result()
+	if errors.Is(err, redis.Nil) {
+		return session.EmptyFocus(), nil
+	}
+	if err != nil {
+		return session.SessionFocus{}, fmt.Errorf("read session focus: %w", err)
+	}
+	focus := session.EmptyFocus()
+	if err := json.Unmarshal([]byte(value), &focus); err != nil {
+		return session.SessionFocus{}, fmt.Errorf("decode session focus: %w", err)
+	}
+	return focus, nil
+}
+
+func (s *Store) SaveFocus(
+	ctx context.Context,
+	sessionID string,
+	focus session.SessionFocus,
+) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
+	key := focusKey(sessionID)
+	err := s.client.Watch(ctx, func(tx *redis.Tx) error {
+		currentVersion, err := readHashVersion(ctx, tx, key, focusVersionField)
+		if err != nil {
+			return err
+		}
+		if currentVersion != focus.Version {
+			return session.ErrVersionConflict
+		}
+		focus.Version = currentVersion + 1
+		focus.UpdatedAt = time.Now().UTC()
+		encoded, err := json.Marshal(focus)
+		if err != nil {
+			return fmt.Errorf("encode session focus: %w", err)
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(
+				ctx,
+				key,
+				focusVersionField,
+				focus.Version,
+				focusDataField,
+				encoded,
+			)
+			pipe.Expire(ctx, key, s.ttl)
+			return nil
+		})
+		return err
+	}, key)
+	if errors.Is(err, redis.TxFailedErr) {
+		return session.ErrVersionConflict
+	}
+	if err != nil {
+		if errors.Is(err, session.ErrVersionConflict) {
+			return err
+		}
+		return fmt.Errorf("save session focus: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
 	if err := validateSessionID(sessionID); err != nil {
 		return err
@@ -195,6 +264,7 @@ func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
 		ctx,
 		recentKey(sessionID),
 		summaryKey(sessionID),
+		focusKey(sessionID),
 	).Err(); err != nil {
 		return fmt.Errorf("clear session history: %w", err)
 	}
@@ -202,17 +272,26 @@ func (s *Store) ClearHistory(ctx context.Context, sessionID string) error {
 }
 
 func readVersion(ctx context.Context, tx *redis.Tx, key string) (int64, error) {
-	value, err := tx.HGet(ctx, key, summaryVersionField).Result()
+	return readHashVersion(ctx, tx, key, summaryVersionField)
+}
+
+func readHashVersion(
+	ctx context.Context,
+	tx *redis.Tx,
+	key string,
+	field string,
+) (int64, error) {
+	value, err := tx.HGet(ctx, key, field).Result()
 	if errors.Is(err, redis.Nil) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("read session summary version: %w", err)
+		return 0, fmt.Errorf("read session state version: %w", err)
 	}
 
 	version, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		return 0, errors.New("stored session summary version is invalid")
+		return 0, errors.New("stored session state version is invalid")
 	}
 	return version, nil
 }
@@ -232,4 +311,9 @@ func summaryKey(sessionID string) string {
 	return "session:" + sessionID + ":summary"
 }
 
+func focusKey(sessionID string) string {
+	return "session:" + sessionID + ":focus"
+}
+
 var _ session.Store = (*Store)(nil)
+var _ session.FocusStore = (*Store)(nil)

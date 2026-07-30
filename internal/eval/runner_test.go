@@ -64,6 +64,20 @@ func TestCheckCaseRequiresEvidenceAndLimitation(t *testing.T) {
 	}
 }
 
+func TestCheckCaseTreatsClarificationAsValidWithoutEvidenceOrTools(t *testing.T) {
+	reasons := checkCase(context.Background(), Case{
+		ID:       "clarification",
+		CaseType: CaseTypeGood,
+		Metadata: map[string]any{},
+	}, EvalOutput{
+		LimitationCount: 1,
+		LimitationCodes: []string{"CLARIFICATION_REQUIRED"},
+	})
+	if len(reasons) != 0 {
+		t.Fatalf("reasons = %v, want valid clarification", reasons)
+	}
+}
+
 func TestRunnerPersistsCaseResultsAndSummary(t *testing.T) {
 	store := &runStoreStub{storeStub: storeStub{cases: []Case{
 		{ID: "case-pass", CaseType: CaseTypeGood, InputMessage: "Question"},

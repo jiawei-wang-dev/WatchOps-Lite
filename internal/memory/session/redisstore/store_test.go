@@ -125,6 +125,113 @@ func TestStoreClearsRecentMessagesAndSummary(t *testing.T) {
 	}
 }
 
+func TestStoreSavesLoadsAndClearsSessionFocusWithTTL(t *testing.T) {
+	store, client := newIntegrationStore(t, 6, time.Hour)
+	ctx := context.Background()
+	focus := session.SessionFocus{
+		LastIntent:      "metrics_query",
+		CurrentService:  "checkout",
+		KnownSlots:      map[string]string{"service": "checkout"},
+		TurnStatus:      session.TurnStatusClarify,
+		PendingQuestion: "需要排查哪个服务？",
+	}
+	if err := store.SaveFocus(ctx, "ses-focus", focus); err != nil {
+		t.Fatalf("SaveFocus() error = %v", err)
+	}
+	loaded, err := store.LoadFocus(ctx, "ses-focus")
+	if err != nil {
+		t.Fatalf("LoadFocus() error = %v", err)
+	}
+	if loaded.LastIntent != "metrics_query" ||
+		loaded.KnownSlots["service"] != "checkout" ||
+		loaded.UpdatedAt.IsZero() {
+		t.Fatalf("focus = %#v", loaded)
+	}
+	assertTTL(t, client, focusKey("ses-focus"), time.Hour)
+	if err := store.ClearHistory(ctx, "ses-focus"); err != nil {
+		t.Fatalf("ClearHistory() error = %v", err)
+	}
+	exists, err := client.Exists(ctx, focusKey("ses-focus")).Result()
+	if err != nil || exists != 0 {
+		t.Fatalf("focus exists=%d error=%v", exists, err)
+	}
+}
+
+func TestStoreRejectsStaleConcurrentFocusWrite(t *testing.T) {
+	store, _ := newIntegrationStore(t, 6, time.Hour)
+	ctx := context.Background()
+	if err := store.SaveFocus(ctx, "ses-focus-cas", session.SessionFocus{
+		KnownSlots: map[string]string{"service": "initial"},
+	}); err != nil {
+		t.Fatalf("initial SaveFocus() error = %v", err)
+	}
+	requestA, err := store.LoadFocus(ctx, "ses-focus-cas")
+	if err != nil {
+		t.Fatalf("request A LoadFocus() error = %v", err)
+	}
+	requestB, err := store.LoadFocus(ctx, "ses-focus-cas")
+	if err != nil {
+		t.Fatalf("request B LoadFocus() error = %v", err)
+	}
+	requestB.KnownSlots["service"] = "payment"
+	if err := store.SaveFocus(ctx, "ses-focus-cas", requestB); err != nil {
+		t.Fatalf("request B SaveFocus() error = %v", err)
+	}
+	requestA.KnownSlots["service"] = "checkout"
+	if err := store.SaveFocus(ctx, "ses-focus-cas", requestA); !errors.Is(err, session.ErrVersionConflict) {
+		t.Fatalf("stale request A SaveFocus() error = %v, want version conflict", err)
+	}
+	loaded, err := store.LoadFocus(ctx, "ses-focus-cas")
+	if err != nil {
+		t.Fatalf("final LoadFocus() error = %v", err)
+	}
+	if loaded.KnownSlots["service"] != "payment" {
+		t.Fatalf("final focus = %#v, stale request overwrote newer state", loaded)
+	}
+}
+
+func TestStoreIsolatesFocusBySessionID(t *testing.T) {
+	store, _ := newIntegrationStore(t, 6, time.Hour)
+	ctx := context.Background()
+	if err := store.SaveFocus(ctx, "ses-checkout", session.SessionFocus{
+		KnownSlots: map[string]string{"service": "checkout"},
+	}); err != nil {
+		t.Fatalf("SaveFocus(checkout) error = %v", err)
+	}
+	if err := store.SaveFocus(ctx, "ses-payment", session.SessionFocus{
+		KnownSlots: map[string]string{"service": "payment"},
+	}); err != nil {
+		t.Fatalf("SaveFocus(payment) error = %v", err)
+	}
+	checkout, err := store.LoadFocus(ctx, "ses-checkout")
+	if err != nil {
+		t.Fatalf("LoadFocus(checkout) error = %v", err)
+	}
+	payment, err := store.LoadFocus(ctx, "ses-payment")
+	if err != nil {
+		t.Fatalf("LoadFocus(payment) error = %v", err)
+	}
+	if checkout.KnownSlots["service"] != "checkout" ||
+		payment.KnownSlots["service"] != "payment" {
+		t.Fatalf("focus leaked across sessions: checkout=%#v payment=%#v", checkout, payment)
+	}
+}
+
+func TestStoreReturnsSafeErrorForCorruptFocusJSON(t *testing.T) {
+	store, client := newIntegrationStore(t, 6, time.Hour)
+	if err := client.HSet(
+		context.Background(),
+		focusKey("ses-corrupt"),
+		focusDataField,
+		"{not-json",
+	).Err(); err != nil {
+		t.Fatalf("seed corrupt focus: %v", err)
+	}
+	if _, err := store.LoadFocus(context.Background(), "ses-corrupt"); err == nil {
+		t.Fatal("LoadFocus() error = nil, want safe decode error")
+	}
+}
+
 func newIntegrationStore(
 	t *testing.T,
 	window int,

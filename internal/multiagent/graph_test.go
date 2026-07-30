@@ -3,6 +3,7 @@ package multiagent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,10 +136,9 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
 		fakeSynthesizer{},
 	)
-	var tick int64
+	var tick atomic.Int64
 	orchestrator.now = func() time.Time {
-		tick++
-		return time.UnixMilli(tick * 10).UTC()
+		return time.UnixMilli(tick.Add(1) * 10).UTC()
 	}
 
 	result, err := orchestrator.Execute(context.Background(), Input{

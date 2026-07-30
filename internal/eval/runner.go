@@ -145,9 +145,10 @@ func checkCase(ctx context.Context, evalCase Case, output EvalOutput) []string {
 	)
 	defer span.End()
 	reasons := []string{}
-	requireEvidence := metadataBool(evalCase.Metadata, "require_evidence", true)
-	requireToolRuns := metadataBool(evalCase.Metadata, "require_tool_runs", true)
-	requireLimitation := metadataBool(evalCase.Metadata, "require_limitation", false)
+	clarification := containsValue(output.LimitationCodes, "CLARIFICATION_REQUIRED")
+	requireEvidence := metadataBool(evalCase.Metadata, "require_evidence", !clarification)
+	requireToolRuns := metadataBool(evalCase.Metadata, "require_tool_runs", !clarification)
+	requireLimitation := metadataBool(evalCase.Metadata, "require_limitation", clarification)
 	requireConclusions := metadataBool(evalCase.Metadata, "require_conclusions", false)
 	requireRecommendations := metadataBool(evalCase.Metadata, "require_recommendations", false)
 	if requireEvidence && output.EvidenceCount == 0 {
@@ -175,6 +176,15 @@ func checkCase(ctx context.Context, evalCase Case, output EvalOutput) []string {
 		}
 	}
 	return reasons
+}
+
+func containsValue(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func metadataBool(metadata map[string]any, key string, fallback bool) bool {

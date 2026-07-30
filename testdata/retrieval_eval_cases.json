@@ -46,5 +46,94 @@
     "expected_keywords": ["alert", "error rate", "payment"],
     "expected_source_type": "knowledge",
     "notes": "Should retrieve runbook context for an alert-driven checkout investigation."
+  },
+  {
+    "id": "checkout-latency-runbook",
+    "query": "checkout p95 latency runbook",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "latency", "runbook"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "payment-retry-guide",
+    "query": "payment retry amplification guide",
+    "service": "payment",
+    "expected_keywords": ["payment", "retry"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "trace-investigation-guide",
+    "query": "trace span investigation guide",
+    "expected_keywords": ["trace"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "prometheus-error-query",
+    "query": "prometheus error rate query",
+    "expected_keywords": ["error rate"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "elasticsearch-log-query",
+    "query": "elasticsearch exception log query",
+    "expected_keywords": ["log"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "jaeger-slow-span",
+    "query": "jaeger slow span critical path",
+    "expected_keywords": ["span"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "circuit-breaker-mitigation",
+    "query": "circuit breaker mitigation runbook",
+    "expected_keywords": ["mitigation", "runbook"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "dependency-timeout",
+    "query": "dependency timeout incident response",
+    "expected_keywords": ["timeout"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "checkout-error-rate-zh",
+    "query": "checkout 错误率 排障手册",
+    "service": "checkout",
+    "expected_keywords": ["checkout"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "payment-timeout-zh",
+    "query": "payment 超时 调查",
+    "service": "payment",
+    "expected_keywords": ["payment"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "retry-amplification-zh",
+    "query": "重试放大 缓解",
+    "expected_keywords": ["retry"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "alert-routing",
+    "query": "alert dependency failure routing",
+    "expected_keywords": ["alert"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "database-saturation",
+    "query": "database saturation incident guide",
+    "expected_keywords": ["incident"],
+    "expected_source_type": "knowledge"
+  },
+  {
+    "id": "service-topology",
+    "query": "checkout payment service topology",
+    "service": "checkout",
+    "expected_keywords": ["checkout", "payment"],
+    "expected_source_type": "knowledge"
   }
 ]

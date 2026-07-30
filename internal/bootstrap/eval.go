@@ -56,6 +56,12 @@ func mapEvalOutput(result applicationchat.Result) eval.EvalOutput {
 			toolErrors++
 		}
 	}
+	limitationCodes := make([]string, 0, len(result.Agent.Limitations))
+	for _, limitation := range result.Agent.Limitations {
+		if limitation.Code != "" {
+			limitationCodes = append(limitationCodes, limitation.Code)
+		}
+	}
 	return eval.EvalOutput{
 		RequestID:           result.RequestID,
 		TraceID:             result.TraceID,
@@ -66,6 +72,7 @@ func mapEvalOutput(result applicationchat.Result) eval.EvalOutput {
 		LimitationCount:     len(result.Agent.Limitations),
 		ConclusionCount:     len(result.Agent.Conclusions),
 		RecommendationCount: len(result.Agent.Recommendations),
+		LimitationCodes:     limitationCodes,
 	}
 }
 

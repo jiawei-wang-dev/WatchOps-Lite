@@ -44,6 +44,7 @@ Retrieval eval cases live in `testdata/retrieval_eval_cases.json`. Each case rec
 - query
 - optional service
 - optional expected document or chunk ID
+- optional multiple relevant document or chunk IDs
 - expected keywords
 - expected source type
 - notes
@@ -68,6 +69,9 @@ The script calls the local knowledge search API and prints:
 - rerank provider, deterministic reason, and fallback reason when present
 - empty recall behavior
 - summary pass rate
+- HitRate@K, Recall@K, MRR, and nDCG@K
+- average and P95 retrieval latency
+- empty-recall count and retrieval/rerank/fallback modes
 
 Set optional environment variables:
 
@@ -79,6 +83,42 @@ export WATCHOPS_RETRIEVAL_EVAL_OUTPUT=tmp/retrieval_eval_report.json
 ```
 
 Generated reports under `tmp/` are local artifacts and should not be committed.
+
+## Unified node evaluation
+
+Retrieval is also one stage of the offline node-level suite:
+
+```bash
+make eval-nodes
+```
+
+This loads `testdata/node_eval_cases.json`, directly evaluates the rule Intent
+Recognizer, deterministic Slot validator, isolated multi-turn Focus continuity,
+`multiagent.PlanAgents`, an independent deterministic retrieval corpus, and
+safe fallback contracts. It writes `tmp/node_eval_report.json` and
+`tmp/node_eval_report.md`. Dataset time is fixed, each Context case has an
+isolated logical Session ID, and the default run uses no production Redis,
+network, paid LLM, user memory, prompts, or raw logs.
+
+The dataset declares 120 rows. Intent, Slot, Context, Routing, and Retrieval
+currently provide 105 executed local checks. The 15 Fallback rows are reported
+as `contract_only`, are excluded from the executed-verification total, and do
+not claim real fault injection. Production fallback paths are additionally
+covered by focused package tests.
+
+Thresholds are opt-in:
+
+```bash
+export WATCHOPS_INTENT_ACCURACY_MIN=0.80
+export WATCHOPS_ROUTING_EXACT_MATCH_MIN=0.80
+export WATCHOPS_RETRIEVAL_HIT_RATE_MIN=0.70
+export WATCHOPS_FALLBACK_PASS_RATE_MIN=0.90
+make eval-nodes
+```
+
+Without these variables the command reports the real baseline and does not
+invent a target. Eval failures remain review artifacts; they are not
+automatically promoted to Good/Bad Cases or used to change production routing.
 
 ## Empty recall behavior
 

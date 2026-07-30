@@ -69,7 +69,12 @@ func chatGraphSpanName(info *callbacks.RunInfo) string {
 	}
 	switch info.Name {
 	case nodeNormalizeChatInput,
+		nodeLoadSessionFocus,
 		nodeRecognizeIntent,
+		nodeValidateSlots,
+		nodeProceedIntent,
+		nodeBuildClarification,
+		nodePersistClarification,
 		nodeLoadSessionContext,
 		nodeLoadLongTermMemory,
 		nodeLoadUserProfile,
@@ -79,6 +84,7 @@ func chatGraphSpanName(info *callbacks.RunInfo) string {
 		nodeRunReActAgent,
 		nodeCollectToolEvidence,
 		nodePersistSessionMemory,
+		nodePersistSessionFocus,
 		nodeBuildChatResponse:
 		return "graph." + info.Name
 	default:

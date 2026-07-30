@@ -56,6 +56,7 @@ type EvalOutput struct {
 	LimitationCount     int
 	ConclusionCount     int
 	RecommendationCount int
+	LimitationCodes     []string
 }
 
 type CaseExecutor interface {

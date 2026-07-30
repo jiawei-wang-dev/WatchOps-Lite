@@ -7,6 +7,8 @@ import (
 
 type IntentType string
 
+func (i IntentType) String() string { return string(i) }
+
 const (
 	IntentIncidentTriage IntentType = "incident_triage"
 	IntentMetricsQuery   IntentType = "metrics_query"

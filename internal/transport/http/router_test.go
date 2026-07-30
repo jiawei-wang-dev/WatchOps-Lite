@@ -671,7 +671,7 @@ func TestRouterRejectsInvalidChatRequest(t *testing.T) {
 	}
 }
 
-func TestRouterRepresentsToolFailureInLimitations(t *testing.T) {
+func TestRouterClarifiesMissingServiceWithoutToolExecution(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := newTestRouter(t)
 
@@ -698,24 +698,20 @@ func TestRouterRepresentsToolFailureInLimitations(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	failedRuns := 0
-	for _, run := range response.ToolRuns {
-		if !run.Success && run.ErrorCode == "TOOL_INVALID_ARGUMENT" {
-			failedRuns++
-		}
-	}
-	if failedRuns != 2 {
-		t.Fatalf("failed tool runs = %d, want 2; runs=%#v", failedRuns, response.ToolRuns)
+	if len(response.ToolRuns) != 0 || len(response.Answer.Evidence) != 0 {
+		t.Fatalf("runs=%#v evidence=%#v, want clarification without execution",
+			response.ToolRuns, response.Answer.Evidence)
 	}
 
-	toolLimitations := 0
+	clarifications := 0
 	for _, limitation := range response.Answer.Limitations {
-		if limitation.Tool != "" && limitation.Code == "TOOL_INVALID_ARGUMENT" {
-			toolLimitations++
+		if limitation.Code == "CLARIFICATION_REQUIRED" {
+			clarifications++
 		}
 	}
-	if toolLimitations != 2 {
-		t.Fatalf("tool limitations = %d, want 2; limitations=%#v", toolLimitations, response.Answer.Limitations)
+	if clarifications != 1 {
+		t.Fatalf("clarifications = %d, want 1; limitations=%#v",
+			clarifications, response.Answer.Limitations)
 	}
 }
 

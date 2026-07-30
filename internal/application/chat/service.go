@@ -52,35 +52,37 @@ func (e *ValidationError) Error() string {
 }
 
 type ServiceConfig struct {
-	RecentWindowSize   int
-	SummaryThreshold   int
-	LongTermMemory     longterm.Store
-	LongTermMemoryTopK int
-	ProfileLoader      profile.Loader
-	KnowledgeRetriever KnowledgeRetriever
-	PreRAGTopK         int
-	IntentRecognizer   intent.Recognizer
-	RAGQueryPlanner    queryplan.QueryPlanner
-	EvidenceProcessor  *evidenceprocessor.Processor
+	RecentWindowSize    int
+	SummaryThreshold    int
+	LongTermMemory      longterm.Store
+	LongTermMemoryTopK  int
+	ProfileLoader       profile.Loader
+	KnowledgeRetriever  KnowledgeRetriever
+	PreRAGTopK          int
+	IntentRecognizer    intent.Recognizer
+	RAGQueryPlanner     queryplan.QueryPlanner
+	EvidenceProcessor   *evidenceprocessor.Processor
+	IntentConfidenceMin float64
 }
 
 type Service struct {
-	runner             agenteino.AgentRunner
-	store              session.Store
-	summarizer         session.Summarizer
-	recentWindowSize   int
-	summaryThreshold   int
-	now                func() time.Time
-	graph              chatGraphRunner
-	graphErr           error
-	longTermMemory     longterm.Store
-	longTermMemoryTopK int
-	profileLoader      profile.Loader
-	knowledgeRetriever KnowledgeRetriever
-	preRAGTopK         int
-	intentRecognizer   intent.Recognizer
-	ragQueryPlanner    queryplan.QueryPlanner
-	evidenceProcessor  *evidenceprocessor.Processor
+	runner              agenteino.AgentRunner
+	store               session.Store
+	summarizer          session.Summarizer
+	recentWindowSize    int
+	summaryThreshold    int
+	now                 func() time.Time
+	graph               chatGraphRunner
+	graphErr            error
+	longTermMemory      longterm.Store
+	longTermMemoryTopK  int
+	profileLoader       profile.Loader
+	knowledgeRetriever  KnowledgeRetriever
+	preRAGTopK          int
+	intentRecognizer    intent.Recognizer
+	ragQueryPlanner     queryplan.QueryPlanner
+	evidenceProcessor   *evidenceprocessor.Processor
+	intentConfidenceMin float64
 }
 
 type KnowledgeRetriever interface {
@@ -101,19 +103,20 @@ func NewService(
 	}
 
 	service := &Service{
-		runner:             runner,
-		store:              store,
-		summarizer:         summarizer,
-		recentWindowSize:   config.RecentWindowSize,
-		summaryThreshold:   config.SummaryThreshold,
-		longTermMemory:     config.LongTermMemory,
-		longTermMemoryTopK: config.LongTermMemoryTopK,
-		profileLoader:      config.ProfileLoader,
-		knowledgeRetriever: config.KnowledgeRetriever,
-		preRAGTopK:         config.PreRAGTopK,
-		intentRecognizer:   config.IntentRecognizer,
-		ragQueryPlanner:    config.RAGQueryPlanner,
-		evidenceProcessor:  config.EvidenceProcessor,
+		runner:              runner,
+		store:               store,
+		summarizer:          summarizer,
+		recentWindowSize:    config.RecentWindowSize,
+		summaryThreshold:    config.SummaryThreshold,
+		longTermMemory:      config.LongTermMemory,
+		longTermMemoryTopK:  config.LongTermMemoryTopK,
+		profileLoader:       config.ProfileLoader,
+		knowledgeRetriever:  config.KnowledgeRetriever,
+		preRAGTopK:          config.PreRAGTopK,
+		intentRecognizer:    config.IntentRecognizer,
+		ragQueryPlanner:     config.RAGQueryPlanner,
+		evidenceProcessor:   config.EvidenceProcessor,
+		intentConfidenceMin: config.IntentConfidenceMin,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -129,6 +132,9 @@ func NewService(
 	}
 	if service.evidenceProcessor == nil {
 		service.evidenceProcessor = evidenceprocessor.NewDefault()
+	}
+	if service.intentConfidenceMin <= 0 {
+		service.intentConfidenceMin = 0.55
 	}
 	service.graph, service.graphErr = compileChatGraph(context.Background(), service)
 	return service

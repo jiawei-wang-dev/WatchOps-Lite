@@ -18,10 +18,21 @@ type RecognitionInput struct {
 	AvailableTools  []string
 	AvailableSkills []string
 	Metadata        map[string]any
+	Focus           FocusView
 }
 
 type MessageView struct {
 	Role      string
 	Content   string
 	CreatedAt time.Time
+}
+
+type FocusView struct {
+	LastIntent      string
+	KnownSlots      map[string]string
+	PendingQuestion string
+	Candidates      []string
+	TurnStatus      string
+	Summary         string
+	Available       bool
 }
