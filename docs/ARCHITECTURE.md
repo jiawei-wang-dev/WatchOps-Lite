@@ -473,9 +473,11 @@ The local Compose stack provisions Grafana with Prometheus as a read-only dataso
 - Unit tests: domain rules, context pruning, evidence validation, fallback selection, and stop conditions.
 - Golden tests: prompt rendering and structured response templates.
 - Contract tests: four tool adapters and their external API fixtures, including Prometheus and Jaeger response parsing.
+- Node eval: deterministic Intent, Slot, Context, and Routing execution plus explicit Fallback contract-only checks.
+- Retrieval eval: the running WatchOps Knowledge API and Elasticsearch index through `make eval-retrieval`; BM25 is exercised when embeddings are disabled and Hybrid Retrieval can be exercised when enabled.
 - Local demo: Compose-backed upload → logs/metrics/traces evidence → Chat → feedback → eval seed.
 - Future integration tests: disposable Elasticsearch, Prometheus, Jaeger, MySQL, and Redis lifecycles.
-- Future eval runner: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
+- Future eval coverage: tool selection, evidence coverage, forbidden claims, answer structure, and budget.
 
 CI uses redacted fixtures or containers and never depends on real production endpoints.
 

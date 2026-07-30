@@ -194,11 +194,17 @@ Execution boundaries:
 `make eval-nodes` runs the versioned, deterministic dataset in
 `testdata/node_eval_cases.json` and writes
 `tmp/node_eval_report.json` plus `tmp/node_eval_report.md`. The report evaluates
-Intent, Slot/Clarification, multi-turn Context, Multi-Agent Routing, Retrieval,
-and Fallback separately. The first five stages execute their local production
-boundaries; the 15 Fallback rows remain explicitly labelled `contract_only`
-and are excluded from the executed-verification total. Default execution uses
-no network or paid LLM and only fails on configured thresholds.
+Intent, Slot/Clarification, multi-turn Context, Multi-Agent Routing, and
+Fallback separately. Intent, Slot, Context, and Routing execute their local
+production boundaries; the 15 Fallback rows remain explicitly labelled
+`contract_only` and are excluded from the executed-verification total. Default
+execution uses no network or paid LLM and only fails on configured thresholds.
+
+RAG retrieval quality is not evaluated with a token-overlap fixture. Use
+`make eval-retrieval` to exercise the running WatchOps Knowledge API and local
+Elasticsearch index. With embeddings disabled this validates BM25; with
+embeddings enabled it can validate Hybrid Retrieval. Local results are not
+equivalent to production retrieval quality.
 
 Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
 

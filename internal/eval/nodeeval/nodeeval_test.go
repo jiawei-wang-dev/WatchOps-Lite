@@ -47,17 +47,28 @@ func TestDatasetCountsAndEvaluationMetrics(t *testing.T) {
 	}
 	if len(dataset.Intent) < 30 || len(dataset.Slot) < 20 ||
 		len(dataset.Context) < 15 || len(dataset.Routing) < 20 ||
-		len(dataset.Retrieval) < 20 || len(dataset.Fallback) < 15 {
+		len(dataset.Fallback) < 15 {
 		t.Fatalf("dataset counts are below required minimum: %#v", dataset)
 	}
 	report := Evaluate(context.Background(), dataset)
-	if report.Stages[EvalStageRetrieval].Metrics["mrr"].(float64) <= 0 ||
-		report.Stages[EvalStageSlot].Metrics["clarification_precision"].(float64) <= 0 ||
+	if report.Stages[EvalStageSlot].Metrics["clarification_precision"].(float64) <= 0 ||
 		report.Stages[EvalStageRouting].Metrics["per_role_recall"] == nil {
 		t.Fatalf("metrics = %#v", report.Stages)
 	}
 	if report.Stages[EvalStageContext].Metrics["isolated_session_count"] != 15 {
 		t.Fatalf("context metrics = %#v", report.Stages[EvalStageContext].Metrics)
+	}
+	if len(report.Stages) != 5 {
+		t.Fatalf("stage count = %d, want 5", len(report.Stages))
+	}
+	executed := len(dataset.Intent) + len(dataset.Slot) +
+		len(dataset.Context) + len(dataset.Routing)
+	declared := executed + len(dataset.Fallback)
+	if report.Summary["declared_case_total"] != declared ||
+		report.Summary["total"] != executed ||
+		report.Summary["passed"] != executed ||
+		report.Summary["contract_only_case_count"] != len(dataset.Fallback) {
+		t.Fatalf("summary = %#v", report.Summary)
 	}
 }
 
@@ -74,11 +85,8 @@ func TestWriteReportsAndOptionalThresholds(t *testing.T) {
 			EvalStageRouting: {
 				Metrics: map[string]any{"exact_match": 1.0},
 			},
-			EvalStageRetrieval: {
-				Metrics: map[string]any{"hit_rate_at_k": 1.0},
-			},
 			EvalStageFallback: {
-				Metrics: map[string]any{"pass_rate": 1.0},
+				Metrics: map[string]any{"contract_pass_rate": 1.0},
 			},
 		},
 	}
@@ -106,53 +114,5 @@ func TestWriteReportsAndOptionalThresholds(t *testing.T) {
 	})
 	if len(failures) != 1 {
 		t.Fatalf("threshold failures=%v", failures)
-	}
-}
-
-func TestRetrievalMRRCalculation(t *testing.T) {
-	cases := []RetrievalCase{
-		{ID: "a", Query: "alpha", RelevantIDs: []string{"doc-a"}},
-		{ID: "b", Query: "beta", RelevantIDs: []string{"doc-b"}},
-	}
-	corpus := []RetrievalDocument{
-		{ID: "doc-a", Content: "alpha"},
-		{ID: "doc-b", Content: "beta"},
-	}
-	stage := evaluateRetrieval(cases, corpus)
-	if stage.Metrics["mrr"].(float64) != 1 {
-		t.Fatalf("metrics=%#v", stage.Metrics)
-	}
-}
-
-func TestRetrievalMetricsUseIndependentCorpusRanking(t *testing.T) {
-	stage := evaluateRetrieval(
-		[]RetrievalCase{{
-			ID: "ranked", Query: "alpha beta",
-			RelevantIDs: []string{"relevant"},
-		}},
-		[]RetrievalDocument{
-			{ID: "distractor", Content: "alpha beta"},
-			{ID: "relevant", Content: "alpha"},
-		},
-	)
-	if stage.Metrics["mrr"].(float64) != 0.5 {
-		t.Fatalf("MRR = %#v, want 0.5", stage.Metrics["mrr"])
-	}
-	ndcg := stage.Metrics["ndcg_at_k"].(float64)
-	if ndcg < 0.63 || ndcg > 0.64 {
-		t.Fatalf("nDCG = %f, want about 0.6309", ndcg)
-	}
-}
-
-func TestRetrievalExpectedEmptyRecall(t *testing.T) {
-	stage := evaluateRetrieval(
-		[]RetrievalCase{{
-			ID: "empty", Query: "quantum",
-			ExpectNoRelevant: true,
-		}},
-		[]RetrievalDocument{{ID: "ops", Content: "checkout runbook"}},
-	)
-	if stage.Passed != 1 || stage.Metrics["empty_recall_count"] != 1 {
-		t.Fatalf("stage = %#v", stage)
 	}
 }

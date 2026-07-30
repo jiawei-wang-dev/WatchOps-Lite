@@ -1,5 +1,5 @@
 {
-  "version": "2026-07-30.v1",
+  "version": "2026-07-31.v2",
   "fixed_now": "2026-07-30T10:00:00Z",
   "intent": [
     {"id":"i01","message":"查看 checkout 最近 10 分钟错误率","expected_intent":"metrics_query","expected_service":"checkout","expected_symptom":"","expected_trace_id":"","expected_confidence_min":0.7,"expected_source":"rule"},
@@ -93,41 +93,6 @@
     {"id":"r18","intent":"metrics_query","confidence":0.4,"expected_selected_agents":["triage","evidence","knowledge","synthesis"],"expected_dynamic_routing_enabled":false},
     {"id":"r19","intent":"logs_query","confidence":0.54,"expected_selected_agents":["triage","evidence","knowledge","synthesis"],"expected_dynamic_routing_enabled":false},
     {"id":"r20","intent":"trace_analysis","confidence":0.55,"expected_selected_agents":["evidence","triage","synthesis"],"expected_dynamic_routing_enabled":true}
-  ],
-  "retrieval_corpus": [
-    {"id":"kb-checkout-error","title":"Checkout error-rate runbook","content":"checkout high error rate payment dependency retry amplification runbook"},
-    {"id":"kb-payment-timeout","title":"Payment timeout guide","content":"payment timeout investigation retry budget runbook"},
-    {"id":"kb-trace","title":"Trace investigation","content":"trace span jaeger slow critical path lookup"},
-    {"id":"kb-redis","title":"Redis latency","content":"redis timeout latency connection pool exhaustion"},
-    {"id":"kb-metrics","title":"Prometheus metrics","content":"prometheus qps p95 latency error rate metric query"},
-    {"id":"kb-logs","title":"Elasticsearch logs","content":"elasticsearch logs exception panic stack search"},
-    {"id":"kb-mitigation","title":"Dependency mitigation","content":"circuit breaker retry mitigation dependency failure"},
-    {"id":"kb-alert","title":"Alert investigation","content":"alert routing dependency failure high error rate"},
-    {"id":"kb-db","title":"Database saturation","content":"database saturation incident connection exhaustion"},
-    {"id":"kb-zh","title":"中文排障手册","content":"checkout 支付服务 超时 排障 错误率 重试放大 链路 慢调用 关键路径 日志 panic 指标 延迟 p95 故障 缓解 重试 告警 依赖 错误"},
-    {"id":"kb-topology","title":"Service topology","content":"checkout payment service topology dependency map"}
-  ],
-  "retrieval": [
-    {"id":"d01","query":"checkout high error rate runbook","relevant_ids":["kb-checkout-error"]},
-    {"id":"d02","query":"payment timeout investigation guide","relevant_ids":["kb-payment-timeout","kb-checkout-error"]},
-    {"id":"d03","query":"slow trace critical path spans","relevant_ids":["kb-trace"]},
-    {"id":"d04","query":"redis latency connection pool","relevant_ids":["kb-redis"]},
-    {"id":"d05","query":"retry amplification mitigation","relevant_ids":["kb-mitigation","kb-checkout-error"]},
-    {"id":"d06","query":"alert high error rate dependency","relevant_ids":["kb-alert","kb-checkout-error"]},
-    {"id":"d07","query":"checkout logs exception stack","relevant_ids":["kb-logs"]},
-    {"id":"d08","query":"payment metrics p95 latency","relevant_ids":["kb-metrics"]},
-    {"id":"d09","query":"trace id lookup jaeger","relevant_ids":["kb-trace"]},
-    {"id":"d10","query":"prometheus qps query guide","relevant_ids":["kb-metrics"]},
-    {"id":"d11","query":"elasticsearch logs search","relevant_ids":["kb-logs"]},
-    {"id":"d12","query":"circuit breaker runbook","relevant_ids":["kb-mitigation"]},
-    {"id":"d13","query":"database saturation incident","relevant_ids":["kb-db"]},
-    {"id":"d14","query":"生产 checkout 错误率 手册","relevant_ids":["kb-zh"]},
-    {"id":"d15","query":"支付服务 超时 排障","relevant_ids":["kb-zh"]},
-    {"id":"d16","query":"链路 慢调用 关键路径","relevant_ids":["kb-zh"]},
-    {"id":"d17","query":"日志 panic 调查","relevant_ids":["kb-zh","kb-logs"]},
-    {"id":"d18","query":"指标 延迟 p95","relevant_ids":["kb-zh","kb-metrics"]},
-    {"id":"d19","query":"故障 缓解 重试","relevant_ids":["kb-zh","kb-mitigation"]},
-    {"id":"d20","query":"quantum scheduler handbook","relevant_ids":[],"expect_no_relevant":true}
   ],
   "fallback": [
     {"id":"f01","failure":"intent_llm_timeout","expected_fallback":true,"expected_safe_code":"INTENT_RECOGNITION_FAILED","expected_limitation":true,"expected_no_panic":true},

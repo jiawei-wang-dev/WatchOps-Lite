@@ -13,24 +13,21 @@ import (
 type EvalStage string
 
 const (
-	EvalStageIntent    EvalStage = "intent"
-	EvalStageSlot      EvalStage = "slot"
-	EvalStageContext   EvalStage = "context"
-	EvalStageRouting   EvalStage = "routing"
-	EvalStageRetrieval EvalStage = "retrieval"
-	EvalStageFallback  EvalStage = "fallback"
+	EvalStageIntent   EvalStage = "intent"
+	EvalStageSlot     EvalStage = "slot"
+	EvalStageContext  EvalStage = "context"
+	EvalStageRouting  EvalStage = "routing"
+	EvalStageFallback EvalStage = "fallback"
 )
 
 type Dataset struct {
-	Version         string              `json:"version"`
-	FixedNow        string              `json:"fixed_now"`
-	Intent          []IntentCase        `json:"intent"`
-	Slot            []SlotCase          `json:"slot"`
-	Context         []ContextCase       `json:"context"`
-	Routing         []RoutingCase       `json:"routing"`
-	RetrievalCorpus []RetrievalDocument `json:"retrieval_corpus"`
-	Retrieval       []RetrievalCase     `json:"retrieval"`
-	Fallback        []FallbackCase      `json:"fallback"`
+	Version  string         `json:"version"`
+	FixedNow string         `json:"fixed_now"`
+	Intent   []IntentCase   `json:"intent"`
+	Slot     []SlotCase     `json:"slot"`
+	Context  []ContextCase  `json:"context"`
+	Routing  []RoutingCase  `json:"routing"`
+	Fallback []FallbackCase `json:"fallback"`
 }
 
 type Focus struct {
@@ -86,19 +83,6 @@ type RoutingCase struct {
 	ExpectedSelectedAgents        []string `json:"expected_selected_agents"`
 	ExpectedSkippedAgents         []string `json:"expected_skipped_agents,omitempty"`
 	ExpectedDynamicRoutingEnabled bool     `json:"expected_dynamic_routing_enabled"`
-}
-
-type RetrievalCase struct {
-	ID               string   `json:"id"`
-	Query            string   `json:"query"`
-	RelevantIDs      []string `json:"relevant_ids"`
-	ExpectNoRelevant bool     `json:"expect_no_relevant,omitempty"`
-}
-
-type RetrievalDocument struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
 }
 
 type FallbackCase struct {
@@ -230,45 +214,6 @@ func LoadDataset(reader io.Reader) (Dataset, error) {
 				"routing case %q requires expected_selected_agents",
 				current.ID,
 			)
-		}
-	}
-	for _, current := range dataset.Retrieval {
-		if err := check(EvalStageRetrieval, current.ID, current.Query); err != nil {
-			return Dataset{}, err
-		}
-		if len(current.RelevantIDs) == 0 && !current.ExpectNoRelevant {
-			return Dataset{}, fmt.Errorf(
-				"retrieval case %q requires relevant_ids or expect_no_relevant",
-				current.ID,
-			)
-		}
-	}
-	corpusIDs := map[string]struct{}{}
-	for index, document := range dataset.RetrievalCorpus {
-		if strings.TrimSpace(document.ID) == "" ||
-			strings.TrimSpace(document.Content) == "" {
-			return Dataset{}, fmt.Errorf(
-				"retrieval_corpus[%d] requires id and content",
-				index,
-			)
-		}
-		if _, duplicate := corpusIDs[document.ID]; duplicate {
-			return Dataset{}, fmt.Errorf(
-				"duplicate retrieval document id %q",
-				document.ID,
-			)
-		}
-		corpusIDs[document.ID] = struct{}{}
-	}
-	for _, current := range dataset.Retrieval {
-		for _, id := range current.RelevantIDs {
-			if _, exists := corpusIDs[id]; !exists {
-				return Dataset{}, fmt.Errorf(
-					"retrieval case %q references unknown document %q",
-					current.ID,
-					id,
-				)
-			}
 		}
 	}
 	for _, current := range dataset.Fallback {

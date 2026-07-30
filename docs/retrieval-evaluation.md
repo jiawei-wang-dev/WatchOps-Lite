@@ -84,9 +84,9 @@ export WATCHOPS_RETRIEVAL_EVAL_OUTPUT=tmp/retrieval_eval_report.json
 
 Generated reports under `tmp/` are local artifacts and should not be committed.
 
-## Unified node evaluation
+## Node and retrieval evaluation boundaries
 
-Retrieval is also one stage of the offline node-level suite:
+The offline node-level suite remains available:
 
 ```bash
 make eval-nodes
@@ -94,24 +94,29 @@ make eval-nodes
 
 This loads `testdata/node_eval_cases.json`, directly evaluates the rule Intent
 Recognizer, deterministic Slot validator, isolated multi-turn Focus continuity,
-`multiagent.PlanAgents`, an independent deterministic retrieval corpus, and
-safe fallback contracts. It writes `tmp/node_eval_report.json` and
+`multiagent.PlanAgents`, and safe fallback contracts. It covers Intent, Slot,
+Context, Routing, and Fallback. It writes `tmp/node_eval_report.json` and
 `tmp/node_eval_report.md`. Dataset time is fixed, each Context case has an
 isolated logical Session ID, and the default run uses no production Redis,
 network, paid LLM, user memory, prompts, or raw logs.
 
-The dataset declares 120 rows. Intent, Slot, Context, Routing, and Retrieval
-currently provide 105 executed local checks. The 15 Fallback rows are reported
-as `contract_only`, are excluded from the executed-verification total, and do
-not claim real fault injection. Production fallback paths are additionally
-covered by focused package tests.
+Case totals are calculated from the loaded dataset rather than hard-coded.
+Fallback rows are reported as `contract_only`, are excluded from the
+executed-verification total, and do not claim real fault injection. Production
+fallback paths are additionally covered by focused package tests.
+
+RAG retrieval quality is no longer evaluated with a token-overlap fixture.
+`make eval-retrieval` is the single retrieval-effectiveness evaluation path: it
+calls the running WatchOps Knowledge API and Elasticsearch index. With
+embeddings disabled it validates BM25; with embeddings enabled it can validate
+Hybrid Retrieval. Local results are not equivalent to production retrieval
+quality.
 
 Thresholds are opt-in:
 
 ```bash
 export WATCHOPS_INTENT_ACCURACY_MIN=0.80
 export WATCHOPS_ROUTING_EXACT_MATCH_MIN=0.80
-export WATCHOPS_RETRIEVAL_HIT_RATE_MIN=0.70
 export WATCHOPS_FALLBACK_PASS_RATE_MIN=0.90
 make eval-nodes
 ```
@@ -124,7 +129,7 @@ automatically promoted to Good/Bad Cases or used to change production routing.
 
 If retrieval returns no results, WatchOps-Lite should not invent knowledge evidence. Chat responses should include limitations when no knowledge evidence supports a claim. Other evidence tools, such as metrics, logs, traces, alerts, or topology, may still provide useful evidence.
 
-The eval runner marks empty retrieval as `empty_recall=true` so it is visible during demos and interviews.
+The real retrieval eval runner marks empty retrieval as `empty_recall=true` so it is visible during demos and interviews.
 
 ## Evidence constraints reduce hallucination
 
@@ -138,4 +143,4 @@ The Agent can only support conclusions and inferences with evidence IDs that cam
 - External provider quality and latency depend on the configured model; the eval never invents external results.
 - The demo corpus is intentionally small, so some cases are useful as partial-recall or empty-recall probes.
 
-Future improvements can add larger versioned datasets, before/after ranking comparison, corpus coverage reports, and CI-friendly fixture-backed retrieval tests.
+Future improvements can add larger versioned datasets, before/after ranking comparison, corpus coverage reports, and CI-friendly container-backed retrieval tests.

@@ -34,7 +34,7 @@ func Markdown(report Report) string {
 	builder.WriteString("|---|---:|---:|---:|\n")
 	stages := []EvalStage{
 		EvalStageIntent, EvalStageSlot, EvalStageContext,
-		EvalStageRouting, EvalStageRetrieval, EvalStageFallback,
+		EvalStageRouting, EvalStageFallback,
 	}
 	for _, name := range stages {
 		stage := report.Stages[name]
@@ -82,7 +82,6 @@ func ThresholdFailures(report Report, getenv func(string) string) []string {
 	}{
 		{"WATCHOPS_INTENT_ACCURACY_MIN", EvalStageIntent, "accuracy"},
 		{"WATCHOPS_ROUTING_EXACT_MATCH_MIN", EvalStageRouting, "exact_match"},
-		{"WATCHOPS_RETRIEVAL_HIT_RATE_MIN", EvalStageRetrieval, "hit_rate_at_k"},
 		{"WATCHOPS_FALLBACK_PASS_RATE_MIN", EvalStageFallback, "contract_pass_rate"},
 	}
 	failures := []string{}

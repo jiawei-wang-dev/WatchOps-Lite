@@ -2,7 +2,6 @@ package nodeeval
 
 import (
 	"context"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -29,10 +28,6 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 	report.Stages[EvalStageSlot] = evaluateSlot(ctx, dataset.Slot, now)
 	report.Stages[EvalStageContext] = evaluateContext(ctx, dataset.Context, now)
 	report.Stages[EvalStageRouting] = evaluateRouting(dataset.Routing)
-	report.Stages[EvalStageRetrieval] = evaluateRetrieval(
-		dataset.Retrieval,
-		dataset.RetrievalCorpus,
-	)
 	report.Stages[EvalStageFallback] = evaluateFallback(dataset.Fallback)
 	declaredTotal, matched, verifiedTotal, verifiedPassed := 0, 0, 0, 0
 	for _, stage := range report.Stages {
@@ -360,82 +355,6 @@ func evaluateRouting(cases []RoutingCase) StageReport {
 	return stage
 }
 
-func evaluateRetrieval(
-	cases []RetrievalCase,
-	corpus []RetrievalDocument,
-) StageReport {
-	stage := newStage(EvalStageRetrieval, len(cases))
-	hits, relevantFound, relevantTotal, empty := 0, 0, 0, 0
-	relevantCaseTotal := 0
-	var reciprocalRank, ndcg, latency float64
-	latencies := make([]float64, 0, len(cases))
-	for _, current := range cases {
-		started := time.Now()
-		ranked := rankRetrievalCorpus(current.Query, corpus, 5)
-		elapsed := durationMS(started)
-		latency += elapsed
-		latencies = append(latencies, elapsed)
-		relevant := stringSet(current.RelevantIDs)
-		relevantTotal += len(relevant)
-		if len(relevant) > 0 {
-			relevantCaseTotal++
-		}
-		firstRank, found, dcg := 0, 0, 0.0
-		for index, id := range ranked {
-			if _, ok := relevant[id]; !ok {
-				continue
-			}
-			found++
-			if firstRank == 0 {
-				firstRank = index + 1
-			}
-			dcg += 1 / math.Log2(float64(index+2))
-		}
-		relevantFound += found
-		hit := found > 0
-		if current.ExpectNoRelevant {
-			hit = len(ranked) == 0
-		}
-		if hit {
-			hits++
-			if firstRank > 0 {
-				reciprocalRank += 1 / float64(firstRank)
-			}
-		}
-		if len(ranked) == 0 {
-			empty++
-		}
-		ideal := 0.0
-		for index := 0; index < minInt(len(relevant), 5); index++ {
-			ideal += 1 / math.Log2(float64(index+2))
-		}
-		caseNDCG := 0.0
-		if ideal > 0 {
-			caseNDCG = dcg / ideal
-		}
-		ndcg += caseNDCG
-		stage.add(CaseResult{
-			ID: current.ID, Passed: hit, LatencyMS: elapsed,
-			FailureReason: failureIf(!hit, "no relevant document in top K"),
-			Actual: map[string]any{
-				"top_k_ids": ranked, "retrieval_mode": "deterministic_token_overlap_fixture",
-				"rerank_mode": "none", "fallback_reason": "",
-			},
-			Verification: "executed",
-		})
-	}
-	sort.Float64s(latencies)
-	stage.Metrics["hit_rate_at_k"] = ratio(hits, stage.Total)
-	stage.Metrics["recall_at_k"] = ratio(relevantFound, relevantTotal)
-	stage.Metrics["mrr"] = average(reciprocalRank, relevantCaseTotal)
-	stage.Metrics["ndcg_at_k"] = average(ndcg, relevantCaseTotal)
-	stage.Metrics["average_latency_ms"] = average(latency, stage.Total)
-	stage.Metrics["p95_latency_ms"] = percentile(latencies, 0.95)
-	stage.Metrics["empty_recall_count"] = empty
-	stage.Metrics["retrieval_mode"] = "deterministic_token_overlap_fixture"
-	return stage
-}
-
 func evaluateFallback(cases []FallbackCase) StageReport {
 	stage := newStage(EvalStageFallback, len(cases))
 	for _, current := range cases {
@@ -597,81 +516,9 @@ func serviceCandidates(message string, existing []string) []string {
 	return result
 }
 
-func rankRetrievalCorpus(
-	query string,
-	corpus []RetrievalDocument,
-	limit int,
-) []string {
-	queryTokens := tokenSet(query)
-	type scored struct {
-		id    string
-		score int
-	}
-	values := make([]scored, 0, len(corpus))
-	for _, current := range corpus {
-		score := 0
-		for token := range tokenSet(current.Title + " " + current.Content) {
-			if _, ok := queryTokens[token]; ok {
-				score++
-			}
-		}
-		if score > 0 {
-			values = append(values, scored{id: current.ID, score: score})
-		}
-	}
-	sort.SliceStable(values, func(i, j int) bool {
-		if values[i].score == values[j].score {
-			return values[i].id < values[j].id
-		}
-		return values[i].score > values[j].score
-	})
-	if len(values) > limit {
-		values = values[:limit]
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		result = append(result, value.id)
-	}
-	return result
-}
-
-func tokenSet(value string) map[string]struct{} {
-	result := map[string]struct{}{}
-	for _, token := range strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-		return r == ' ' || r == ',' || r == '-' || r == '_' || r == '/' ||
-			r == '，' || r == '。'
-	}) {
-		if token != "" {
-			result[token] = struct{}{}
-		}
-	}
-	return result
-}
-
-func percentile(values []float64, quantile float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	index := int(math.Ceil(quantile*float64(len(values)))) - 1
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(values) {
-		index = len(values) - 1
-	}
-	return values[index]
-}
-
 func failureIf(condition bool, message string) string {
 	if condition {
 		return message
 	}
 	return ""
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
 }
