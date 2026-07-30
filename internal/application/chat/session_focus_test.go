@@ -11,6 +11,7 @@ import (
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	sessionSummary "github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session/summary"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
 
 type capturingIntentRecognizer struct {
@@ -135,6 +136,48 @@ func TestRuleIntentKeepsServiceAndOverridesTime(t *testing.T) {
 	if err != nil || result.Service != "checkout" ||
 		result.TimeRange == nil || result.TimeRange.Relative != "yesterday" {
 		t.Fatalf("result=%#v error=%v", result, err)
+	}
+}
+
+func TestResolvedIntentTimeContextOverridesStructuredFallback(t *testing.T) {
+	now := time.Date(2026, 7, 30, 8, 0, 0, 0, time.UTC)
+	fallback := common.TimeRange{
+		From: "2026-07-30T07:40:00Z",
+		To:   "2026-07-30T08:00:00Z",
+	}
+	tests := []struct {
+		name string
+		hint string
+		want common.TimeRange
+	}{
+		{
+			name: "last ten minutes",
+			hint: "last_10_minutes",
+			want: common.TimeRange{
+				From: "2026-07-30T07:50:00Z",
+				To:   "2026-07-30T08:00:00Z",
+			},
+		},
+		{
+			name: "yesterday",
+			hint: "yesterday",
+			want: common.TimeRange{
+				From: "2026-07-29T00:00:00Z",
+				To:   "2026-07-30T00:00:00Z",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := resolvedIntentTimeContext(
+				fallback,
+				&intent.TimeRangeHint{Relative: test.hint},
+				now,
+			)
+			if got != test.want {
+				t.Fatalf("time range = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }
 

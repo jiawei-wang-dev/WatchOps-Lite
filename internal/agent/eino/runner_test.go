@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 )
@@ -71,6 +72,38 @@ func TestDeterministicRunnerReturnsLimitationWhenNoRouteMatches(t *testing.T) {
 	}
 	if len(output.Limitations) != 1 || output.Limitations[0].Code != "MORE_CONTEXT_REQUIRED" {
 		t.Fatalf("limitations = %#v, want MORE_CONTEXT_REQUIRED", output.Limitations)
+	}
+}
+
+func TestDeterministicRunnerUsesContextAwareIntentForEllipticalContinuation(t *testing.T) {
+	tools, err := BuildMockTools()
+	if err != nil {
+		t.Fatalf("BuildMockTools() error = %v", err)
+	}
+	timeRange := common.TimeRange{
+		From: "2026-07-30T07:50:00Z",
+		To:   "2026-07-30T08:00:00Z",
+	}
+	output, err := NewDeterministicRunner(tools).Run(context.Background(), AgentInput{
+		CurrentMessage: "换成 payment，看最近十分钟",
+		TimeContext:    timeRange,
+		Intent: intent.IntentResult{
+			Intent:         intent.IntentMetricsQuery,
+			Service:        "payment",
+			SuggestedTools: []intent.ToolName{intent.ToolQueryMetrics},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(output.ToolRuns) != 1 ||
+		output.ToolRuns[0].Tool != "query_metrics" ||
+		output.ToolRuns[0].Service != "payment" {
+		t.Fatalf("tool runs = %#v", output.ToolRuns)
+	}
+	if output.ToolRuns[0].TimeRange == nil ||
+		*output.ToolRuns[0].TimeRange != timeRange {
+		t.Fatalf("tool time range = %#v, want %#v", output.ToolRuns[0].TimeRange, timeRange)
 	}
 }
 

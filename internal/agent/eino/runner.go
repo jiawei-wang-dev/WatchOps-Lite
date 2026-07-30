@@ -513,7 +513,62 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 			},
 		})
 	}
+	if len(calls) == 0 {
+		calls = planIntentSuggestedToolCalls(input, service, logKeywords)
+	}
 
+	return calls
+}
+
+func planIntentSuggestedToolCalls(
+	input AgentInput,
+	service string,
+	logKeywords []string,
+) []plannedToolCall {
+	if strings.TrimSpace(input.Intent.Service) != "" {
+		service = strings.TrimSpace(input.Intent.Service)
+	}
+	calls := make([]plannedToolCall, 0, len(input.Intent.SuggestedTools))
+	for _, toolName := range input.Intent.SuggestedTools {
+		switch toolName {
+		case intent.ToolQueryMetrics:
+			calls = append(calls, plannedToolCall{
+				name: metrics.Name,
+				arguments: metrics.Input{
+					Service:    service,
+					MetricName: "http_server_error_rate",
+					TimeRange:  input.TimeContext,
+				},
+			})
+		case intent.ToolQueryLogs:
+			calls = append(calls, plannedToolCall{
+				name: logs.Name,
+				arguments: logs.Input{
+					Service:   service,
+					TimeRange: input.TimeContext,
+					Keywords:  logKeywords,
+					Level:     "error",
+				},
+			})
+		case intent.ToolQueryTraces:
+			calls = append(calls, plannedToolCall{
+				name: traces.Name,
+				arguments: traces.Input{
+					Service:   service,
+					TimeRange: input.TimeContext,
+					TraceID:   input.Intent.TraceID,
+				},
+			})
+		case intent.ToolSearchKnowledge:
+			calls = append(calls, plannedToolCall{
+				name: knowledge.Name,
+				arguments: knowledge.Input{
+					Query: input.CurrentMessage,
+					TopK:  3,
+				},
+			})
+		}
+	}
 	return calls
 }
 

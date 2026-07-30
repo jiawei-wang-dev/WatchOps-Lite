@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
@@ -190,6 +192,12 @@ func (s *Service) validateSlotsGraphNode(
 		intentFocusView(branch.focus, branch.focusAvailable),
 		s.intentConfidenceMin,
 	)
+	command := branch.command
+	command.TimeContext = resolvedIntentTimeContext(
+		command.TimeContext,
+		decision.Result.TimeRange,
+		s.now(),
+	)
 	agenteino.EmitStreamEvent(ctx, "slot_validation_completed", map[string]any{
 		"decision":               decision.Decision,
 		"reason_code":            decision.ReasonCode,
@@ -197,11 +205,64 @@ func (s *Service) validateSlotsGraphNode(
 		"known_slots":            decision.KnownSlots,
 	})
 	return decisionBranch{
-		command:        branch.command,
+		command:        command,
 		decision:       decision,
 		focus:          branch.focus,
 		focusAvailable: branch.focusAvailable,
 	}, nil
+}
+
+var relativeMinutesPattern = regexp.MustCompile(`^last_(\d+)_minutes$`)
+
+func resolvedIntentTimeContext(
+	fallback common.TimeRange,
+	hint *intent.TimeRangeHint,
+	now time.Time,
+) common.TimeRange {
+	if hint == nil {
+		return fallback
+	}
+	if strings.TrimSpace(hint.From) != "" || strings.TrimSpace(hint.To) != "" {
+		return common.TimeRange{
+			From: strings.TrimSpace(hint.From),
+			To:   strings.TrimSpace(hint.To),
+		}
+	}
+	relative := strings.TrimSpace(hint.Relative)
+	if bounds := strings.SplitN(relative, "/", 2); len(bounds) == 2 {
+		if _, fromErr := time.Parse(time.RFC3339, bounds[0]); fromErr == nil {
+			if _, toErr := time.Parse(time.RFC3339, bounds[1]); toErr == nil {
+				return common.TimeRange{From: bounds[0], To: bounds[1]}
+			}
+		}
+	}
+	now = now.UTC()
+	format := func(value time.Time) string {
+		return value.Format(time.RFC3339)
+	}
+	if match := relativeMinutesPattern.FindStringSubmatch(relative); len(match) == 2 {
+		minutes, err := strconv.Atoi(match[1])
+		if err == nil && minutes > 0 {
+			return common.TimeRange{
+				From: format(now.Add(-time.Duration(minutes) * time.Minute)),
+				To:   format(now),
+			}
+		}
+	}
+	startToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	switch relative {
+	case "yesterday":
+		return common.TimeRange{
+			From: format(startToday.AddDate(0, 0, -1)),
+			To:   format(startToday),
+		}
+	case "today":
+		return common.TimeRange{From: format(startToday), To: format(now)}
+	case "last_week":
+		return common.TimeRange{From: format(now.AddDate(0, 0, -7)), To: format(now)}
+	default:
+		return fallback
+	}
 }
 
 func proceedIntentGraphNode(

@@ -244,7 +244,14 @@ func newIntegrationStore(
 		t.Skip("redis-server is not installed; skipping optional Redis integration test")
 	}
 
-	socket := filepath.Join(t.TempDir(), "redis.sock")
+	tempDir, err := os.MkdirTemp("/tmp", "watchops-redis-test-")
+	if err != nil {
+		t.Fatalf("create short Redis test directory: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(tempDir)
+	})
+	socket := filepath.Join(tempDir, "redis.sock")
 	command := exec.Command(
 		binary,
 		"--port", "0",
