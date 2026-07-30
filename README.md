@@ -189,22 +189,27 @@ Execution boundaries:
 - Evidence Processor runs inside `collect_tool_evidence`; it formalizes tool results and attaches `citation_id` metadata without replacing original evidence IDs.
 - The system performs diagnosis only and does not automatically restart services, change configuration, or execute remediation.
 
-### Node-level evaluation
+### Evaluation layers
 
-`make eval-nodes` runs the versioned, deterministic dataset in
-`testdata/node_eval_cases.json` and writes
-`tmp/node_eval_report.json` plus `tmp/node_eval_report.md`. The report evaluates
-Intent, Slot/Clarification, multi-turn Context, Multi-Agent Routing, and
-Fallback separately. Intent, Slot, Context, and Routing execute their local
-production boundaries; the 15 Fallback rows remain explicitly labelled
-`contract_only` and are excluded from the executed-verification total. Default
-execution uses no network or paid LLM and only fails on configured thresholds.
+WatchOps-Lite separates evaluation by responsibility:
 
-RAG retrieval quality is not evaluated with a token-overlap fixture. Use
-`make eval-retrieval` to exercise the running WatchOps Knowledge API and local
-Elasticsearch index. With embeddings disabled this validates BM25; with
-embeddings enabled it can validate Hybrid Retrieval. Local results are not
-equivalent to production retrieval quality.
+1. `go test ./...` verifies deterministic governance logic such as Session
+   Focus and CAS, Slot Validation, Clarification branches, Graph routing, and
+   fallback behavior.
+2. `make eval-intent` runs `testdata/intent_eval_cases.json` against the Intent
+   Recognizer. It reports Intent Accuracy, per-field and aggregate Slot
+   Extraction Accuracy, and Joint Intent + Slot Exact Match.
+3. `make eval-retrieval` exercises the running WatchOps Knowledge API and local
+   Elasticsearch index. With embeddings disabled this validates BM25; with
+   embeddings enabled it can validate Hybrid Retrieval. Local results are not
+   equivalent to production retrieval quality.
+4. `make e2e-demo-zh` and `make e2e-demo-multi-zh` validate the complete
+   Single-Agent and Multi-Agent paths from HTTP input through evidence-bound
+   response generation.
+
+`make benchmark-agent` remains the local scenario, tool-use, and latency
+benchmark. Intent and Retrieval Eval reports are written under `tmp/` and are
+not committed.
 
 Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
 

@@ -1,0 +1,272 @@
+{
+  "version": "2026-07-31.v1",
+  "fixed_now": "2026-07-30T10:00:00Z",
+  "cases": [
+    {
+      "id": "metrics-payment-error-rate",
+      "message": "查 payment 最近十分钟的错误率",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "last_10_minutes",
+        "symptom": "error"
+      }
+    },
+    {
+      "id": "metrics-checkout-qps",
+      "message": "show checkout QPS for the last 30 minutes",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "last_30_minutes"
+      }
+    },
+    {
+      "id": "metrics-inventory-latency",
+      "message": "show inventory p95 latency yesterday",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "inventory",
+        "time_range": "yesterday",
+        "symptom": "latency"
+      }
+    },
+    {
+      "id": "metrics-cart-today",
+      "message": "看看 cart 今天的指标",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "cart",
+        "time_range": "today"
+      }
+    },
+    {
+      "id": "logs-payment-errors",
+      "message": "查 payment 最近 20 分钟的 error logs",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "last_20_minutes",
+        "symptom": "error"
+      }
+    },
+    {
+      "id": "logs-checkout-exception",
+      "message": "checkout yesterday exception logs",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "yesterday",
+        "symptom": "exception"
+      }
+    },
+    {
+      "id": "logs-auth-panic",
+      "message": "看 auth 上周的 panic 日志",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "auth",
+        "time_range": "last_week",
+        "symptom": "exception"
+      }
+    },
+    {
+      "id": "trace-by-id",
+      "message": "分析 trace 4bf92f3577b34da6a3ce929d0e0e4736",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      }
+    },
+    {
+      "id": "trace-payment-slow",
+      "message": "看看 payment 最近十分钟的 Trace 为什么慢",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "last_10_minutes",
+        "symptom": "latency"
+      }
+    },
+    {
+      "id": "trace-checkout-span",
+      "message": "slow span for checkout yesterday",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "yesterday",
+        "symptom": "latency"
+      }
+    },
+    {
+      "id": "incident-composite",
+      "message": "查 payment 错误率、看看 Trace、再给建议",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error"
+      },
+      "notes": "Composite diagnostic request should be triaged as one incident."
+    },
+    {
+      "id": "incident-checkout-timeout",
+      "message": "checkout 故障超时，查指标和日志",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "timeout"
+      }
+    },
+    {
+      "id": "incident-payment-alert",
+      "message": "payment 5xx 告警最近 15 分钟",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "last_15_minutes",
+        "symptom": "error"
+      }
+    },
+    {
+      "id": "incident-checkout-yesterday",
+      "message": "investigate checkout incident yesterday",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "yesterday"
+      }
+    },
+    {
+      "id": "knowledge-payment-timeout",
+      "message": "找一下 payment 超时处理手册",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "timeout"
+      }
+    },
+    {
+      "id": "knowledge-non-incident",
+      "message": "checkout 没报错，我只是想找文档",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "error"
+      }
+    },
+    {
+      "id": "knowledge-inventory-runbook",
+      "message": "show me the inventory runbook",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "inventory"
+      }
+    },
+    {
+      "id": "knowledge-payment-playbook",
+      "message": "payment playbook last week",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "last_week"
+      }
+    },
+    {
+      "id": "mitigation-checkout-timeout",
+      "message": "给 checkout 超时止损建议",
+      "expected_intent": "mitigation_advice",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "timeout"
+      }
+    },
+    {
+      "id": "mitigation-payment-latency",
+      "message": "mitigation advice for payment latency yesterday",
+      "expected_intent": "mitigation_advice",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "yesterday",
+        "symptom": "latency"
+      }
+    },
+    {
+      "id": "mitigation-cart",
+      "message": "cart 故障怎么缓解",
+      "expected_intent": "mitigation_advice",
+      "expected_slots": {
+        "service": "cart"
+      }
+    },
+    {
+      "id": "status-checkout-yesterday",
+      "message": "汇总 checkout 昨天的排障",
+      "expected_intent": "status_summary",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "yesterday"
+      }
+    },
+    {
+      "id": "status-payment-today",
+      "message": "summarize payment status today",
+      "expected_intent": "status_summary",
+      "expected_slots": {
+        "service": "payment",
+        "time_range": "today"
+      }
+    },
+    {
+      "id": "status-inventory-progress",
+      "message": "当前 inventory 排障进展",
+      "expected_intent": "status_summary",
+      "expected_slots": {
+        "service": "inventory"
+      }
+    },
+    {
+      "id": "general-greeting",
+      "message": "你好",
+      "expected_intent": "general_chat",
+      "expected_slots": {}
+    },
+    {
+      "id": "general-rag-question",
+      "message": "给我解释一下 RAG 是什么",
+      "expected_intent": "general_chat",
+      "expected_slots": {}
+    },
+    {
+      "id": "general-thanks",
+      "message": "thanks for the help",
+      "expected_intent": "general_chat",
+      "expected_slots": {}
+    },
+    {
+      "id": "ambiguous-logs-before-metrics",
+      "message": "payment exception 日志还是指标？先看日志",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "exception"
+      },
+      "notes": "Confusing expression with an explicit final preference."
+    },
+    {
+      "id": "task-switch-to-runbook",
+      "message": "不用查指标了，找一下 checkout runbook",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "checkout"
+      }
+    },
+    {
+      "id": "colloquial-payment",
+      "message": "帮我看看 payment",
+      "expected_intent": "general_chat",
+      "expected_slots": {
+        "service": "payment"
+      }
+    }
+  ]
+}

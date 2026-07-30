@@ -87,6 +87,7 @@ func TestBoundSessionFocusDropsSystemMessagesAndClonesMutableState(t *testing.T)
 	known := map[string]string{"service": "checkout"}
 	focus := boundSessionFocus(session.SessionFocus{
 		KnownSlots: known,
+		Summary:    "api_key=do-not-store " + strings.Repeat("界", 650),
 		RecentMessages: []session.Message{
 			{Role: session.RoleSystem, Content: "private system prompt"},
 			{Role: session.RoleUser, Content: "checkout"},
@@ -99,6 +100,10 @@ func TestBoundSessionFocusDropsSystemMessagesAndClonesMutableState(t *testing.T)
 	if len(focus.RecentMessages) != 1 ||
 		focus.RecentMessages[0].Role != session.RoleUser {
 		t.Fatalf("recent messages = %#v, system content must be excluded", focus.RecentMessages)
+	}
+	if len([]rune(focus.Summary)) > 600 ||
+		strings.Contains(focus.Summary, "do-not-store") {
+		t.Fatalf("summary was not bounded and redacted: %q", focus.Summary)
 	}
 }
 
@@ -209,8 +214,13 @@ func TestClarificationSkipsRunnerAndPersistsTurnState(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	if runner.calls != 0 || len(result.Agent.ToolRuns) != 0 ||
-		len(result.Agent.Evidence) != 0 {
+		len(result.Agent.Evidence) != 0 ||
+		len(result.Agent.Recommendations) != 0 {
 		t.Fatalf("runner calls=%d output=%#v", runner.calls, result.Agent)
+	}
+	if len(result.Agent.Limitations) != 1 ||
+		result.Agent.Limitations[0].Code != "CLARIFICATION_REQUIRED" {
+		t.Fatalf("limitations=%#v", result.Agent.Limitations)
 	}
 	if result.Agent.Metadata["status"] != "clarification_required" ||
 		store.savedFocus.TurnStatus != session.TurnStatusClarify ||

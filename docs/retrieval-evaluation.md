@@ -84,28 +84,21 @@ export WATCHOPS_RETRIEVAL_EVAL_OUTPUT=tmp/retrieval_eval_report.json
 
 Generated reports under `tmp/` are local artifacts and should not be committed.
 
-## Node and retrieval evaluation boundaries
+## Intent and retrieval evaluation boundaries
 
-The offline node-level suite remains available:
+Intent classification and direct natural-language slot extraction use a
+separate offline dataset:
 
 ```bash
-make eval-nodes
+make eval-intent
 ```
 
-This loads `testdata/node_eval_cases.json`, directly evaluates the rule Intent
-Recognizer, deterministic Slot validator, isolated multi-turn Focus continuity,
-`multiagent.PlanAgents`, and safe fallback contracts. It covers Intent, Slot,
-Context, Routing, and Fallback. It writes `tmp/node_eval_report.json` and
-`tmp/node_eval_report.md`. Dataset time is fixed, each Context case has an
-isolated logical Session ID, and the default run uses no production Redis,
-network, paid LLM, user memory, prompts, or raw logs.
+This loads `testdata/intent_eval_cases.json` and reports Intent Accuracy, Slot
+Field Accuracy for service/time range/Trace ID/symptom, and Joint Intent + Slot
+Exact Match. It does not evaluate Clarify/Proceed decisions, Session Focus,
+Graph routing, fallback contracts, or retrieval ranking. Those deterministic
+governance behaviors are covered by `go test ./...`.
 
-Case totals are calculated from the loaded dataset rather than hard-coded.
-Fallback rows are reported as `contract_only`, are excluded from the
-executed-verification total, and do not claim real fault injection. Production
-fallback paths are additionally covered by focused package tests.
-
-RAG retrieval quality is no longer evaluated with a token-overlap fixture.
 `make eval-retrieval` is the single retrieval-effectiveness evaluation path: it
 calls the running WatchOps Knowledge API and Elasticsearch index. With
 embeddings disabled it validates BM25; with embeddings enabled it can validate
@@ -116,9 +109,9 @@ Thresholds are opt-in:
 
 ```bash
 export WATCHOPS_INTENT_ACCURACY_MIN=0.80
-export WATCHOPS_ROUTING_EXACT_MATCH_MIN=0.80
-export WATCHOPS_FALLBACK_PASS_RATE_MIN=0.90
-make eval-nodes
+export WATCHOPS_SLOT_EXTRACTION_ACCURACY_MIN=0.80
+export WATCHOPS_JOINT_INTENT_SLOT_MIN=0.70
+make eval-intent
 ```
 
 Without these variables the command reports the real baseline and does not

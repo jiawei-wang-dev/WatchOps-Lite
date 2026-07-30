@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify eval-retrieval eval-nodes verify-agent benchmark-agent check-deps e2e-demo e2e-demo-zh e2e-demo-multi e2e-demo-multi-zh
+.PHONY: run test lint fmt verify eval-intent eval-retrieval verify-agent benchmark-agent check-deps e2e-demo e2e-demo-zh e2e-demo-multi e2e-demo-multi-zh
 
 CONFIG ?= configs/config.json
 
@@ -20,10 +20,10 @@ verify:
 eval-retrieval:
 	./scripts/eval_retrieval.sh
 
-eval-nodes:
-	go run ./cmd/node-eval
+eval-intent:
+	go run ./cmd/intent-eval
 
-verify-agent: verify eval-nodes benchmark-agent
+verify-agent: verify eval-intent benchmark-agent
 
 benchmark-agent:
 	./scripts/benchmark_agent.sh
