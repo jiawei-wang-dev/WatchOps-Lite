@@ -104,8 +104,59 @@ func TestRuleBasedRecognizesCheckoutRecentErrorRate(t *testing.T) {
 	}
 	if result.Service != "checkout" ||
 		(result.Intent != IntentMetricsQuery && result.Intent != IntentIncidentTriage) ||
-		result.TimeRange == nil || result.TimeRange.Relative != "last_10_minutes" {
+		result.TimeRange == nil || result.TimeRange.Relative != "last_10_minutes" ||
+		result.Symptom != "error" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuleBasedIntentEvalRegressions(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		intent  IntentType
+		service string
+		symptom string
+	}{
+		{
+			name:    "Chinese error rate symptom",
+			message: "查 payment 最近十分钟的错误率",
+			intent:  IntentMetricsQuery,
+			service: "payment",
+			symptom: "error",
+		},
+		{
+			name:    "composite diagnostic request",
+			message: "查 payment 错误率、看看 Trace、再给建议",
+			intent:  IntentIncidentTriage,
+			service: "payment",
+			symptom: "error",
+		},
+		{
+			name:    "explicit log preference",
+			message: "payment exception 日志还是指标？先看日志",
+			intent:  IntentLogsQuery,
+			service: "payment",
+			symptom: "exception",
+		},
+	}
+
+	recognizer := NewRuleBasedRecognizer()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := recognizer.Recognize(context.Background(), RecognitionInput{
+				Message: test.message,
+				Now:     time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatalf("Recognize() error = %v", err)
+			}
+			if result.Intent != test.intent ||
+				result.Service != test.service ||
+				result.Symptom != test.symptom {
+				t.Fatalf("result = %#v", result)
+			}
+		})
 	}
 }
 

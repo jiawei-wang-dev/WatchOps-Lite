@@ -204,13 +204,27 @@ Its response retains the structured `answer`, `tool_runs`, request/session IDs, 
 
 Each role step exposes operational fields such as status, duration, tool runs, evidence IDs, and limitations. It does not expose private reasoning, prompts, or raw model output.
 
+Before any role plan or retrieval, Multi-Agent uses the same bounded Session
+Focus, Intent Recognition, and deterministic Slot Validation as Single-Agent.
+Missing targets return HTTP 200 with the normal response shape and
+`metadata.error_code=CLARIFICATION_REQUIRED`; `agent_steps`, `evidence`,
+`tool_runs`, and answer recommendations are empty. The clarification question
+is returned as the answer conclusion and saved in Session Focus for the next
+turn.
+
 ```http
 POST /api/v1/chat/multi-agent/stream
 Content-Type: application/json
 Accept: text/event-stream
 ```
 
-The stream may emit `multi_agent_started`, `agent_step_started`, `agent_step_completed`, tool lifecycle events, `evidence_collected`, `synthesis_started`, `final_answer`, and `multi_agent_completed` or `multi_agent_failed`. The serialized `final_answer` event always precedes `multi_agent_completed`.
+The stream may emit `multi_agent_started`, `intent_recognized`,
+`slot_validation_completed`, role/tool lifecycle events, `evidence_collected`,
+`synthesis_started`, `final_answer`, and `multi_agent_completed` or
+`multi_agent_failed`. A clarification emits `clarification_required` and then
+the final/completed events, without AgentPlan, RAG, agent, tool, evidence, or
+synthesis events. The serialized `final_answer` event always precedes
+`multi_agent_completed`.
 
 The optional mode is a bounded Eino Graph demonstration. It does not replace the main Chat API or add autonomous planning/remediation semantics.
 

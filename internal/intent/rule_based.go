@@ -198,7 +198,7 @@ func detectSymptom(message string) string {
 		return "timeout"
 	case containsAny(lower, "latency", "slow", "p95", "耗时", "慢"):
 		return "latency"
-	case containsAny(lower, "error", "5xx", "500", "fail", "失败", "报错", "异常"):
+	case containsAny(lower, "error", "5xx", "500", "fail", "失败", "报错", "错误率", "錯誤率", "异常"):
 		return "error"
 	case containsAny(lower, "panic", "exception", "stack"):
 		return "exception"
@@ -209,6 +209,14 @@ func detectSymptom(message string) string {
 
 func classifyIntentByKeywords(message string, traceID string) (IntentType, float64, string) {
 	lower := strings.ToLower(message)
+	if containsAny(lower, "先看日志", "先查日志", "只看日志", "只查日志", "logs first", "log first", "prefer logs", "only logs") {
+		return IntentLogsQuery, 0.88, "explicit log preference detected"
+	}
+	if containsAny(lower, "trace", "span", "链路", "慢调用") &&
+		containsAny(lower, "metric", "metrics", "qps", "error rate", "错误率", "錯誤率", "latency", "p95", "指标", "log", "日志") &&
+		containsAny(lower, "建议", "advice", "recommend", "结合", "综合") {
+		return IntentIncidentTriage, 0.88, "composite diagnostic request detected"
+	}
 	if traceID != "" || containsAny(lower, "trace", "span", "链路", "慢调用") {
 		return IntentTraceAnalysis, 0.9, "trace signal detected"
 	}

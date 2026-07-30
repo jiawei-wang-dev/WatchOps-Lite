@@ -3,14 +3,13 @@ package chat
 import (
 	"context"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
 	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/skills"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/turngovernance"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/evidence"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/longterm"
@@ -127,31 +126,18 @@ func (s *Service) recognizeIntentGraphNode(
 			}),
 		}, nil
 	}
-	focusView := intentFocusView(input.focus, input.available)
-	recent := focusRecentMessages(input.focus.RecentMessages)
-	result, err := s.intentRecognizer.Recognize(ctx, intent.RecognitionInput{
-		Message:        input.command.Message,
-		SessionID:      input.command.SessionID,
-		UserID:         input.command.UserID,
-		Now:            s.now(),
-		RecentMessages: intent.BoundedMessages(recent),
-		Focus:          focusView,
-		Metadata: map[string]any{
-			"session_focus_available": input.available,
-			"last_intent":             input.focus.LastIntent,
-			"known_slots":             cloneStringMap(input.focus.KnownSlots),
-			"pending_question":        input.focus.PendingQuestion,
-			"turn_status":             input.focus.TurnStatus,
+	result, err := s.intentRecognizer.Recognize(ctx, turngovernance.RecognitionInput(
+		turngovernance.TurnInput{
+			RequestID:   input.command.RequestID,
+			SessionID:   input.command.SessionID,
+			UserID:      input.command.UserID,
+			Message:     input.command.Message,
+			TimeContext: input.command.TimeContext,
 		},
-		AvailableTools: []string{"query_metrics", "query_logs", "query_traces", "search_knowledge"},
-		AvailableSkills: []string{
-			"metric_inspection",
-			"log_investigation",
-			"trace_inspection",
-			"runbook_lookup",
-			"checkout_incident_diagnosis",
-		},
-	})
+		input.focus,
+		input.available,
+		s.now(),
+	))
 	if err != nil {
 		result = intent.SafeDefault(input.command.Message, intent.IntentLimitation{
 			Code:    "INTENT_RECOGNITION_FAILED",
@@ -180,20 +166,15 @@ func (s *Service) validateSlotsGraphNode(
 	ctx context.Context,
 	branch intentBranch,
 ) (decisionBranch, error) {
-	commandSlots := map[string]string{}
-	if branch.command.TimeContext.From != "" || branch.command.TimeContext.To != "" {
-		commandSlots["time_range"] = branch.command.TimeContext.From + "/" +
-			branch.command.TimeContext.To
-	}
 	decision := intent.ValidateSlots(
 		branch.command.Message,
 		branch.result,
-		commandSlots,
-		intentFocusView(branch.focus, branch.focusAvailable),
+		turngovernance.CommandSlots(branch.command.TimeContext),
+		turngovernance.FocusView(branch.focus, branch.focusAvailable),
 		s.intentConfidenceMin,
 	)
 	command := branch.command
-	command.TimeContext = resolvedIntentTimeContext(
+	command.TimeContext = turngovernance.ResolveTimeContext(
 		command.TimeContext,
 		decision.Result.TimeRange,
 		s.now(),
@@ -212,57 +193,12 @@ func (s *Service) validateSlotsGraphNode(
 	}, nil
 }
 
-var relativeMinutesPattern = regexp.MustCompile(`^last_(\d+)_minutes$`)
-
 func resolvedIntentTimeContext(
 	fallback common.TimeRange,
 	hint *intent.TimeRangeHint,
 	now time.Time,
 ) common.TimeRange {
-	if hint == nil {
-		return fallback
-	}
-	if strings.TrimSpace(hint.From) != "" || strings.TrimSpace(hint.To) != "" {
-		return common.TimeRange{
-			From: strings.TrimSpace(hint.From),
-			To:   strings.TrimSpace(hint.To),
-		}
-	}
-	relative := strings.TrimSpace(hint.Relative)
-	if bounds := strings.SplitN(relative, "/", 2); len(bounds) == 2 {
-		if _, fromErr := time.Parse(time.RFC3339, bounds[0]); fromErr == nil {
-			if _, toErr := time.Parse(time.RFC3339, bounds[1]); toErr == nil {
-				return common.TimeRange{From: bounds[0], To: bounds[1]}
-			}
-		}
-	}
-	now = now.UTC()
-	format := func(value time.Time) string {
-		return value.Format(time.RFC3339)
-	}
-	if match := relativeMinutesPattern.FindStringSubmatch(relative); len(match) == 2 {
-		minutes, err := strconv.Atoi(match[1])
-		if err == nil && minutes > 0 {
-			return common.TimeRange{
-				From: format(now.Add(-time.Duration(minutes) * time.Minute)),
-				To:   format(now),
-			}
-		}
-	}
-	startToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	switch relative {
-	case "yesterday":
-		return common.TimeRange{
-			From: format(startToday.AddDate(0, 0, -1)),
-			To:   format(startToday),
-		}
-	case "today":
-		return common.TimeRange{From: format(startToday), To: format(now)}
-	case "last_week":
-		return common.TimeRange{From: format(now.AddDate(0, 0, -7)), To: format(now)}
-	default:
-		return fallback
-	}
+	return turngovernance.ResolveTimeContext(fallback, hint, now)
 }
 
 func proceedIntentGraphNode(
@@ -855,45 +791,12 @@ func emptyClarificationOutput(branch decisionBranch) agenteino.AgentOutput {
 	}
 }
 
-func intentFocusView(focus session.SessionFocus, available bool) intent.FocusView {
-	return intent.FocusView{
-		LastIntent:      focus.LastIntent,
-		KnownSlots:      cloneStringMap(focus.KnownSlots),
-		PendingQuestion: focus.PendingQuestion,
-		Candidates:      append([]string{}, focus.Candidates...),
-		TurnStatus:      focus.TurnStatus,
-		Summary:         focus.Summary,
-		Available:       available,
-	}
-}
-
-func focusRecentMessages(messages []session.Message) []intent.MessageView {
-	result := make([]intent.MessageView, 0, len(messages))
-	for _, message := range messages {
-		if message.Role == session.RoleTool || message.Role == session.RoleSystem {
-			continue
-		}
-		result = append(result, intent.MessageView{
-			Role:      string(message.Role),
-			Content:   redactFocusText(message.Content),
-			CreatedAt: message.CreatedAt,
-		})
-	}
-	return result
-}
-
 func cloneStringMap(source map[string]string) map[string]string {
-	result := make(map[string]string, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
+	return turngovernance.CloneStringMap(source)
 }
-
-var focusSecretPattern = regexp.MustCompile(`(?i)(api[_-]?key|password|secret|token|redis://|mysql://|postgres://)\s*[:=]?\s*\S+`)
 
 func redactFocusText(value string) string {
-	return focusSecretPattern.ReplaceAllString(strings.TrimSpace(value), "[REDACTED]")
+	return turngovernance.RedactText(value)
 }
 
 func diagnosticSkillCards() []string {

@@ -154,7 +154,11 @@ Single-Agent remains the default execution model. The optional Multi-Agent API c
 
 ```mermaid
 flowchart LR
-    I["Validated request"] --> T["Triage Agent"]
+    H["HTTP validation"] --> G["Shared Turn Governance"]
+    G -->|"clarify"| C["Clarification + Focus CAS → END"]
+    G -->|"proceed"| A["AgentPlan"]
+    A --> R["Full Context + Role-aware RAG"]
+    R --> T["Triage Agent"]
     T --> E["Evidence Agent"]
     T --> K["Knowledge Agent"]
     E --> M["Stable merge"]
@@ -163,13 +167,45 @@ flowchart LR
     S --> O["Structured answer"]
 ```
 
+`internal/application/turngovernance` is shared by both execution modes. It
+loads the bounded `session:{id}:focus` record before recognition, constructs
+the context-aware `RecognitionInput`, invokes the configured shared
+`intent.Recognizer`, applies the single `intent.ValidateSlots` implementation,
+resolves relative time, and persists bounded Focus state through the existing
+`session.FocusStore`. Focus budgets, redaction, TTL, Version, and Redis
+WATCH/MULTI CAS are therefore not reimplemented for Multi-Agent.
+
+Multi-Agent performs this governance in its Service before invoking the Eino
+Orchestrator. A clarification response contains no AgentPlan, role steps, RAG,
+agent/tool calls, evidence, or recommendations. Proceed passes the validated
+`IntentDecision.Result` as `Input.Intent`; `normalize_multi_agent_input`
+normalizes that value and does not invoke the Recognizer again. Its internal
+Recognizer path remains only for direct low-level Orchestrator compatibility.
+
+The responsibility boundary is strict:
+
+- Intent Governance decides Intent, confirmed slots, and Clarify versus Proceed.
+- AgentPlan selects roles, allowed tools, skills, and role RAG hints.
+- TriagePlan creates evidence investigation steps and hypotheses.
+
+AgentPlan and TriagePlan cannot guess missing execution targets. After a Triage
+planner returns, governed Intent, service, and time are reapplied. Conflicting
+planner fields are recorded as discrepancy metadata and are not accepted as
+new truth.
+
 Evidence and Knowledge are native fan-out branches joined before synthesis. Evidence Agent may use only the existing observability Eino tools through Tool Guard and Tool Runtime. Knowledge Agent may use knowledge retrieval and bounded confirmed long-term memory. After data collection, each branch may run a bounded Eino ChatModel JSON analysis over only its own returned inputs. Merge deduplicates evidence IDs and limitations without adding claims. Synthesis may then use the same configured model to produce the existing answer schema from only the plan, role findings, merged evidence, and limitations; every cited ID is checked against the merged evidence allowlist.
 
 Each model-backed role preserves its previous deterministic implementation as a fallback. Missing configuration, model errors, timeouts, malformed JSON, empty required fields, or unknown evidence IDs never fail the Multi-Agent request. Per-role metadata records whether LLM analysis was attempted and used, its model and duration, and whether fallback was used. Top-level metadata records the successful LLM roles and total attempted role calls.
 
 Agents are bounded diagnostic roles; tools remain atomic external capabilities. The graph has no planner, role discovery, agent registry, inter-agent free-form conversation, autonomous remediation, MCP, or production-distributed scheduling. It is an optional interview/demo path and does not alter `/api/v1/chat`, `/api/v1/chat/stream`, their memory behavior, or the Single-Agent Eino ReAct graph.
 
-Multi-Agent SSE uses one serialized writer even though Evidence and Knowledge may execute concurrently. Operational events expose role, status, counts, duration, request ID, trace ID, and safe `agent_llm_started`, `agent_llm_completed`, or `agent_llm_failed` lifecycle events—not prompts, chain-of-thought, raw model output, or raw tool arguments. Dedicated spans cover `multiagent.evidence.llm_call`, `multiagent.knowledge.llm_call`, and `multiagent.synthesis.llm_call`.
+Multi-Agent JSON and SSE use the same governance result and recognize intent
+once. Clarification SSE emits start, intent, slot validation, clarification,
+final response, and completion; it emits no AgentPlan, RAG, agent, tool,
+evidence, or synthesis event. Proceed SSE still uses one serialized writer even
+though Evidence and Knowledge may execute concurrently. Operational events
+expose role, status, counts, duration, request ID, trace ID, and safe lifecycle
+metadata—not prompts, chain-of-thought, raw model output, or raw tool arguments.
 
 All current tools are read-only. Tool Guard rejects unsupported tool names, invalid service names, excessive time windows or limits, invalid trace IDs and severities, and excessive topology depth before external dependency calls. It redacts sensitive metadata keys such as password, token, secret, api_key, authorization, cookie, and credential from tool output where practical.
 

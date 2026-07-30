@@ -6,8 +6,12 @@ import (
 	"strings"
 	"time"
 
+	agenteino "github.com/jiawei-wang-dev/WatchOps-Lite/internal/agent/eino"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/application/turngovernance"
+	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/memory/session"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability"
+	runtimemetrics "github.com/jiawei-wang-dev/WatchOps-Lite/internal/observability/metrics"
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/tools/common"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -112,6 +116,65 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 		span.SetAttributes(attribute.Int64("multiagent.timeout_ms", s.timeout.Milliseconds()))
 	}
 
+	outcome, err := turngovernance.NewResolver(
+		s.sessionStore,
+		s.orchestrator.recognizer,
+		0.55,
+	).WithNow(s.now).Resolve(ctx, turngovernance.TurnInput{
+		RequestID:   command.RequestID,
+		SessionID:   command.SessionID,
+		UserID:      command.UserID,
+		Message:     command.Message,
+		TimeContext: command.TimeContext,
+		Metadata:    command.Metadata,
+	})
+	if err != nil {
+		observability.MarkError(span, "multi-agent turn governance failed")
+		return Result{}, fmt.Errorf("%w: turn governance failed", ErrExecution)
+	}
+	if outcome.Decision.Decision == intent.DecisionClarify {
+		output := buildClarificationResult(command, outcome)
+		agenteino.EmitStreamEvent(ctx, "clarification_required", map[string]any{
+			"intent_type":            outcome.ResolvedIntent.Intent,
+			"confidence":             outcome.ResolvedIntent.Confidence,
+			"missing_required_slots": outcome.Decision.MissingRequired,
+			"reason_code":            outcome.Decision.ReasonCode,
+			"pending_question":       outcome.Decision.ClarifyQuestion,
+		})
+		if err := s.persistFocus(
+			ctx,
+			command,
+			outcome,
+			output,
+			session.TurnStatusClarify,
+		); err != nil {
+			runtimemetrics.IncSessionMemoryUnavailable()
+			output.Metadata["persistence_failed"] = true
+			output.Metadata["session_focus_persistence_failed"] = true
+			output.FinalAnswer.Metadata["persistence_failed"] = true
+		}
+		traceID := observability.TraceID(ctx)
+		if traceID != "" {
+			output.Metadata["trace_id"] = traceID
+			output.FinalAnswer.Metadata["trace_id"] = traceID
+		}
+		return Result{
+			RequestID: command.RequestID,
+			SessionID: command.SessionID,
+			Output:    output,
+			TraceID:   traceID,
+		}, nil
+	}
+
+	// Intent Governance has declared the turn executable. AgentPlan can now
+	// select roles, but it cannot change the validated task or slots.
+	agentPlan := planAgentsWithTracing(ctx, outcome.ResolvedIntent)
+	agenteino.EmitStreamEvent(ctx, "multiagent_plan_created", map[string]any{
+		"intent_type":             string(outcome.ResolvedIntent.Intent),
+		"selected_agents":         agentRoleStrings(agentPlan.SelectedAgents),
+		"skipped_agents":          agentRoleStrings(agentPlan.SkippedAgents),
+		"dynamic_routing_enabled": agentPlan.DynamicRoutingEnabled,
+	})
 	snapshot, memoryAvailable := s.loadSessionContext(ctx, command.SessionID)
 	metadata := cloneServiceMetadata(command.Metadata)
 	metadata["session_context"] = sessionContextForPrompt(snapshot)
@@ -119,14 +182,19 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	metadata["session_context_loaded"] = memoryAvailable
 	metadata["recent_message_count"] = len(snapshot.RecentMessages)
 	metadata["summary_version"] = snapshot.Summary.Version
+	metadata["session_focus_available"] = outcome.MemoryAvailable
+	metadata["decision"] = string(outcome.Decision.Decision)
+	metadata["turn_governance_decision"] = string(outcome.Decision.Decision)
 
 	output, err := s.orchestrator.Execute(ctx, Input{
 		RequestID:   command.RequestID,
 		SessionID:   command.SessionID,
 		UserID:      command.UserID,
 		Message:     command.Message,
-		TimeContext: command.TimeContext,
+		TimeContext: outcome.ResolvedTime,
 		Metadata:    metadata,
+		Intent:      outcome.ResolvedIntent,
+		AgentPlan:   agentPlan,
 	})
 	if err != nil {
 		observability.MarkError(span, "multi-agent workflow failed")
@@ -140,11 +208,26 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	output.Metadata["session_context_loaded"] = memoryAvailable
 	output.Metadata["recent_message_count"] = len(snapshot.RecentMessages)
 	output.Metadata["summary_version"] = snapshot.Summary.Version
+	output.Metadata["session_focus_available"] = outcome.MemoryAvailable
+	output.Metadata["decision"] = string(outcome.Decision.Decision)
+	output.Metadata["turn_governance_decision"] = string(outcome.Decision.Decision)
 	if memoryAvailable {
-		if err := s.persistSessionContext(ctx, command, output); err != nil {
+		persistCommand := command
+		persistCommand.TimeContext = outcome.ResolvedTime
+		if err := s.persistSessionContext(ctx, persistCommand, output); err != nil {
 			output.Metadata["session_memory_available"] = false
 			output.Metadata["session_persist_error"] = "session_memory_unavailable"
 		}
+	}
+	if err := s.persistFocus(
+		ctx,
+		command,
+		outcome,
+		output,
+		session.TurnStatusCompleted,
+	); err != nil {
+		runtimemetrics.IncSessionMemoryUnavailable()
+		output.Metadata["session_focus_persistence_failed"] = true
 	}
 	if traceID != "" {
 		output.Metadata["trace_id"] = traceID
@@ -155,6 +238,84 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 		Output:    output,
 		TraceID:   traceID,
 	}, nil
+}
+
+func buildClarificationResult(
+	command Command,
+	outcome turngovernance.TurnOutcome,
+) MultiAgentResult {
+	metadata := map[string]any{
+		"decision":                string(intent.DecisionClarify),
+		"status":                  "clarification_required",
+		"error_code":              "CLARIFICATION_REQUIRED",
+		"intent_type":             string(outcome.ResolvedIntent.Intent),
+		"confidence":              outcome.ResolvedIntent.Confidence,
+		"reason_code":             outcome.Decision.ReasonCode,
+		"missing_slots":           append([]string{}, outcome.Decision.MissingRequired...),
+		"missing_required_slots":  append([]string{}, outcome.Decision.MissingRequired...),
+		"known_slots":             turngovernance.CloneStringMap(outcome.Decision.KnownSlots),
+		"pending_question":        outcome.Decision.ClarifyQuestion,
+		"ambiguous_reference":     outcome.Decision.ReasonCode == "AMBIGUOUS_REFERENCE",
+		"candidates":              append([]string{}, outcome.Focus.Candidates...),
+		"session_id":              command.SessionID,
+		"request_id":              command.RequestID,
+		"session_focus_available": outcome.MemoryAvailable,
+		"selected_agents":         []string{},
+	}
+	answerMetadata := cloneServiceMetadata(metadata)
+	answer := agenteino.AgentOutput{
+		Conclusions: []agenteino.Conclusion{{
+			Text:        outcome.Decision.ClarifyQuestion,
+			EvidenceIDs: []string{},
+		}},
+		Evidence:        []common.EvidenceItem{},
+		Inferences:      []agenteino.Inference{},
+		Recommendations: []agenteino.Recommendation{},
+		Limitations: []agenteino.Limitation{{
+			Code:    "CLARIFICATION_REQUIRED",
+			Message: "关键信息不足，本轮未执行 Multi-Agent、RAG 或工具调用。",
+		}},
+		ToolRuns: []agenteino.ToolRun{},
+		Metadata: answerMetadata,
+	}
+	return MultiAgentResult{
+		Steps:       []AgentStep{},
+		Evidence:    []common.EvidenceItem{},
+		ToolRuns:    []agenteino.ToolRun{},
+		FinalAnswer: answer,
+		Metadata:    metadata,
+	}
+}
+
+func (s *Service) persistFocus(
+	ctx context.Context,
+	command Command,
+	outcome turngovernance.TurnOutcome,
+	output MultiAgentResult,
+	status string,
+) error {
+	return turngovernance.PersistFocus(ctx, s.sessionStore, turngovernance.FocusUpdate{
+		SessionID:        command.SessionID,
+		RequestID:        command.RequestID,
+		Message:          command.Message,
+		AssistantSummary: multiAgentAssistantMemoryContent(output),
+		Status:           status,
+		Focus:            outcome.Focus,
+		Decision:         outcome.Decision,
+		ResolvedIntent:   outcome.ResolvedIntent,
+		EvidenceIDs:      multiAgentEvidenceIDs(output),
+		Now:              s.now(),
+	})
+}
+
+func multiAgentEvidenceIDs(output MultiAgentResult) []string {
+	result := make([]string, 0, len(output.Evidence))
+	for _, item := range output.Evidence {
+		if item.ID != "" {
+			result = append(result, item.ID)
+		}
+	}
+	return result
 }
 
 func (s *Service) loadSessionContext(

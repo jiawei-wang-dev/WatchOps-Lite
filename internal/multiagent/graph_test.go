@@ -54,6 +54,25 @@ func (llmMetadataTriagePlanner) Plan(
 	}, nil
 }
 
+type conflictingTriagePlanner struct{}
+
+func (conflictingTriagePlanner) Plan(
+	_ context.Context,
+	input Input,
+) (TriagePlan, error) {
+	return TriagePlan{
+		Service:      "payment",
+		IncidentType: "high_error_rate",
+		EvidencePlan: []string{"metrics", "logs"},
+		Query:        input.Message,
+		TimeContext: common.TimeRange{
+			From: "2020-01-01T00:00:00Z",
+			To:   "2020-01-01T00:10:00Z",
+		},
+		Language: "en",
+	}, nil
+}
+
 type recordingAnalyzer struct {
 	role AgentRole
 	mu   *sync.Mutex
@@ -190,6 +209,60 @@ func TestOrchestratorRunsNativeEinoFanOutAndFanIn(t *testing.T) {
 		result.Metadata["knowledge_fallback_used"] != true ||
 		result.Metadata["synthesis_fallback_used"] != true {
 		t.Fatalf("deterministic LLM metadata = %#v", result.Metadata)
+	}
+}
+
+func TestTriagePlannerCannotOverrideGovernedTargets(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen []TriagePlan
+	)
+	orchestrator := NewOrchestrator(
+		context.Background(),
+		conflictingTriagePlanner{},
+		recordingAnalyzer{role: AgentRoleEvidence, mu: &mu, seen: &seen},
+		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
+		fakeSynthesizer{},
+	)
+	verifiedTime := common.TimeRange{
+		From: "2026-07-31T07:50:00Z",
+		To:   "2026-07-31T08:00:00Z",
+	}
+	verifiedIntent := intent.Normalize(intent.IntentResult{
+		Intent:     intent.IntentIncidentTriage,
+		Confidence: 0.9,
+		Service:    "checkout",
+		TimeRange:  &intent.TimeRangeHint{Relative: "last_10_minutes"},
+		Source:     "test",
+	})
+	result, err := orchestrator.Execute(context.Background(), Input{
+		RequestID:   "req-governed-plan",
+		SessionID:   "ses-governed-plan",
+		Message:     "查 checkout 错误率",
+		TimeContext: verifiedTime,
+		Intent:      verifiedIntent,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("analyzers saw %d plans, want 2", len(seen))
+	}
+	for _, plan := range seen {
+		if plan.Service != "checkout" ||
+			plan.TimeContext != verifiedTime ||
+			plan.Intent.Service != "checkout" ||
+			plan.AgentPlan.Intent.Service != "checkout" {
+			t.Fatalf("analyzer plan = %#v", plan)
+		}
+		if len(plan.EvidencePlan) != 2 ||
+			plan.Metadata["planner_service_discrepancy"] == nil ||
+			plan.Metadata["planner_time_context_discrepancy"] == nil {
+			t.Fatalf("planner evidence/discrepancy metadata = %#v", plan)
+		}
+	}
+	if result.Metadata["intent_type"] != string(intent.IntentIncidentTriage) {
+		t.Fatalf("result metadata = %#v", result.Metadata)
 	}
 }
 

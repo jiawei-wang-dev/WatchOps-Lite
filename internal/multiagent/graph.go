@@ -40,6 +40,7 @@ type Input struct {
 	TimeContext common.TimeRange
 	Metadata    map[string]any
 	Intent      intent.IntentResult
+	AgentPlan   AgentPlan
 }
 
 type TriagePlanner interface {
@@ -310,6 +311,7 @@ func (o *Orchestrator) normalizeInput(
 		return normalizedInput{}, err
 	}
 	result := input.Intent
+	providedIntent := result.Intent != ""
 	if result.Intent == "" {
 		if o.recognizer != nil {
 			recognized, err := o.recognizer.Recognize(ctx, intent.RecognitionInput{
@@ -335,28 +337,40 @@ func (o *Orchestrator) normalizeInput(
 		result = intent.SafeDefault(input.Message)
 	}
 	result = intent.Normalize(result)
-	agenteino.EmitStreamEvent(ctx, "intent_recognized", map[string]any{
-		"intent":           result.Intent,
-		"confidence":       result.Confidence,
-		"source":           result.Source,
-		"suggested_tools":  result.SuggestedTools,
-		"suggested_agents": result.SuggestedAgents,
-		"fallback_used":    result.Metadata["fallback_used"],
-	})
+	if !providedIntent {
+		agenteino.EmitStreamEvent(ctx, "intent_recognized", map[string]any{
+			"intent":           result.Intent,
+			"confidence":       result.Confidence,
+			"source":           result.Source,
+			"suggested_tools":  result.SuggestedTools,
+			"suggested_agents": result.SuggestedAgents,
+			"fallback_used":    result.Metadata["fallback_used"],
+		})
+	}
 	input.Intent = result
 	input.Metadata["intent"] = result
 	input.Metadata["intent_type"] = string(result.Intent)
-	plan := planAgentsWithTracing(ctx, result)
+	plan := input.AgentPlan
+	providedPlan := plan.Intent.Intent != ""
+	if !providedPlan {
+		plan = planAgentsWithTracing(ctx, result)
+	} else {
+		// Governance already created this plan from the validated result.
+		// Reassert the normalized Intent without changing role selection.
+		plan.Intent = result
+	}
 	input.Metadata["agent_plan"] = plan.Metadata
 	input.Metadata["selected_agents"] = agentRoleStrings(plan.SelectedAgents)
 	input.Metadata["skipped_agents"] = agentRoleStrings(plan.SkippedAgents)
 	input.Metadata["dynamic_routing_enabled"] = plan.DynamicRoutingEnabled
-	agenteino.EmitStreamEvent(ctx, "multiagent_plan_created", map[string]any{
-		"intent_type":             string(result.Intent),
-		"selected_agents":         agentRoleStrings(plan.SelectedAgents),
-		"skipped_agents":          agentRoleStrings(plan.SkippedAgents),
-		"dynamic_routing_enabled": plan.DynamicRoutingEnabled,
-	})
+	if !providedPlan {
+		agenteino.EmitStreamEvent(ctx, "multiagent_plan_created", map[string]any{
+			"intent_type":             string(result.Intent),
+			"selected_agents":         agentRoleStrings(plan.SelectedAgents),
+			"skipped_agents":          agentRoleStrings(plan.SkippedAgents),
+			"dynamic_routing_enabled": plan.DynamicRoutingEnabled,
+		})
+	}
 	return normalizedInput{Input: input, Plan: plan}, nil
 }
 
@@ -468,10 +482,26 @@ func (o *Orchestrator) runTriage(
 		observability.MarkError(span, "Triage Agent failed")
 		return triageOutput{}, err
 	}
+	plan.Metadata = cloneMetadata(plan.Metadata)
+	if verified := input.Input.Intent.Service; plan.Service != verified {
+		plan.Metadata["planner_service_discrepancy"] = map[string]any{
+			"planner":  plan.Service,
+			"verified": verified,
+		}
+	}
+	if plan.TimeContext != input.Input.TimeContext {
+		plan.Metadata["planner_time_context_discrepancy"] = map[string]any{
+			"planner":  plan.TimeContext,
+			"verified": input.Input.TimeContext,
+		}
+	}
+	// Intent Governance owns executable targets. Triage may add hypotheses and
+	// evidence steps, but it cannot replace validated slots.
+	plan.Service = input.Input.Intent.Service
+	plan.TimeContext = input.Input.TimeContext
 	plan.Intent = input.Input.Intent
 	plan.AgentPlan = input.Plan
 	plan.RoleRAG = input.Context
-	plan.Metadata = cloneMetadata(plan.Metadata)
 	plan.Metadata["role_rag"] = input.Context.Metadata
 	plan.Metadata["intent_type"] = string(input.Input.Intent.Intent)
 	plan.Metadata["selected_agents"] = agentRoleStrings(input.Plan.SelectedAgents)

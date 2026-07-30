@@ -59,7 +59,7 @@ flowchart TB
     U --> MAAPI["Multi-Agent API<br/>POST /api/v1/chat/multi-agent<br/>POST /api/v1/chat/multi-agent/stream"]
 
     SAAPI --> SA["Single-Agent Eino Graph<br/>Intent + parallel context loading + Pre-RAG<br/>ReAct runtime tool decision"]
-    MAAPI --> MA["Multi-Agent Eino Graph<br/>Intent + AgentPlan<br/>conditional role execution"]
+    MAAPI --> MA["Shared Turn Governance<br/>Focus + Intent + Slot Validation<br/>then Multi-Agent Eino Graph"]
 
     SA --> TH["Unified Tool Harness / Tool Runtime"]
     MA --> TH
@@ -217,15 +217,18 @@ Single-Agent is best for quick investigation demos and normal chat-style trouble
 
 ## Multi-Agent Workflow
 
-Multi-Agent mode keeps the same tool contracts but runs a bounded, role-based diagnostic graph. It uses a fixed Eino Graph topology plus an intent-derived `AgentPlan` to decide which roles execute and which roles return skipped steps.
+Multi-Agent mode keeps the same tool contracts but runs a bounded, role-based diagnostic graph. Before that graph, it uses the same Turn Governance implementation as Single-Agent: bounded Session Focus, context-aware Intent Recognition and natural-language slot extraction, deterministic `SlotRule` validation, ambiguous-reference detection, and a tool-free Clarification branch.
 
 ```mermaid
 flowchart TB
-    U["User"] --> API["Multi-Agent API / Service<br/>validation / overall timeout<br/>load Redis session context"]
-
-    API --> N["Normalize Input<br/>Intent Recognition + AgentPlan<br/>selected roles / skipped roles<br/>role tools / skill cards / RAG hints"]
-
-    N --> R["Shared Global Pre-RAG<br/>role_aware_rag<br/>HybridRetrieve once<br/>role-aware context split"]
+    U["User"] --> API["Multi-Agent API / Service<br/>basic validation / overall timeout"]
+    API --> F["Load Session Focus<br/>bounded slots + messages"]
+    F --> I["Context-aware Intent Recognition<br/>natural-language slot extraction"]
+    I --> V["Deterministic Slot Validation"]
+    V -->|"clarify"| C["Clarification Result<br/>persist Focus → END"]
+    V -->|"proceed"| P["AgentPlan<br/>roles / tools / skill and RAG hints"]
+    P --> SC["Load Full Session Context"]
+    SC --> R["Shared Global Pre-RAG<br/>role_aware_rag<br/>HybridRetrieve once<br/>role-aware context split"]
 
     R --> T["Triage Agent<br/>service / incident type<br/>evidence plan / candidate hypotheses"]
 
@@ -241,20 +244,26 @@ flowchart TB
 
     S --> B["Response Builder<br/>steps / evidence / tool runs / metadata"]
 
-    B --> P["Persist Redis Session Context<br/>user message + diagnostic result"]
+    B --> PS["Persist Redis Session Context + Focus<br/>CAS / shared TTL / bounded state"]
 
-    P --> F["Final Answer"]
+    PS --> FA["Final Answer"]
 ```
 
-Multi-Agent uses a fixed Eino Graph topology and an intent-derived AgentPlan to decide which roles execute or return skipped steps. Shared Global Pre-RAG retrieves knowledge once before role execution and distributes bounded context by role. Triage creates the investigation scope, evidence plan, and candidate hypotheses. Evidence and Knowledge execute as native fan-out branches, then merge_agent_findings performs deterministic fan-in, evidence deduplication, limitation merging, citation assignment, and hypothesis evaluation. Synthesis consumes only the merged findings and evaluated hypotheses, validates every evidence reference, and produces an evidence-bound answer without inventing new evidence or calling new observability tools.
+Single-Agent and Multi-Agent share `internal/application/turngovernance` for Focus loading, budgets and redaction, RecognitionInput construction, command/Focus slot precedence, relative-time resolution, and versioned Focus persistence. Both modes continue to use the one `internal/intent` implementation for recognizers, `IntentDecision`, `SlotRule`, `ValidateSlots`, and clarification reason codes. They do not maintain separate governance rules.
 
-Intent recognition and AgentPlan creation are conceptual substages inside the `normalize_multi_agent_input` Graph node rather than separate Eino Graph nodes.
+On `clarify`, the service returns the existing Multi-Agent response shape with empty steps, selected agents, evidence, tool runs, and recommendations. It persists `TurnStatus=clarify` and ends before AgentPlan, full Context, Role-aware RAG, Triage, agents, tools, evidence, or synthesis. JSON and SSE call the same service path; SSE emits intent/slot/clarification lifecycle events but no execution events.
 
-The Multi-Agent orchestrator first builds the structured result. The service then attempts to persist the user message and diagnostic response to Redis before returning the public result. A persistence failure is exposed through response metadata without replacing the completed diagnosis.
+On `proceed`, the validated `IntentDecision.Result` is the only executable task truth passed to the Orchestrator. Because `Input.Intent` is populated, the Orchestrator normalizes it without calling the Recognizer again, then creates AgentPlan. Full Session Context is loaded only after validation. Shared Global Pre-RAG retrieves knowledge once before role execution and distributes bounded context by role.
+
+Intent Governance decides the task, confirmed parameters, and whether execution is safe. AgentPlan only selects roles, allowed tools, and role hints. TriagePlan only adds investigation steps, hypotheses, and an evidence plan. A Triage planner service/time conflict is recorded as discrepancy metadata, while the validated service and time remain authoritative.
+
+After successful execution, Multi-Agent persists ordinary messages and the same `session:{id}:focus` record used by Single-Agent. The Redis Store retains the shared TTL and WATCH/MULTI version CAS. Focus persistence failures and version conflicts are safe degradations and never replace a completed clarification or diagnosis.
 
 Role boundaries:
 
-- Triage defines the investigation scope, evidence plan, and candidate hypotheses, but does not declare the final root cause.
+- Intent Governance identifies the task, extracts/merges slots, and decides Clarify or Proceed.
+- AgentPlan selects roles and role capabilities; it cannot recognize intent, change validated slots, or decide clarification.
+- Triage defines investigation steps, evidence plan, and candidate hypotheses, but cannot override the validated service/time or declare the final root cause.
 - Evidence executes the bounded observability plan and reports verifiable runtime signals from metrics, logs, traces, alerts, and topology.
 - Knowledge retrieves role-aware RAG context, runbooks, and confirmed long-term memory as guidance, not proof of the current incident.
 - Merge performs deterministic fan-in, evidence deduplication, limitation merging, evidence processing, citation assignment, and hypothesis evaluation.

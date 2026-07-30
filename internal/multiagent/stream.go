@@ -58,6 +58,9 @@ func (s *Service) Stream(
 	if err != nil {
 		return Result{}, err
 	}
+	if decision, _ := result.Output.Metadata["decision"].(string); decision == "clarify" {
+		return result, nil
+	}
 	safeEmit("evidence_collected", map[string]any{
 		"trace_id":       result.TraceID,
 		"evidence_count": len(result.Output.Evidence),
