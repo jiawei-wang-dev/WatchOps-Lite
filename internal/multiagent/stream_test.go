@@ -84,9 +84,10 @@ func TestServiceStreamEmitsRoleAndEvidenceProgress(t *testing.T) {
 func TestServiceStreamClarificationSkipsExecutionEvents(t *testing.T) {
 	recognizer := &countingRecognizer{}
 	graph := &recordingGraphRunner{}
-	orchestrator := testOrchestrator(t).WithIntentRecognizer(recognizer)
+	orchestrator := testOrchestrator(t)
 	orchestrator.graph = graph
 	service := NewService(orchestrator).
+		WithIntentRecognizer(recognizer).
 		WithSessionMemory(&serviceSessionStore{})
 	events := []string{}
 

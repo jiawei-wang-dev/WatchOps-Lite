@@ -160,6 +160,47 @@ func TestRuleBasedIntentEvalRegressions(t *testing.T) {
 	}
 }
 
+func TestRuleBasedMarksStructuredEscalationSignals(t *testing.T) {
+	recognizer := NewRuleBasedRecognizer()
+	conflict, err := recognizer.Recognize(context.Background(), RecognitionInput{
+		Message: "查 payment 指标还是日志",
+	})
+	if err != nil {
+		t.Fatalf("Recognize(conflict) error=%v", err)
+	}
+	if conflict.Metadata["intent_signal_conflict"] != true {
+		t.Fatalf("conflict metadata=%#v", conflict.Metadata)
+	}
+
+	explicit, err := recognizer.Recognize(context.Background(), RecognitionInput{
+		Message: "payment 指标还是日志？先看日志",
+	})
+	if err != nil {
+		t.Fatalf("Recognize(explicit) error=%v", err)
+	}
+	if explicit.Intent != IntentLogsQuery ||
+		explicit.Metadata["intent_signal_conflict"] != false {
+		t.Fatalf("explicit result=%#v", explicit)
+	}
+
+	unresolved, err := recognizer.Recognize(context.Background(), RecognitionInput{
+		Message: "第二个",
+		Focus: FocusView{
+			Available:  true,
+			LastIntent: string(IntentIncidentTriage),
+			KnownSlots: map[string]string{},
+			Candidates: []string{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Recognize(unresolved) error=%v", err)
+	}
+	if unresolved.Metadata["context_reference_unresolved"] != true ||
+		unresolved.Metadata["ambiguous"] != true {
+		t.Fatalf("unresolved metadata=%#v", unresolved.Metadata)
+	}
+}
+
 func hasTool(result IntentResult, tool ToolName) bool {
 	for _, current := range result.SuggestedTools {
 		if current == tool {

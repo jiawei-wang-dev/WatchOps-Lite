@@ -204,12 +204,13 @@ type MultiAgentConfig struct {
 }
 
 type IntentConfig struct {
-	Enabled          bool     `json:"enabled"`
-	Mode             string   `json:"mode"`
-	LLMEnabled       bool     `json:"llm_enabled"`
-	Timeout          Duration `json:"timeout"`
-	MinLLMConfidence float64  `json:"min_llm_confidence"`
-	EmitStreamEvents bool     `json:"emit_stream_events"`
+	Enabled           bool     `json:"enabled"`
+	Mode              string   `json:"mode"`
+	LLMEnabled        bool     `json:"llm_enabled"`
+	Timeout           Duration `json:"timeout"`
+	MinLLMConfidence  float64  `json:"min_llm_confidence"`
+	MinRuleConfidence float64  `json:"min_rule_confidence"`
+	EmitStreamEvents  bool     `json:"emit_stream_events"`
 }
 
 type LLMConfig struct {
@@ -360,12 +361,13 @@ func Default() Config {
 			SynthesisLLMTimeout:       Duration(25 * time.Second),
 		},
 		Intent: IntentConfig{
-			Enabled:          true,
-			Mode:             "hybrid",
-			LLMEnabled:       false,
-			Timeout:          Duration(3 * time.Second),
-			MinLLMConfidence: 0.55,
-			EmitStreamEvents: true,
+			Enabled:           true,
+			Mode:              "hybrid",
+			LLMEnabled:        false,
+			Timeout:           Duration(3 * time.Second),
+			MinLLMConfidence:  0.55,
+			MinRuleConfidence: 0.75,
+			EmitStreamEvents:  true,
 		},
 		LLM: LLMConfig{
 			Enabled:        false,
@@ -705,6 +707,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("%sINTENT_MIN_LLM_CONFIDENCE must be a number: %w", envPrefix, err)
 		}
 		cfg.Intent.MinLLMConfidence = parsed
+	}
+	if value, ok := lookup("INTENT_MIN_RULE_CONFIDENCE"); ok {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("%sINTENT_MIN_RULE_CONFIDENCE must be a number: %w", envPrefix, err)
+		}
+		cfg.Intent.MinRuleConfidence = parsed
 	}
 
 	if value, ok := lookup("TELEMETRY_ENABLED"); ok {
@@ -1083,6 +1092,9 @@ func (cfg Config) Validate() error {
 	}
 	if cfg.Intent.MinLLMConfidence < 0 || cfg.Intent.MinLLMConfidence > 1 {
 		return errors.New("intent.min_llm_confidence must be between 0 and 1")
+	}
+	if cfg.Intent.MinRuleConfidence < 0 || cfg.Intent.MinRuleConfidence > 1 {
+		return errors.New("intent.min_rule_confidence must be between 0 and 1")
 	}
 	if strings.ToLower(strings.TrimSpace(cfg.LLM.Provider)) != "openai_compatible" {
 		return errors.New("llm.provider must be openai_compatible")

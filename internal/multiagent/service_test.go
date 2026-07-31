@@ -208,9 +208,11 @@ func TestServiceGovernanceClarifiesBeforeOrchestrator(t *testing.T) {
 	store := &serviceSessionStore{}
 	recognizer := &countingRecognizer{}
 	graph := &recordingGraphRunner{}
-	orchestrator := testOrchestrator(t).WithIntentRecognizer(recognizer)
+	orchestrator := testOrchestrator(t)
 	orchestrator.graph = graph
-	service := NewService(orchestrator).WithSessionMemory(store)
+	service := NewService(orchestrator).
+		WithIntentRecognizer(recognizer).
+		WithSessionMemory(store)
 
 	result, err := service.Execute(context.Background(), Command{
 		RequestID:   "req-clarify",
@@ -245,9 +247,11 @@ func TestServiceGovernanceProceedsWithValidatedIntentOnce(t *testing.T) {
 	store := &serviceSessionStore{}
 	recognizer := &countingRecognizer{}
 	graph := &recordingGraphRunner{}
-	orchestrator := testOrchestrator(t).WithIntentRecognizer(recognizer)
+	orchestrator := testOrchestrator(t)
 	orchestrator.graph = graph
-	service := NewService(orchestrator).WithSessionMemory(store)
+	service := NewService(orchestrator).
+		WithIntentRecognizer(recognizer).
+		WithSessionMemory(store)
 	service.now = func() time.Time {
 		return time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
 	}

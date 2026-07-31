@@ -42,21 +42,40 @@ func (e *ValidationError) Error() string {
 }
 
 type Service struct {
-	orchestrator *Orchestrator
-	sessionStore session.Store
-	timeout      time.Duration
-	now          func() time.Time
+	orchestrator     *Orchestrator
+	sessionStore     session.Store
+	intentRecognizer intent.Recognizer
+	timeout          time.Duration
+	now              func() time.Time
 }
 
 func NewService(orchestrator *Orchestrator) *Service {
+	var recognizer intent.Recognizer
+	if orchestrator != nil {
+		recognizer = orchestrator.recognizer
+	}
+	if recognizer == nil {
+		recognizer = intent.NewRuleBasedRecognizer()
+	}
 	return &Service{
-		orchestrator: orchestrator,
-		now:          func() time.Time { return time.Now().UTC() },
+		orchestrator:     orchestrator,
+		intentRecognizer: recognizer,
+		now:              func() time.Time { return time.Now().UTC() },
 	}
 }
 
 func (s *Service) WithSessionMemory(store session.Store) *Service {
 	s.sessionStore = store
+	return s
+}
+
+// WithIntentRecognizer injects the application-wide recognizer used by Turn
+// Governance. The Orchestrator keeps its own recognizer only for direct,
+// low-level calls that bypass Service.
+func (s *Service) WithIntentRecognizer(recognizer intent.Recognizer) *Service {
+	if recognizer != nil {
+		s.intentRecognizer = recognizer
+	}
 	return s
 }
 
@@ -118,7 +137,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 
 	outcome, err := turngovernance.NewResolver(
 		s.sessionStore,
-		s.orchestrator.recognizer,
+		s.intentRecognizer,
 		0.55,
 	).WithNow(s.now).Resolve(ctx, turngovernance.TurnInput{
 		RequestID:   command.RequestID,

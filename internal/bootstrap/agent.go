@@ -139,12 +139,13 @@ func buildIntentRecognizer(
 	factory chatModelFactory,
 ) intent.Recognizer {
 	intentConfig := intent.Config{
-		Enabled:          cfg.Intent.Enabled,
-		Mode:             cfg.Intent.Mode,
-		LLMEnabled:       cfg.Intent.LLMEnabled,
-		Timeout:          cfg.Intent.Timeout.Value(),
-		MinLLMConfidence: cfg.Intent.MinLLMConfidence,
-		EmitStreamEvents: cfg.Intent.EmitStreamEvents,
+		Enabled:           cfg.Intent.Enabled,
+		Mode:              cfg.Intent.Mode,
+		LLMEnabled:        cfg.Intent.LLMEnabled,
+		Timeout:           cfg.Intent.Timeout.Value(),
+		MinLLMConfidence:  cfg.Intent.MinLLMConfidence,
+		MinRuleConfidence: cfg.Intent.MinRuleConfidence,
+		EmitStreamEvents:  cfg.Intent.EmitStreamEvents,
 	}.Normalize()
 	rule := intent.NewRuleBasedRecognizer()
 	if !intentConfig.LLMEnabled || !cfg.LLM.Enabled {

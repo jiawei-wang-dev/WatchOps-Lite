@@ -41,6 +41,7 @@ func (r *RuleBasedRecognizer) Recognize(
 	service := detectService(message)
 	timeRange := detectTimeRange(message, input.Now)
 	contextApplied := false
+	contextReferenceUnresolved := false
 	if ordinal := referencedCandidateIndex(message); ordinal >= 0 {
 		if len(input.Focus.Candidates) > ordinal {
 			service = input.Focus.Candidates[ordinal]
@@ -51,6 +52,7 @@ func (r *RuleBasedRecognizer) Recognize(
 		} else {
 			confidence = 0.3
 			reason = "ordinal reference has no session candidates"
+			contextReferenceUnresolved = true
 		}
 	} else if isEllipticalContinuation(message, intentType) && input.Focus.Available {
 		intentType = validContextIntent(input.Focus.LastIntent)
@@ -78,8 +80,12 @@ func (r *RuleBasedRecognizer) Recognize(
 		RAGHints:        buildRAGHints(intentType, message),
 		Source:          "rule",
 		Metadata: map[string]any{
-			"rule_based":            true,
-			"session_focus_applied": contextApplied,
+			"rule_based":             true,
+			"session_focus_applied":  contextApplied,
+			"intent_signal_conflict": detectIntentSignalConflict(message),
+			"ambiguous":              confidence < 0.5,
+			"context_reference_unresolved": contextReferenceUnresolved ||
+				(isContextReference(message) && !input.Focus.Available),
 		},
 	}
 	normalized := Normalize(result)
@@ -209,12 +215,10 @@ func detectSymptom(message string) string {
 
 func classifyIntentByKeywords(message string, traceID string) (IntentType, float64, string) {
 	lower := strings.ToLower(message)
-	if containsAny(lower, "先看日志", "先查日志", "只看日志", "只查日志", "logs first", "log first", "prefer logs", "only logs") {
+	if hasExplicitLogPreference(lower) {
 		return IntentLogsQuery, 0.88, "explicit log preference detected"
 	}
-	if containsAny(lower, "trace", "span", "链路", "慢调用") &&
-		containsAny(lower, "metric", "metrics", "qps", "error rate", "错误率", "錯誤率", "latency", "p95", "指标", "log", "日志") &&
-		containsAny(lower, "建议", "advice", "recommend", "结合", "综合") {
+	if isCompositeDiagnosticRequest(lower) {
 		return IntentIncidentTriage, 0.88, "composite diagnostic request detected"
 	}
 	if traceID != "" || containsAny(lower, "trace", "span", "链路", "慢调用") {
@@ -250,6 +254,76 @@ func classifyIntentByKeywords(message string, traceID string) (IntentType, float
 		return IntentIncidentTriage, 0.82, "incident symptom detected"
 	}
 	return IntentGeneralChat, 0.5, "no strong diagnostic signal detected"
+}
+
+func detectIntentSignalConflict(message string) bool {
+	lower := strings.ToLower(message)
+	if hasExplicitLogPreference(lower) ||
+		hasExplicitMetricPreference(lower) ||
+		isCompositeDiagnosticRequest(lower) {
+		return false
+	}
+	signals := 0
+	for _, matched := range []bool{
+		containsAny(lower, "metric", "metrics", "qps", "error rate", "错误率", "錯誤率", "latency", "p95", "指标"),
+		containsAny(lower, "log", "logs", "日志", "panic", "exception", "stack"),
+		containsAny(lower, "trace", "span", "链路", "慢调用"),
+		containsAny(lower, "runbook", "文档", "知识库", "处理手册", "playbook"),
+		containsAny(lower, "缓解", "止损", "mitigate", "mitigation", "remediation advice"),
+		containsAny(lower, "总结", "汇总", "当前状态", "进展", "status summary", "summarize"),
+	} {
+		if matched {
+			signals++
+		}
+	}
+	return signals > 1
+}
+
+func hasExplicitLogPreference(lower string) bool {
+	return containsAny(
+		lower,
+		"先看日志",
+		"先查日志",
+		"只看日志",
+		"只查日志",
+		"logs first",
+		"log first",
+		"prefer logs",
+		"only logs",
+	)
+}
+
+func hasExplicitMetricPreference(lower string) bool {
+	return containsAny(
+		lower,
+		"先看指标",
+		"先查指标",
+		"只看指标",
+		"只查指标",
+		"metrics first",
+		"metric first",
+		"prefer metrics",
+		"only metrics",
+	)
+}
+
+func isCompositeDiagnosticRequest(lower string) bool {
+	return containsAny(lower, "trace", "span", "链路", "慢调用") &&
+		containsAny(
+			lower,
+			"metric",
+			"metrics",
+			"qps",
+			"error rate",
+			"错误率",
+			"錯誤率",
+			"latency",
+			"p95",
+			"指标",
+			"log",
+			"日志",
+		) &&
+		containsAny(lower, "建议", "advice", "recommend", "结合", "综合")
 }
 
 func suggestToolsForIntent(intentType IntentType, traceID string) []ToolName {

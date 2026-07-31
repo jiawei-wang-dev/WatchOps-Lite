@@ -51,6 +51,27 @@ func TestRuntimeMetricsDefaultsAndEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestIntentRuleConfidenceDefaultAndEnvironmentOverride(t *testing.T) {
+	cfg := Default()
+	if cfg.Intent.MinRuleConfidence != 0.75 {
+		t.Fatalf(
+			"Intent.MinRuleConfidence=%v want=0.75",
+			cfg.Intent.MinRuleConfidence,
+		)
+	}
+
+	t.Setenv("WATCHOPS_INTENT_MIN_RULE_CONFIDENCE", "0.82")
+	if err := applyEnvironment(&cfg); err != nil {
+		t.Fatalf("apply environment: %v", err)
+	}
+	if cfg.Intent.MinRuleConfidence != 0.82 {
+		t.Fatalf(
+			"Intent.MinRuleConfidence=%v want=0.82",
+			cfg.Intent.MinRuleConfidence,
+		)
+	}
+}
+
 func TestLongTermMemoryDefaultsAndEnvironmentOverride(t *testing.T) {
 	cfg := Default()
 	if cfg.LongTermMemory.TopK != 3 {

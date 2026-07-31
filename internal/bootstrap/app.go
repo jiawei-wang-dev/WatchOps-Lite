@@ -365,7 +365,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		logger,
 		newOpenAICompatibleModel,
 	)
-	intentRecognizer := buildIntentRecognizer(
+	sharedIntentRecognizer := buildIntentRecognizer(
 		context.Background(),
 		cfg,
 		logger,
@@ -389,7 +389,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			ProfileLoader:      profileLoader,
 			KnowledgeRetriever: knowledgeService,
 			PreRAGTopK:         cfg.Knowledge.FinalTopK,
-			IntentRecognizer:   intentRecognizer,
+			IntentRecognizer:   sharedIntentRecognizer,
 		},
 	)
 	evidenceAgent, err := multiagent.NewEvidenceAgent(
@@ -427,8 +427,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		evidenceAgent,
 		knowledgeAgent,
 		multiagent.NewSynthesisAgent(multiAgentSynthesizer),
-	).WithRoleAwareRAG(knowledgeService).WithIntentRecognizer(intentRecognizer)
+	).WithRoleAwareRAG(knowledgeService)
 	multiAgentService := multiagent.NewService(multiAgentOrchestrator).
+		WithIntentRecognizer(sharedIntentRecognizer).
 		WithSessionMemory(sessionStore).
 		WithTimeout(cfg.MultiAgent.OverallTimeout.Value())
 	evalService, err := eval.NewServiceWithRunner(

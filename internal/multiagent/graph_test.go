@@ -217,13 +217,14 @@ func TestTriagePlannerCannotOverrideGovernedTargets(t *testing.T) {
 		mu   sync.Mutex
 		seen []TriagePlan
 	)
+	recognizer := &countingRecognizer{}
 	orchestrator := NewOrchestrator(
 		context.Background(),
 		conflictingTriagePlanner{},
 		recordingAnalyzer{role: AgentRoleEvidence, mu: &mu, seen: &seen},
 		recordingAnalyzer{role: AgentRoleKnowledge, mu: &mu, seen: &seen},
 		fakeSynthesizer{},
-	)
+	).WithIntentRecognizer(recognizer)
 	verifiedTime := common.TimeRange{
 		From: "2026-07-31T07:50:00Z",
 		To:   "2026-07-31T08:00:00Z",
@@ -244,6 +245,12 @@ func TestTriagePlannerCannotOverrideGovernedTargets(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
+	}
+	if recognizer.calls != 0 {
+		t.Fatalf(
+			"orchestrator recognizer calls = %d, want 0 for governed intent",
+			recognizer.calls,
+		)
 	}
 	if len(seen) != 2 {
 		t.Fatalf("analyzers saw %d plans, want 2", len(seen))
