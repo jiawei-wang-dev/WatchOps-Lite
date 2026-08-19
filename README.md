@@ -1,5 +1,7 @@
 # WatchOps-Lite
 
+[English](README.md) | [简体中文](README_CN.md)
+
 **Evidence-driven OnCall Troubleshooting Agent**
 
 `CONTROLLED · GROUNDED · EVALUATED`
