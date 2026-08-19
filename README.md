@@ -1,49 +1,68 @@
 # WatchOps-Lite
 
-> An evidence-driven Agentic RAG console for OnCall troubleshooting, built with Go, Eino, Gin, Redis, MySQL, Elasticsearch, Prometheus, Jaeger, Grafana, OpenTelemetry, and optional MCP-backed metrics.
+**Evidence-driven OnCall Troubleshooting Agent**
 
-WatchOps-Lite turns an incident question into a structured reliability investigation. It can inspect metrics, logs, traces, alerts, service topology, runbooks, short-term session context, and long-term troubleshooting memory, then produce an answer with evidence, recommendations, and explicit limitations.
+`CONTROLLED · GROUNDED · EVALUATED`
 
-It is designed as a GitHub showcase and interview-friendly project: small enough to understand, complete enough to run locally, and observable enough to explain how the Agent behaves.
+WatchOps-Lite turns an incident question into a bounded troubleshooting workflow that combines context governance, hybrid retrieval, controlled tool execution, and evidence-bound diagnosis.
 
----
+`Go` · `Eino` · `RAG` · `Tool Calling` · `Multi-Agent` · `Evaluation`
 
-## Table of Contents
-
-- [Project Overview](#project-overview)
-- [Architecture](#architecture)
-- [Core Features](#core-features)
-- [System Workflow](#system-workflow)
-- [Single-Agent Workflow](#single-agent-workflow)
-- [Multi-Agent Workflow](#multi-agent-workflow)
-- [Hybrid RAG Pipeline](#hybrid-rag-pipeline)
-- [Memory Architecture](#memory-architecture)
-- [MCP Integration](#mcp-integration)
-- [Observability](#observability)
-- [Docker Compose](#docker-compose)
-- [Quick Start](#quick-start)
-- [Screenshots](#screenshots)
-- [Project Structure](#project-structure)
-- [Future Roadmap](#future-roadmap)
-- [License](#license)
+[Architecture](#architecture) · [Quick Start](#quick-start) · [Agent Design](#deep-dive) · [Evaluation](#evaluation) · [Observability](#observability) · [Documentation](#documentation)
 
 ---
 
-## Project Overview
+## Why WatchOps-Lite
 
-During an incident, an on-call engineer often has to jump between Prometheus, Elasticsearch, Jaeger, runbooks, previous cases, and chat history. WatchOps-Lite compresses that workflow into one controlled Agent pipeline:
+OnCall Agents fail in engineering details that a larger model or a stronger prompt does not solve:
 
-```text
-Incident question
-  -> intent recognition
-  -> context and memory loading
-  -> hybrid knowledge retrieval
-  -> read-only tool calls
-  -> evidence normalization
-  -> evidence-bound final answer
-```
+- ambiguous intent and missing parameters;
+- stale multi-turn context overriding the current request;
+- uncontrolled ReAct loops and repeated tool calls;
+- noisy retrieval and unsupported conclusions;
+- unsafe or slow integrations with operational systems;
+- failures that cannot be reproduced, compared, or evaluated.
 
-The project intentionally avoids auto-remediation. Every tool is read-only, every answer is expected to cite evidence, and missing data is surfaced as a limitation instead of being hidden behind a confident guess.
+WatchOps-Lite treats these as governance, runtime, grounding, and evaluation problems. It performs diagnosis only: tools are read-only, unsupported claims become explicit limitations, and no remediation is executed automatically.
+
+---
+
+## Core Design
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Turn Governance</h3>
+      <p><code>Intent · Slot · Session Focus · Clarify</code></p>
+      <p>The current turn takes precedence over historical Focus. Missing or ambiguous critical slots return Clarify before RAG, Agent, or Tool execution.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Agent Harness</h3>
+      <p><code>Schema · Read-only · Timeout · Budget · StopReason</code></p>
+      <p>ReAct execution is bounded by step, tool-call, retry, repeated-call, and total-time budgets. Every tool result uses a normalized success, degradation, or failure contract.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Evidence Grounding</h3>
+      <p><code>Hybrid RAG · Evidence Processor · Citation Allowlist</code></p>
+      <p>Conditional Single/Multi-Query retrieval combines BM25, optional Vector search, fusion, and reranking. Conclusions can cite only Evidence produced by the executed workflow.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Evaluation</h3>
+      <p><code>Intent · Retrieval · Agent E2E · Replay</code></p>
+      <p>Deterministic evaluation layers measure routing, slots, retrieval, tool use, Evidence, and fallbacks. Failed checks become replayable Bad Cases for regression comparison.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## Diagnosis Preview
+
+The local Web Console exposes the diagnosis, supporting citations, recommendations, limitations, tool execution, and request/trace context in one result.
+
+![Single-Agent evidence-bound diagnosis](docs/images/single-agent-diagnosis.png)
 
 ---
 
@@ -54,76 +73,107 @@ The project intentionally avoids auto-remediation. Every tool is read-only, ever
 ```mermaid
 flowchart TB
     U["User / Web Console"]
-
-    U --> SAAPI["Single-Agent API<br/>POST /api/v1/chat<br/>POST /api/v1/chat/stream"]
-    U --> MAAPI["Multi-Agent API<br/>POST /api/v1/chat/multi-agent<br/>POST /api/v1/chat/multi-agent/stream"]
-
-    SAAPI --> SA["Single-Agent Eino Graph<br/>Intent + parallel context loading + Pre-RAG<br/>ReAct runtime tool decision"]
-    MAAPI --> MA["Shared Turn Governance<br/>Focus + Intent + Slot Validation<br/>then Multi-Agent Eino Graph"]
-
-    SA --> TH["Unified Tool Harness / Tool Runtime"]
+    U --> API["Gin API<br/>JSON / SSE"]
+    API --> GOV["Turn Governance<br/>Intent + Slot + Session Focus"]
+    GOV --> MODE{"Execution Mode"}
+    MODE --> SA["Single-Agent<br/>Eino Graph + ReAct"]
+    MODE --> MA["Multi-Agent<br/>AgentPlan + bounded roles"]
+    SA --> TH["Unified Tool Runtime"]
     MA --> TH
-
-    TH --> DATA["Tool Data Backends<br/>Prometheus / Elasticsearch / Jaeger<br/>optional MCP / deterministic mocks"]
-
-    SA --> MEMORY["Context and Durable State<br/>Redis / MySQL"]
-    MA --> MEMORY
-
-    SA --> SAR["Evidence-bound Single-Agent Response"]
-    MA --> MAR["Evidence-bound Multi-Agent Response"]
+    TH --> DATA["Prometheus · Elasticsearch · Jaeger<br/>optional MCP · deterministic fallback"]
+    GOV <--> REDIS["Redis<br/>Context + Session Focus"]
+    SA <--> MYSQL["MySQL<br/>Durable Memory"]
+    MA <--> MYSQL
+    SA --> EP["Evidence Processor"]
+    MA --> EP
+    EP --> OUT["Evidence-bound Response<br/>citations + limitations"]
 ```
 
-Single-Agent and Multi-Agent are separate execution modes exposed through different API endpoints and the web console. Intent recognition does not choose between the two modes. Inside Single-Agent, the Eino ReAct Agent makes the final runtime tool decision. Inside Multi-Agent, an intent-derived `AgentPlan` selects which bounded diagnostic roles execute or return skipped steps.
+Single-Agent and Multi-Agent are separate execution modes exposed through different API endpoints and the Web Console; intent recognition does not choose between them. Single-Agent lets the Eino ReAct Agent make bounded runtime tool decisions. Multi-Agent derives an `AgentPlan` that selects diagnostic roles, while unselected roles return typed `skipped` steps.
 
-The Agent-facing tool contract remains stable across both modes. Provider details, including Prometheus HTTP versus optional MCP metrics, stay behind Eino Tools and the unified Tool Runtime.
-
----
-
-## Core Features
-
-| Feature | User Value |
-|---|---|
-| Evidence-driven diagnosis | The Agent explains what it observed, what it inferred, and what still needs verification. |
-| Hybrid Retrieval | Combines keyword retrieval, optional vector retrieval, fusion, and reranking to improve runbook recall. |
-| Role-aware Multi-Agent | Triage, Evidence, Knowledge, and Synthesis roles focus on different parts of the investigation. |
-| Short-term and long-term memory | Redis keeps session context while MySQL stores reusable feedback, cases, profiles, and memory. |
-| MCP-based Metrics | The Metric Tool can use either native Prometheus HTTP or a Prometheus MCP provider without changing the Agent contract. |
-| Tool Runtime safety | Tool calls use schema validation, timeouts, fallback, structured errors, output normalization, and tracing. |
-| Local observability stack | OpenTelemetry, Jaeger, Prometheus, and Grafana make Agent execution inspectable. |
-| Demo-ready workflow | Docker Compose and scripts seed knowledge, logs, metrics, traces, feedback, eval cases, and benchmark data. |
+Both modes use the same Agent-facing tool contract, Evidence processing rules, and Redis Focus semantics. Provider details—including Prometheus HTTP versus optional MCP metrics—remain behind Eino Tools and the unified Tool Runtime.
 
 ---
 
-## System Workflow
+## Governed Agent Workflow
 
 ```mermaid
-sequenceDiagram
-    participant User
-    participant UI as Web Console
-    participant API as Gin API
-    participant Intent
-    participant Memory
-    participant Agent
-    participant RAG as Hybrid RAG
-    participant Tools as Tool Runtime
-    participant Obs as Observability
-
-    User->>UI: Ask an incident question
-    UI->>API: POST /api/v1/chat or SSE stream
-    API->>Intent: Classify query and extract hints
-    API->>Memory: Load session and confirmed long-term memory
-    API->>RAG: Retrieve relevant runbooks and knowledge
-    API->>Agent: Build prompt with merged context and skill cards
-    Agent->>Tools: Call read-only tools
-    Tools-->>Agent: Normalized evidence or structured errors
-    Agent->>API: Evidence-bound diagnosis
-    API->>Obs: Emit spans and runtime metrics
-    API-->>UI: Answer, evidence, tool runs, limitations
+flowchart TB
+    Q["Incident Question"] --> G["Turn Governance<br/>Intent + Slot + Session Focus"]
+    G --> V{"Slot Validation"}
+    V -->|"clarify"| C["Clarification Response<br/>persist Focus → END"]
+    V -->|"proceed"| M["Context + Memory"]
+    M --> R["Conditional RAG<br/>Single / Multi-Query"]
+    R --> A["Controlled Agent Runtime<br/>Single-Agent or bounded roles"]
+    A --> T["Tool Harness<br/>validation + budget + timeout"]
+    T --> E["Evidence Processor<br/>normalize + dedupe + citations"]
+    E --> D["Citation-bound Diagnosis"]
 ```
+
+OpenTelemetry spans and Prometheus metrics cover request, graph, model, retrieval, tool, fallback, and role execution without becoming a decision step in the workflow.
 
 ---
 
-## Single-Agent Workflow
+## Quick Start
+
+The default configuration uses the deterministic Agent runner and requires no LLM API key.
+
+### 1. Clone and configure
+
+```bash
+git clone https://github.com/jiawei-wang-dev/WatchOps-Lite.git
+cd WatchOps-Lite
+cp configs/config.example.json configs/config.local.json
+```
+
+### 2. Start dependencies and the API
+
+```bash
+docker compose up -d --wait
+docker compose ps
+make run CONFIG=configs/config.local.json
+```
+
+The Compose stack starts Redis, MySQL, Elasticsearch, Jaeger, Prometheus, Grafana, and demo metrics. The Go API and embedded Web Console start separately at `http://localhost:8080/`.
+
+Verify the backend from another terminal:
+
+```bash
+curl --fail http://localhost:8080/healthz
+```
+
+### 3. Seed and exercise the local demo
+
+```bash
+./scripts/demo_seed_knowledge.sh
+./scripts/demo_seed_logs.sh
+./scripts/demo_metrics.sh
+make e2e-demo
+make e2e-demo-multi
+```
+
+To enable the Eino ReAct path, set `agent.mode` to `eino_react`, enable the OpenAI-compatible `llm` block in `configs/config.local.json`, and export the environment variable named by `llm.api_key_env`. Incomplete configuration, timeout, or invalid model output uses the deterministic fallback; never commit a real key.
+
+---
+
+## Evaluation
+
+| Layer | What it measures | Primary command |
+|---|---|---|
+| Intent | Intent accuracy, slot-field accuracy, joint intent + slot match, Clarify decisions | `make eval-intent` |
+| Retrieval | BM25 and optional Hybrid retrieval, Recall@5, MRR, Multi-Query value | `make eval` |
+| Agent | Tool selection/arguments, Evidence coverage, citation allowlist, fallback, deterministic Agent E2E | `make eval` / `make eval-agent` |
+| Regression | Stable failed checks, baseline comparison, targeted replay | `make eval-replay` |
+
+`make eval` runs the deterministic offline harness without external LLMs, embeddings, Prometheus, Elasticsearch, or Jaeger. Real-model Agent evaluation is explicitly opt-in through `WATCHOPS_EVAL_LLM_ENABLED=true` and a configured API key. `make e2e-demo` and `make e2e-demo-multi` exercise the Single-Agent and Multi-Agent HTTP paths against an already running local stack.
+
+Failed scenarios are converted into stable, replayable Bad Cases instead of remaining one-off demo failures. Reports compare baseline and current behavior and record fixed, still-failing, and newly discovered cases. See [Agent Evaluation Harness](docs/evaluation-harness.md) for datasets, boundaries, and commands.
+
+---
+
+## Deep Dive
+
+### Single-Agent Workflow
 
 The default Chat API uses one fixed Eino Graph around an Eino ReAct Agent. The graph loads bounded context, renders the prompt, runs the controlled ReAct loop, processes evidence, persists Redis session memory, and then builds the public response.
 
@@ -171,51 +221,19 @@ flowchart TB
     BR --> F["Final Answer<br/>conclusions / evidence / inferences<br/>recommendations / limitations / tool runs / metadata"]
 ```
 
-Single-Agent uses a fixed Eino Graph. Before recognition it loads only a bounded Redis Session Focus: confirmed slots, pending clarification, status, a short summary, and at most six recent non-tool messages (300 runes each). Full session context, confirmed long-term memory, user profile, diagnostic skill cards, and optional Multi-Query Pre-RAG remain after intent and slot validation as parallel branches.
+Key execution rules:
 
-Slot validation is deterministic. Current-turn values override structured command values, which override confirmed Focus values. Missing services and Trace IDs are never guessed. A clarification response uses the existing public result shape, contains no tool runs or evidence, persists `TurnStatus=clarify`, and ends the graph before RAG, ReAct, or tools. Redis Focus load/write failures are safe degradations and never replace an already generated answer.
+1. Session Focus is loaded before Intent Recognition and is bounded to confirmed slots, clarification state, a short summary, and at most six recent non-tool messages.
+2. Slot validation is deterministic: the current turn overrides command values, which override confirmed Focus. Missing or ambiguous critical slots return Clarify and terminate before RAG, ReAct, or tools.
+3. Full Redis context, confirmed MySQL memory, profile, skill cards, and optional Pre-RAG load only after the turn is safe to execute; independent branches run in parallel.
+4. The Eino ReAct Agent makes runtime tool decisions, while every atomic call passes through the unified Tool Runtime.
+5. The Agent harness bounds steps, tool calls, retries, repeated calls, consecutive failures, and total execution time; one JSON repair and deterministic fallback are available.
+6. `collect_tool_evidence` normalizes and groups Evidence, assigns `citation_id` metadata, and retains original Evidence IDs as the claim allowlist.
+7. Redis context and Focus are persisted only after the result is built; persistence failure is reported as a safe degradation rather than replacing the diagnosis.
 
-The ReAct Agent selects tools dynamically, but every Tool Call is executed through an Eino Tool and the unified Tool Runtime. The tool harness applies read-only validation, timeout and cancellation handling, fallback, error normalization, output sanitization, and tracing before accessing Prometheus, Elasticsearch, Jaeger, MCP, or deterministic mock providers. Tool observations are returned to the Agent for the next controlled iteration.
+Execution boundaries remain explicit: Intent suggests tools but does not execute them; Pre-RAG provides background rather than current-incident proof; tools are atomic and read-only; the Tool Runtime governs a single call, while the Failure Controller governs the full Agent loop.
 
-After Agent execution, the `collect_tool_evidence` node processes the unified Evidence collection and attaches generated `citation_id` metadata to matching evidence items. Original evidence IDs remain the allowlist used by conclusions, inferences, and recommendations. WatchOps then persists the bounded Redis session context and builds the public structured response.
-
-Execution boundaries:
-
-- Intent Recognition identifies the request type and suggests tools, but the ReAct Agent makes the final runtime tool decision.
-- Pre-RAG supplies background knowledge before Agent execution and may be skipped by intent.
-- Tools are atomic read-only capabilities; the Agent does not directly access external systems.
-- The tool harness governs each atomic call with validation, read-only constraints, timeout and cancellation handling, fallback, error normalization, sanitization, and tracing.
-- Failure Controller governs the overall Agent loop with iteration and tool-call limits, consecutive-failure and repeated-call detection, a total execution deadline, one bounded JSON repair attempt, and Agent-level deterministic fallback.
-- Evidence Processor runs inside `collect_tool_evidence`; it formalizes tool results and attaches `citation_id` metadata without replacing original evidence IDs.
-- The system performs diagnosis only and does not automatically restart services, change configuration, or execute remediation.
-
-### Evaluation layers
-
-WatchOps-Lite separates evaluation by responsibility:
-
-1. `go test ./...` verifies deterministic governance logic such as Session
-   Focus and CAS, Slot Validation, Clarification branches, Graph routing, and
-   fallback behavior.
-2. `make eval-intent` runs `testdata/intent_eval_cases.json` against the Intent
-   Recognizer. It reports Intent Accuracy, per-field and aggregate Slot
-   Extraction Accuracy, and Joint Intent + Slot Exact Match.
-3. `make eval-retrieval` exercises the running WatchOps Knowledge API and local
-   Elasticsearch index. With embeddings disabled this validates BM25; with
-   embeddings enabled it can validate Hybrid Retrieval. Local results are not
-   equivalent to production retrieval quality.
-4. `make e2e-demo-zh` and `make e2e-demo-multi-zh` validate the complete
-   Single-Agent and Multi-Agent paths from HTTP input through evidence-bound
-   response generation.
-
-`make benchmark-agent` remains the local scenario, tool-use, and latency
-benchmark. Intent and Retrieval Eval reports are written under `tmp/` and are
-not committed.
-
-Single-Agent is best for quick investigation demos and normal chat-style troubleshooting.
-
----
-
-## Multi-Agent Workflow
+### Multi-Agent Workflow
 
 Multi-Agent mode keeps the same tool contracts but runs a bounded, role-based diagnostic graph. Before that graph, it uses the same Turn Governance implementation as Single-Agent: bounded Session Focus, context-aware Intent Recognition and natural-language slot extraction, deterministic `SlotRule` validation, ambiguous-reference detection, and a tool-free Clarification branch.
 
@@ -270,7 +288,7 @@ Role boundaries:
 - Synthesis is the only role allowed to produce final conclusions, and every cited evidence ID must exist in the merged evidence allowlist.
 - Response Builder converts the completed role outputs into the public Multi-Agent result without adding new diagnostic claims.
 
-### Routing behavior
+#### Routing behavior
 
 - Incident Triage: Triage + Evidence + Knowledge + Synthesis.
 - Trace Analysis: Triage + Evidence + Synthesis.
@@ -289,7 +307,7 @@ This is a bounded, domain-specific 3+1 diagnostic architecture rather than a gen
 
 ---
 
-## Hybrid RAG Pipeline
+### Hybrid RAG Pipeline
 
 Knowledge retrieval is centered on `HybridRetrieve()`. It is the main knowledge path for both pre-RAG context and `search_knowledge` tool calls.
 
@@ -330,7 +348,9 @@ flowchart TB
 
 The current implementation supports:
 
-- Optional Multi-Query Planning only on the Single-Agent Pre-RAG path; intent can skip Pre-RAG entirely.
+- Deterministic Single/Multi-Query selection on the Single-Agent Pre-RAG path; intent can skip Pre-RAG entirely.
+- Single Query for explicit metrics/logs/trace requests, simple knowledge lookup, parameter correction, and simple incidents.
+- Multi-Query only for incident triage with dependency or causal chains, multiple symptoms, explicit error chains, or long compound descriptions.
 - Per-sub-query `HybridRetrieve()` calls followed by weighted merge, deduplication, and Top-K selection.
 - Single-query fallback when query planning fails or the multi-query path produces no usable result.
 - Direct `HybridRetrieve()` calls from the `search_knowledge` tool without mandatory query rewriting.
@@ -341,9 +361,9 @@ The current implementation supports:
 - Reranking with a rule-based default and an optional external model provider.
 - BM25 fallback when embeddings or vector search are unavailable.
 
-### Optional model-based reranking
+#### Optional model-based reranking
 
-The local demo uses a deterministic rule-based reranker so the project can run without paid model calls. Production or showcase environments can switch reranking to an external model provider without changing the Agent, Tool Runtime, or API contracts.
+The local demo uses a deterministic rule-based reranker so the project can run without paid model calls. External-model environments can switch reranking providers without changing the Agent, Tool Runtime, or API contracts.
 
 ```bash
 export WATCHOPS_RERANK_ENABLED=true
@@ -357,15 +377,16 @@ The configured base URL receives a `/rerank` suffix. WatchOps-Lite sends a bound
 
 ---
 
-## Memory Architecture
+### Memory Architecture
 
-WatchOps-Lite keeps short-lived conversation state and durable troubleshooting memory separate.
+WatchOps-Lite separates recent conversation, compressed history, current task state, and durable confirmed memory.
 
 ```mermaid
 flowchart TB
     subgraph RedisMemory["Redis Session Memory"]
-        RM["Recent Messages"]
-        RS["Rolling Summary"]
+        RM["Recent Messages<br/>bounded raw context"]
+        RS["Rolling Summary<br/>compressed history"]
+        SF["Session Focus<br/>task + slots + clarification state"]
     end
 
     subgraph MySQLState["MySQL Durable State"]
@@ -377,24 +398,48 @@ flowchart TB
 
     RM --> SC["Bounded Session Context"]
     RS --> SC
+    SF --> GOV["Turn Governance"]
 
     SC --> SA["Single-Agent Context"]
+    GOV --> SA
     LM --> SA
     PF --> SA
 
     SC --> MA["Multi-Agent Context"]
+    GOV --> MA
     LM --> KA["Multi-Agent Knowledge Agent"]
 
     FB --> EV
 ```
 
-Redis stores bounded conversational state, including recent messages and the rolling summary. Request-time context and prompts are assembled in memory and are not persisted as separate Redis structures.
+`Recent Messages` preserve a bounded raw window; `Rolling Summary` compresses older history; `Session Focus` carries the active task, confirmed slots, missing slots, and clarification state into the next turn. Current-turn values always override historical Focus, so a correction such as “not checkout, use payment” cannot be silently replaced by stale context.
+
+All Redis session structures use the configured TTL. Summary and Focus updates carry monotonically increasing versions and use Redis `WATCH` / `MULTI` CAS, preventing an older request that finishes later from overwriting newer session state. Version conflicts degrade memory persistence without replacing an already completed diagnosis.
 
 Confirmed long-term memory is stored in MySQL and can be injected into both diagnostic modes through their respective execution paths. User Profile is currently injected only into Single-Agent and is not wired into Multi-Agent.
 
 ---
 
-## MCP Integration
+### Tool Runtime / Agent Harness
+
+```mermaid
+flowchart LR
+    IN["Tool Input"] --> SV["Schema Validation"]
+    SV --> RO["Read-only Check"]
+    RO --> BG["Budget + Repeated-call Check"]
+    BG --> TO["Timeout + Cancellation"]
+    TO --> PR["Provider"]
+    PR --> TR["Normalized ToolResult"]
+    TR --> EP["Evidence Processor"]
+```
+
+The **Tool Runtime** governs one atomic call: allowlisted schema and input validation, read-only constraints, timeout/cancellation, provider fallback, sanitization, tracing, and a normalized `ToolResult` envelope.
+
+The **Agent Harness / Failure Controller** governs the whole loop: maximum steps and tool calls, retry count, repeated-call detection, consecutive tool failures, total execution deadline, a bounded JSON repair, deterministic fallback, and a stable `StopReason`. The distinction keeps provider failures local while preventing a degraded Agent from looping indefinitely.
+
+---
+
+### MCP Integration
 
 MCP is currently introduced only for metrics. The Metric Tool can route to either the existing local Prometheus HTTP implementation or an MCP-backed Prometheus provider.
 
@@ -437,28 +482,9 @@ When MCP is disabled, behavior is identical to the native Prometheus HTTP path. 
 
 ## Observability
 
-The project is observable by design. A normal Chat request emits both distributed traces and runtime metrics.
+OpenTelemetry traces request, graph, intent, retrieval, model, memory, tool, Evidence, fallback, evaluation, and Multi-Agent role boundaries. Jaeger shows request-level timing and fan-out/fan-in behavior.
 
-```mermaid
-flowchart LR
-    C["chat"] --> I["intent"]
-    I --> R["rag"]
-    R --> T["tool"]
-    T --> M["mcp.call<br/>when MCP metrics are enabled"]
-    T --> A["answer"]
-
-    C -. OpenTelemetry .-> J["Jaeger"]
-    C -. Prometheus metrics .-> P["Prometheus"]
-    P --> G["Grafana"]
-```
-
-Observability stack:
-
-- OpenTelemetry records spans for chat, intent, retrieval, tool execution, MCP calls, model calls, memory, eval, and fallback boundaries.
-- Jaeger visualizes request-level traces and role/tool timing.
-- Prometheus scrapes WatchOps-Lite runtime metrics from `/metrics`.
-- Grafana provides a starter dashboard for HTTP, chat, tool, RAG, memory, fallback, summary, and eval metrics.
-- Metric provider metadata distinguishes native HTTP metrics from MCP-backed metrics.
+Prometheus exposes HTTP and Agent latency, tool success/failure, retrieval, fallback, summary, evaluation, and role-execution metrics at `/metrics`; Grafana provisions a starter local dashboard. Tool metadata also distinguishes native Prometheus HTTP from optional MCP-backed metrics.
 
 ---
 
@@ -510,103 +536,13 @@ Compose service ports:
 
 ---
 
-## Quick Start
+## Additional Screenshots
 
-### 1. Default deterministic mode
-
-The example configuration defaults to the deterministic Agent runner and does not require an LLM API key.
-
-```bash
-cp configs/config.example.json configs/config.local.json
-docker compose up -d --wait
-docker compose ps
-make run CONFIG=configs/config.local.json
-```
-
-The Compose commands start the infrastructure services. The `make run` command starts the WatchOps Go backend and embedded Web Console.
-
-### 2. Enable the Eino ReAct LLM path
-
-To use a live OpenAI-compatible model, update the corresponding sections in `configs/config.local.json`:
-
-```json
-{
-  "agent": {
-    "mode": "eino_react"
-  },
-  "llm": {
-    "enabled": true,
-    "provider": "openai_compatible",
-    "base_url": "https://your-openai-compatible-endpoint/v1",
-    "api_key_env": "WATCHOPS_LLM_API_KEY",
-    "model": "your-model-name"
-  }
-}
-```
-
-Then export the key using the environment variable named by `llm.api_key_env` and start the backend:
-
-```bash
-export WATCHOPS_LLM_API_KEY="your-api-key"
-make run CONFIG=configs/config.local.json
-```
-
-Setting an API key alone does not change `agent.mode`, enable `llm.enabled`, or provide a valid `base_url` and `model`. If model configuration is incomplete, initialization fails, a call times out, model output is invalid, or the Failure Controller stops the Agent loop, WatchOps uses its deterministic fallback. Never commit real API keys.
-
-Open the Web Console after the backend starts:
-
-```text
-http://localhost:8080/
-```
-
-### 3. Seed demo data
-
-```bash
-./scripts/demo_seed_knowledge.sh
-./scripts/demo_seed_logs.sh
-./scripts/demo_metrics.sh
-```
-
-### 4. Run demo checks
-
-```bash
-make e2e-demo
-make e2e-demo-zh
-make e2e-demo-multi
-make e2e-demo-multi-zh
-```
-
-### 5. Run developer verification
-
-```bash
-make fmt
-go mod tidy
-go test ./...
-go vet ./...
-git diff --check
-make verify
-```
-
-Recommended demo question:
-
-```text
-Why did the checkout service error rate increase in the last 20 minutes?
-Use metrics, logs, traces, alerts, and runbook evidence.
-```
-
----
-
-## Screenshots
-
-The screenshots below were captured from the local demo environment. They focus on the main engineering story: console readiness, evidence-bound diagnosis, multi-agent collaboration, observability, and the feedback/eval loop.
+These existing screenshots were captured from the local demo environment and provide supporting views of the console, bounded role collaboration, Evidence, tracing, and evaluation.
 
 ### Console Overview
 
 ![Console Overview](docs/images/console-overview.png)
-
-### Single-Agent Diagnosis
-
-![Single-Agent Diagnosis](docs/images/single-agent-diagnosis.png)
 
 ### Multi-Agent Workflow
 
@@ -685,6 +621,9 @@ curl --fail-with-body http://localhost:8080/api/v1/feedback \
 .
 ├── cmd/
 │   ├── server/                 # Application entrypoint
+│   ├── eval-harness/           # Deterministic layered evaluation
+│   ├── agent-eval/             # Opt-in real-model Agent evaluation
+│   ├── intent-eval/            # Intent and slot evaluation
 │   ├── demo-metrics/           # Demo Prometheus metric exporter
 │   ├── log-generator/          # Demo log generator
 │   ├── retrieval-eval/         # Retrieval eval CLI
@@ -710,7 +649,7 @@ curl --fail-with-body http://localhost:8080/api/v1/feedback \
     ├── observability/          # OpenTelemetry tracing and Prometheus runtime metrics
     ├── platform/               # Infrastructure adapters such as MySQL and Elasticsearch
     ├── feedback/               # Feedback storage and API support
-    ├── eval/                   # Eval cases, runner, and result persistence
+    ├── eval/                   # Layered harness, Bad Cases, replay, and persisted eval runs
     ├── profile/                # User profile context
     ├── bootstrap/              # Composition root and lifecycle wiring
     └── config/                 # Config loading, environment overrides, validation
@@ -725,13 +664,13 @@ Module responsibilities:
 - `internal/memory`: Redis short-term memory and MySQL durable memory.
 - `internal/mcp`: Provider-neutral MCP client abstraction.
 - `internal/observability`: Tracing and runtime metrics.
-- `web`: Build-free console for demo and interview walkthroughs.
+- `web`: Build-free console for local diagnosis and workflow inspection.
 
 ---
 
 ## Demo Checklist
 
-For a polished walkthrough:
+For a local workflow check:
 
 1. Open the Web Console at `http://localhost:8080/`.
 2. Ask the recommended checkout incident question.
@@ -746,7 +685,7 @@ For a polished walkthrough:
 
 ## Current Boundaries
 
-- This is a local showcase and interview project, not a production AIOps platform.
+- This is a locally reproducible troubleshooting system, not a production AIOps platform.
 - Tool calls are read-only. The system does not restart, scale, deploy, rollback, or mutate external systems.
 - MCP is currently optional and only implemented for metrics.
 - Logs, traces, knowledge, Redis, and MySQL remain local Go integrations.
@@ -766,7 +705,7 @@ For a polished walkthrough:
 
 ---
 
-## Design Documents
+## Documentation
 
 - [Project Blueprint](docs/PROJECT_BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
@@ -774,6 +713,7 @@ For a polished walkthrough:
 - [Roadmap](docs/ROADMAP.md)
 - [Project Structure](docs/STRUCTURE.md)
 - [Demo Verification](docs/demo-verification.md)
+- [Agent Evaluation Harness](docs/evaluation-harness.md)
 - [Retrieval Evaluation](docs/retrieval-evaluation.md)
 - [Performance Report](docs/performance-report.md)
 
@@ -789,14 +729,6 @@ Key ADRs:
 - [ADR 0016: Runtime Prometheus Metrics](docs/adr/0016-runtime-prometheus-metrics.md)
 - [ADR 0017: Grafana Dashboard](docs/adr/0017-grafana-dashboard.md)
 - [ADR 0018: Eino Multi-Agent Demo](docs/adr/0018-eino-multi-agent-demo.md)
-
----
-
-## Originality
-
-WatchOps-Lite is an independently designed and implemented portfolio project.
-
-It demonstrates a bounded, evidence-driven OnCall diagnostic architecture built with Go and CloudWeGo Eino.
 
 ---
 
