@@ -5,6 +5,8 @@ import "time"
 type Config struct {
 	MaxIterations               int
 	MaxToolCalls                int
+	MaxRepeatedToolCalls        int
+	MaxRetries                  int
 	MaxConsecutiveToolFailures  int
 	TotalExecutionTimeout       time.Duration
 	EnableJSONRepairOnce        bool
@@ -15,6 +17,8 @@ func DefaultConfig() Config {
 	return Config{
 		MaxIterations:               6,
 		MaxToolCalls:                12,
+		MaxRepeatedToolCalls:        2,
+		MaxRetries:                  1,
 		MaxConsecutiveToolFailures:  3,
 		TotalExecutionTimeout:       30 * time.Second,
 		EnableJSONRepairOnce:        true,
@@ -30,6 +34,12 @@ func Normalize(config Config) Config {
 	if config.MaxToolCalls <= 0 {
 		config.MaxToolCalls = defaults.MaxToolCalls
 	}
+	if config.MaxRepeatedToolCalls <= 0 {
+		config.MaxRepeatedToolCalls = defaults.MaxRepeatedToolCalls
+	}
+	if config.MaxRetries <= 0 {
+		config.MaxRetries = defaults.MaxRetries
+	}
 	if config.MaxConsecutiveToolFailures <= 0 {
 		config.MaxConsecutiveToolFailures = defaults.MaxConsecutiveToolFailures
 	}
@@ -42,6 +52,8 @@ func Normalize(config Config) Config {
 func IsZero(config Config) bool {
 	return config.MaxIterations == 0 &&
 		config.MaxToolCalls == 0 &&
+		config.MaxRepeatedToolCalls == 0 &&
+		config.MaxRetries == 0 &&
 		config.MaxConsecutiveToolFailures == 0 &&
 		config.TotalExecutionTimeout == 0 &&
 		!config.EnableJSONRepairOnce &&

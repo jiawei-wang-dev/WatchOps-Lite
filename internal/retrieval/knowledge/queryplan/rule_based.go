@@ -26,7 +26,8 @@ func (p *RuleBasedPlanner) Plan(
 	)
 	defer span.End()
 
-	original := strings.TrimSpace(input.UserMessage)
+	rawOriginal := strings.TrimSpace(input.UserMessage)
+	original := AuthoritativeQuery(input)
 	service := firstNonEmpty(input.Service, input.Intent.Service, serviceFromText(original))
 	symptom := firstNonEmpty(input.Symptom, input.Intent.Symptom)
 	keywords := append([]string{}, input.Keywords...)
@@ -85,6 +86,8 @@ func (p *RuleBasedPlanner) Plan(
 			"intent_type":           string(input.Intent.Intent),
 			"service":               service,
 			"symptom":               symptom,
+			"original_query":        rawOriginal,
+			"authoritative_query":   original,
 			"query_rewrite_applied": len(queries) > 1,
 		},
 	}, nil

@@ -2,6 +2,7 @@ package queryplan
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jiawei-wang-dev/WatchOps-Lite/internal/intent"
@@ -56,6 +57,40 @@ func TestRuleBasedPlannerUnknownMessageKeepsOriginal(t *testing.T) {
 		plan.Queries[0].Type != QueryOriginal ||
 		plan.Queries[0].Query != "hello" {
 		t.Fatalf("plan = %#v, want original query preserved", plan)
+	}
+}
+
+func TestMultiQueryDecisionUsesOnlyComplexIncidents(t *testing.T) {
+	tests := []struct {
+		name  string
+		input QueryPlanInput
+		want  bool
+	}{
+		{"incident dependency", QueryPlanInput{UserMessage: "checkout 被 payment 延迟拖慢", Intent: intent.IntentResult{Intent: intent.IntentIncidentTriage}}, true},
+		{"metrics", QueryPlanInput{UserMessage: "checkout error rate", Intent: intent.IntentResult{Intent: intent.IntentMetricsQuery, Service: "checkout"}}, false},
+		{"logs", QueryPlanInput{UserMessage: "checkout logs", Intent: intent.IntentResult{Intent: intent.IntentLogsQuery, Service: "checkout"}}, false},
+		{"trace id", QueryPlanInput{UserMessage: "trace", Intent: intent.IntentResult{Intent: intent.IntentTraceAnalysis, TraceID: "4bf92f3577b34da6"}}, false},
+		{"knowledge", QueryPlanInput{UserMessage: "payment runbook", Intent: intent.IntentResult{Intent: intent.IntentKnowledgeQuery}}, false},
+		{"simple incident", QueryPlanInput{UserMessage: "orders connection errors，查日志和 runbook", Intent: intent.IntentResult{Intent: intent.IntentIncidentTriage}}, false},
+		{"correction", QueryPlanInput{UserMessage: "不是 payment，是 checkout", Service: "checkout", Intent: intent.IntentResult{Intent: intent.IntentIncidentTriage, Service: "checkout"}}, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ShouldUseMultiQuery(test.input); got != test.want {
+				t.Fatalf("got=%t want=%t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestAuthoritativeCorrectionQueryDropsObsoleteService(t *testing.T) {
+	query := AuthoritativeQuery(QueryPlanInput{
+		UserMessage: "不是 payment，是 checkout，时间改成最近五分钟",
+		Service:     "checkout",
+		Intent:      intent.IntentResult{Intent: intent.IntentMetricsQuery, Service: "checkout"},
+	})
+	if !strings.Contains(query, "checkout") || strings.Contains(query, "payment") {
+		t.Fatalf("query=%q", query)
 	}
 }
 

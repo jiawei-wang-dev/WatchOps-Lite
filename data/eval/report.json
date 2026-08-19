@@ -1,0 +1,1334 @@
+{
+  "version": "2026-08-18.v1",
+  "generated_at": "2026-08-18T10:00:00Z",
+  "mode": "offline_fixture",
+  "external_llm": false,
+  "intent": {
+    "cases": 32,
+    "accuracy": 1,
+    "slot_field_accuracy": 1,
+    "joint_exact_match": 1,
+    "clarification_accuracy": 1
+  },
+  "intent_challenge": {
+    "cases": 40,
+    "intent_accuracy": 1,
+    "slot_completeness": 1,
+    "clarification_precision": 1,
+    "clarification_recall": 1,
+    "over_clarification_rate": 0,
+    "under_clarification_rate": 0,
+    "llm_escalation_rate": 0.05,
+    "incorrect_llm_escalation_rate": 0
+  },
+  "retrieval": [
+    {
+      "mode": "bm25",
+      "query_mode": "single_query",
+      "cases": 14,
+      "recall_at_1": 0.5,
+      "recall_at_3": 0.8571428571428571,
+      "recall_at_5": 1,
+      "hit_at_1": 0.5,
+      "hit_at_3": 0.8571428571428571,
+      "hit_at_5": 1,
+      "mrr": 0.6749999999999999,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.02554435714285714
+    },
+    {
+      "mode": "bm25",
+      "query_mode": "multi_query",
+      "cases": 14,
+      "recall_at_1": 0.5,
+      "recall_at_3": 0.7857142857142857,
+      "recall_at_5": 1,
+      "hit_at_1": 0.5,
+      "hit_at_3": 0.7857142857142857,
+      "hit_at_5": 1,
+      "mrr": 0.680952380952381,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.05450878571428571
+    },
+    {
+      "mode": "hybrid",
+      "query_mode": "single_query",
+      "cases": 14,
+      "recall_at_1": 0.5714285714285714,
+      "recall_at_3": 0.9285714285714286,
+      "recall_at_5": 1,
+      "hit_at_1": 0.5714285714285714,
+      "hit_at_3": 0.9285714285714286,
+      "hit_at_5": 1,
+      "mrr": 0.7404761904761905,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.03378871428571428
+    },
+    {
+      "mode": "hybrid",
+      "query_mode": "multi_query",
+      "cases": 14,
+      "recall_at_1": 0.5,
+      "recall_at_3": 0.8571428571428571,
+      "recall_at_5": 1,
+      "hit_at_1": 0.5,
+      "hit_at_3": 0.8571428571428571,
+      "hit_at_5": 1,
+      "mrr": 0.6714285714285715,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.09589607142857144
+    },
+    {
+      "mode": "hybrid+rerank",
+      "query_mode": "multi_query",
+      "cases": 14,
+      "recall_at_1": 0.6428571428571429,
+      "recall_at_3": 0.8571428571428571,
+      "recall_at_5": 1,
+      "hit_at_1": 0.6428571428571429,
+      "hit_at_3": 0.8571428571428571,
+      "hit_at_5": 1,
+      "mrr": 0.7547619047619046,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.10583914285714287
+    },
+    {
+      "mode": "hybrid+rerank",
+      "query_mode": "conditional",
+      "cases": 14,
+      "recall_at_1": 0.6428571428571429,
+      "recall_at_3": 0.9285714285714286,
+      "recall_at_5": 1,
+      "hit_at_1": 0.6428571428571429,
+      "hit_at_3": 0.9285714285714286,
+      "hit_at_5": 1,
+      "mrr": 0.7761904761904762,
+      "average_candidate_count": 6.428571428571429,
+      "average_latency_ms": 0.04232735714285714
+    }
+  ],
+  "multi_query_decision": {
+    "cases": 14,
+    "single_query_cases": 13,
+    "multi_query_cases": 1,
+    "multi_query_trigger_rate": 0.07142857142857142,
+    "multi_query_correct_trigger_rate": 1,
+    "incorrect_multi_query_trigger_rate": 0,
+    "neutral_multi_query_trigger_rate": 0,
+    "single_query_recall_at_5": 1,
+    "single_query_mrr": 0.758974358974359,
+    "multi_query_recall_at_5": 1,
+    "multi_query_mrr": 1,
+    "conditional_recall_at_5": 1,
+    "conditional_mrr": 0.7761904761904762,
+    "triggered_case_ids": [
+      "payment-dependency-latency"
+    ],
+    "improved_case_ids": [
+      "payment-dependency-latency"
+    ],
+    "worsened_case_ids": [],
+    "neutral_case_ids": []
+  },
+  "tool_evidence": {
+    "cases": 17,
+    "tool_selection_accuracy": 0.7058823529411765,
+    "tool_argument_accuracy": 1,
+    "argument_field_accuracy": {
+      "query_semantic": 1,
+      "service": 1,
+      "symptom": 1,
+      "time_range": 1,
+      "trace_id": 1
+    },
+    "required_tool_recall": 1,
+    "forbidden_tool_violation_rate": 0,
+    "unnecessary_tool_call_rate": 0,
+    "tool_path_validity": 1,
+    "forbidden_tool_call_count": 0,
+    "evidence_citation_validity": 1,
+    "evidence_allowlist_violation_count": 0,
+    "evidence_coverage": 1,
+    "evidence_allowlist_violation_rate": 0
+  },
+  "agent_e2e": {
+    "cases": 17,
+    "completed": 11,
+    "clarified": 2,
+    "failed": 0,
+    "timeout": 1,
+    "average_tool_calls": 1.3529411764705883,
+    "average_agent_steps": null,
+    "p50_latency_ms": 0.148459,
+    "p95_latency_ms": 0.86375,
+    "task_success_rate": 1,
+    "decision_accuracy": 1,
+    "required_evidence_coverage": 1,
+    "unsafe_action_rate": 0,
+    "failure_rate": 0,
+    "timeout_rate": 0.058823529411764705,
+    "repeated_tool_call_stops": 1
+  },
+  "agent_cases": [
+    {
+      "case_id": "checkout-error-rate-spike",
+      "category": "checkout error rate spike",
+      "input": "查看 checkout 最近 10 分钟错误率",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_metrics"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "metrics"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-checkout-502",
+        "metric-checkout-error-rate"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 5.166875
+    },
+    {
+      "case_id": "payment-dependency-latency",
+      "category": "payment dependency latency",
+      "input": "分析 checkout 最近 20 分钟是否被 payment 延迟拖慢，结合 Trace 和 runbook",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "latency",
+        "time_range": "last_20_minutes"
+      },
+      "required_tools": [
+        "query_traces",
+        "search_knowledge"
+      ],
+      "acceptable_tools": [
+        "query_metrics",
+        "query_logs"
+      ],
+      "forbidden_tools": [],
+      "required_evidence_types": [
+        "traces",
+        "knowledge"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_traces",
+        "search_knowledge"
+      ],
+      "actual_evidence": [
+        "runbook-payment-latency",
+        "trace-payment-latency"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.86375
+    },
+    {
+      "case_id": "database-connection-errors",
+      "category": "database connection errors",
+      "input": "排查 orders 最近 15 分钟数据库连接错误，查日志和处理手册",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "orders",
+        "symptom": "error",
+        "time_range": "last_15_minutes"
+      },
+      "required_tools": [
+        "query_logs",
+        "search_knowledge"
+      ],
+      "acceptable_tools": [
+        "query_metrics"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "logs",
+        "knowledge"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "search_knowledge"
+      ],
+      "actual_evidence": [
+        "log-orders-db-pool",
+        "runbook-db-pool"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.158375
+    },
+    {
+      "case_id": "upstream-timeout",
+      "category": "upstream timeout",
+      "input": "checkout 最近 30 分钟 upstream timeout，查指标和日志",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "timeout",
+        "time_range": "last_30_minutes"
+      },
+      "required_tools": [
+        "query_metrics",
+        "query_logs"
+      ],
+      "acceptable_tools": [
+        "search_knowledge",
+        "query_traces"
+      ],
+      "forbidden_tools": [],
+      "required_evidence_types": [
+        "metrics",
+        "logs"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-checkout-timeout",
+        "metric-checkout-timeout"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.196416
+    },
+    {
+      "case_id": "cross-service-trace-failure",
+      "category": "cross-service trace failure",
+      "input": "分析 trace 4bf92f3577b34da6a3ce929d0e0e4736 的跨服务失败",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "symptom": "error",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+      },
+      "required_tools": [
+        "query_traces"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [
+        "query_metrics"
+      ],
+      "required_evidence_types": [
+        "traces"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_traces"
+      ],
+      "actual_evidence": [
+        "trace-cross-service-failure"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.242084
+    },
+    {
+      "case_id": "metrics-abnormal-logs-normal",
+      "category": "conflicting signals",
+      "input": "payment 最近 10 分钟错误率升高，但日志看起来正常",
+      "expected_intent": "incident_triage",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_metrics"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "metrics"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-payment-normal",
+        "metric-payment-errors-high"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.168542
+    },
+    {
+      "case_id": "logs-error-metrics-flat",
+      "category": "conflicting signals",
+      "input": "checkout 指标没变化，但最近 15 分钟错误日志很多，先查日志",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "checkout",
+        "symptom": "error",
+        "time_range": "last_15_minutes"
+      },
+      "required_tools": [
+        "query_logs"
+      ],
+      "acceptable_tools": [
+        "query_metrics"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "logs"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-checkout-errors-many",
+        "metric-checkout-flat"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.183708
+    },
+    {
+      "case_id": "trace-without-id-service-window",
+      "category": "trace without id",
+      "input": "查看 payment 最近 10 分钟的调用链异常",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_traces"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [],
+      "required_evidence_types": [
+        "traces"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_traces"
+      ],
+      "actual_evidence": [
+        "trace-payment-window-error"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.141583
+    },
+    {
+      "case_id": "clarify-missing-service-oncall",
+      "category": "missing service",
+      "input": "查看最近 10 分钟错误率",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_logs",
+        "query_traces",
+        "search_knowledge"
+      ],
+      "required_evidence_types": [],
+      "expected_decision": "clarify",
+      "actual_trace": [
+        "intent",
+        "slot_validation"
+      ],
+      "actual_tools": [],
+      "actual_evidence": [],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "clarified",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.016417
+    },
+    {
+      "case_id": "clarify-trace-missing-window",
+      "category": "missing time range",
+      "input": "看看 payment 的 trace",
+      "expected_intent": "trace_analysis",
+      "expected_slots": {
+        "service": "payment"
+      },
+      "required_tools": [],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_logs",
+        "query_traces",
+        "search_knowledge"
+      ],
+      "required_evidence_types": [],
+      "expected_decision": "clarify",
+      "actual_trace": [
+        "intent",
+        "slot_validation"
+      ],
+      "actual_tools": [],
+      "actual_evidence": [],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "clarified",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.017916
+    },
+    {
+      "case_id": "switch-service-correction",
+      "category": "service switch",
+      "input": "别查 checkout 了，改查 payment 最近 5 分钟错误日志",
+      "initial_context": {
+        "available": true,
+        "known_slots": {
+          "service": "checkout",
+          "time_range": "last_20_minutes"
+        },
+        "last_intent": "metrics_query"
+      },
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error",
+        "time_range": "last_5_minutes"
+      },
+      "required_tools": [
+        "query_logs"
+      ],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "logs"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs"
+      ],
+      "actual_evidence": [
+        "log-payment-corrected"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.150875
+    },
+    {
+      "case_id": "correct-previous-parameters",
+      "category": "parameter correction",
+      "input": "改成 checkout，时间用最近 5 分钟",
+      "initial_context": {
+        "available": true,
+        "known_slots": {
+          "service": "payment",
+          "symptom": "latency",
+          "time_range": "last_20_minutes"
+        },
+        "last_intent": "metrics_query"
+      },
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "last_5_minutes"
+      },
+      "required_tools": [
+        "query_metrics"
+      ],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_logs",
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "metrics"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "metric-checkout-corrected"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.132875
+    },
+    {
+      "case_id": "focus-old-state-followup",
+      "category": "session focus",
+      "input": "那它的日志呢？",
+      "initial_context": {
+        "available": true,
+        "known_slots": {
+          "service": "checkout",
+          "time_range": "last_10_minutes"
+        },
+        "last_intent": "metrics_query"
+      },
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "checkout",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_logs"
+      ],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "logs"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs"
+      ],
+      "actual_evidence": [
+        "log-checkout-focus"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "completed",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.113834
+    },
+    {
+      "case_id": "tool-timeout-safe-stop",
+      "category": "tool timeout",
+      "input": "查看 payment 最近 10 分钟错误率",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_metrics"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-payment-timeout-fallback"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "timeout",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.138833
+    },
+    {
+      "case_id": "tool-empty-result",
+      "category": "empty tool result",
+      "input": "查看 inventory 最近 10 分钟错误日志",
+      "expected_intent": "logs_query",
+      "expected_slots": {
+        "service": "inventory",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_logs"
+      ],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_traces"
+      ],
+      "required_evidence_types": [],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs"
+      ],
+      "actual_evidence": [],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "no_evidence",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.097333
+    },
+    {
+      "case_id": "retrieval-no-hit",
+      "category": "retrieval miss",
+      "input": "找一下 shipping 数据库切换 runbook",
+      "expected_intent": "knowledge_query",
+      "expected_slots": {
+        "service": "shipping"
+      },
+      "required_tools": [
+        "search_knowledge"
+      ],
+      "acceptable_tools": [],
+      "forbidden_tools": [
+        "query_metrics",
+        "query_logs",
+        "query_traces"
+      ],
+      "required_evidence_types": [],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "search_knowledge"
+      ],
+      "actual_evidence": [],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "no_evidence",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": false,
+      "latency_ms": 0.105
+    },
+    {
+      "case_id": "repeated-tool-call-budget",
+      "category": "repeated tool call",
+      "input": "查看 payment 最近 10 分钟错误率",
+      "expected_intent": "metrics_query",
+      "expected_slots": {
+        "service": "payment",
+        "symptom": "error",
+        "time_range": "last_10_minutes"
+      },
+      "required_tools": [
+        "query_metrics"
+      ],
+      "acceptable_tools": [
+        "query_logs"
+      ],
+      "forbidden_tools": [
+        "query_traces"
+      ],
+      "required_evidence_types": [
+        "metrics"
+      ],
+      "expected_decision": "proceed",
+      "actual_trace": [
+        "intent",
+        "slot_validation",
+        "offline_rag",
+        "tool",
+        "evidence",
+        "diagnosis"
+      ],
+      "actual_tools": [
+        "query_logs",
+        "query_metrics"
+      ],
+      "actual_evidence": [
+        "log-payment-repeat",
+        "metric-payment-repeat"
+      ],
+      "final_status": "passed",
+      "task_success": true,
+      "observed_status": "repeated_tool_call",
+      "decision_correct": true,
+      "required_evidence_coverage": 1,
+      "unsafe_action": false,
+      "repeated_tool_call_stop": true,
+      "latency_ms": 0.148459
+    }
+  ],
+  "benchmarks": {
+    "rule_first_before": {
+      "mode": "llm",
+      "cases": 32,
+      "rule_direct_count": 0,
+      "llm_escalation_count": 32,
+      "llm_call_rate": 1,
+      "fallback_count": 0,
+      "intent_accuracy": 1
+    },
+    "rule_first_after": {
+      "mode": "hybrid",
+      "cases": 32,
+      "rule_direct_count": 30,
+      "llm_escalation_count": 2,
+      "llm_call_rate": 0.0625,
+      "fallback_count": 0,
+      "intent_accuracy": 1
+    },
+    "clarification_early_exit": {
+      "cases": 3,
+      "rag_calls": 0,
+      "agent_calls": 0,
+      "tool_calls": 0,
+      "avoided_rag_calls": 3,
+      "avoided_agent_calls": 3,
+      "avoided_tool_calls": 3
+    },
+    "context_governance": {
+      "raw_history": {
+        "message_count": 18,
+        "context_chars": 1058,
+        "context_bytes": 1058,
+        "retained_important_fields": [
+          "service",
+          "time_range",
+          "trace_id"
+        ],
+        "redacted_fields": [],
+        "focus_size_bytes": 0
+      },
+      "recent_messages_summary_focus": {
+        "message_count": 6,
+        "context_chars": 930,
+        "context_bytes": 930,
+        "retained_important_fields": [
+          "service",
+          "time_range",
+          "trace_id"
+        ],
+        "redacted_fields": [
+          "api_key"
+        ],
+        "focus_size_bytes": 1640
+      }
+    },
+    "retrieval": [
+      {
+        "mode": "bm25",
+        "query_mode": "single_query",
+        "cases": 14,
+        "recall_at_1": 0.5,
+        "recall_at_3": 0.8571428571428571,
+        "recall_at_5": 1,
+        "hit_at_1": 0.5,
+        "hit_at_3": 0.8571428571428571,
+        "hit_at_5": 1,
+        "mrr": 0.6749999999999999,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.02554435714285714
+      },
+      {
+        "mode": "bm25",
+        "query_mode": "multi_query",
+        "cases": 14,
+        "recall_at_1": 0.5,
+        "recall_at_3": 0.7857142857142857,
+        "recall_at_5": 1,
+        "hit_at_1": 0.5,
+        "hit_at_3": 0.7857142857142857,
+        "hit_at_5": 1,
+        "mrr": 0.680952380952381,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.05450878571428571
+      },
+      {
+        "mode": "hybrid",
+        "query_mode": "single_query",
+        "cases": 14,
+        "recall_at_1": 0.5714285714285714,
+        "recall_at_3": 0.9285714285714286,
+        "recall_at_5": 1,
+        "hit_at_1": 0.5714285714285714,
+        "hit_at_3": 0.9285714285714286,
+        "hit_at_5": 1,
+        "mrr": 0.7404761904761905,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.03378871428571428
+      },
+      {
+        "mode": "hybrid",
+        "query_mode": "multi_query",
+        "cases": 14,
+        "recall_at_1": 0.5,
+        "recall_at_3": 0.8571428571428571,
+        "recall_at_5": 1,
+        "hit_at_1": 0.5,
+        "hit_at_3": 0.8571428571428571,
+        "hit_at_5": 1,
+        "mrr": 0.6714285714285715,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.09589607142857144
+      },
+      {
+        "mode": "hybrid+rerank",
+        "query_mode": "multi_query",
+        "cases": 14,
+        "recall_at_1": 0.6428571428571429,
+        "recall_at_3": 0.8571428571428571,
+        "recall_at_5": 1,
+        "hit_at_1": 0.6428571428571429,
+        "hit_at_3": 0.8571428571428571,
+        "hit_at_5": 1,
+        "mrr": 0.7547619047619046,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.10583914285714287
+      },
+      {
+        "mode": "hybrid+rerank",
+        "query_mode": "conditional",
+        "cases": 14,
+        "recall_at_1": 0.6428571428571429,
+        "recall_at_3": 0.9285714285714286,
+        "recall_at_5": 1,
+        "hit_at_1": 0.6428571428571429,
+        "hit_at_3": 0.9285714285714286,
+        "hit_at_5": 1,
+        "mrr": 0.7761904761904762,
+        "average_candidate_count": 6.428571428571429,
+        "average_latency_ms": 0.04232735714285714
+      }
+    ]
+  },
+  "bad_cases": [],
+  "bad_case_comparison": {
+    "before_records": 9,
+    "before_unique_bad_cases": 3,
+    "after_records": 0,
+    "after_unique_bad_cases": 0,
+    "fixed": 9,
+    "still_failing": 0,
+    "new_regression": 0,
+    "challenge_findings": 0,
+    "cases": [
+      {
+        "case_id": "payment-dependency-latency",
+        "stage": "clarification",
+        "root_cause": "cross-service dependency wording was treated as ambiguous multi-service input",
+        "fix_type": "rule_incomplete",
+        "before_behavior": "clarified instead of proceeding with checkout as the primary service",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "database-connection-errors",
+        "stage": "intent",
+        "root_cause": "Chinese log and database connection error signals were absent from incident-over-knowledge precedence",
+        "fix_type": "code_bug",
+        "before_behavior": "classified as knowledge_query instead of incident_triage",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "payment-dependency-latency",
+        "stage": "intent",
+        "root_cause": "compound trace plus Chinese latency plus runbook wording was not recognized as a composite investigation",
+        "fix_type": "rule_incomplete",
+        "before_behavior": "classified as trace_analysis instead of incident_triage",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "database-connection-errors",
+        "stage": "slot",
+        "root_cause": "generic Chinese database connection error was not normalized to symptom=error",
+        "fix_type": "rule_incomplete",
+        "before_behavior": "symptom was empty",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "database-connection-errors",
+        "stage": "tool_arguments",
+        "root_cause": "the planner selected only knowledge, so no service-aware log arguments were emitted",
+        "fix_type": "code_bug",
+        "before_behavior": "no selected tool carried service=orders or the requested time range",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "payment-dependency-latency",
+        "stage": "tool_arguments",
+        "root_cause": "premature clarification prevented all tool argument generation",
+        "fix_type": "code_bug",
+        "before_behavior": "no tool arguments were produced",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "checkout-error-rate-spike",
+        "stage": "tool_selection",
+        "root_cause": "exact-set evaluation rejected a reasonable metrics plus logs investigation path",
+        "fix_type": "eval_ground_truth_too_strict",
+        "before_behavior": "query_logs was treated as incorrect even though it was relevant corroboration",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "database-connection-errors",
+        "stage": "tool_selection",
+        "root_cause": "Chinese explicit log signal was not recognized by the deterministic planner",
+        "fix_type": "code_bug",
+        "before_behavior": "selected search_knowledge but omitted required query_logs",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "payment-dependency-latency",
+        "stage": "tool_selection",
+        "root_cause": "premature clarification stopped the tool path before trace and knowledge calls",
+        "fix_type": "code_bug",
+        "before_behavior": "selected no tools",
+        "after_behavior": "passed behavior-level evaluation",
+        "fixed": true
+      }
+    ]
+  },
+  "optimization_before_after": {
+    "before": {
+      "captured_at": "2026-08-18T10:00:00Z",
+      "intent": {
+        "llm_escalation_rate": 0.225,
+        "incorrect_escalation_rate": 0.15,
+        "challenge_behavior_accuracy": 1,
+        "fixed_regression_accuracy": 1
+      },
+      "retrieval": {
+        "single_query_recall_at_5": 0.9285714285714286,
+        "single_query_mrr": 0.5583333333333333,
+        "multi_query_recall_at_5": 0.8571428571428571,
+        "multi_query_mrr": 0.5761904761904761,
+        "bad_cases": 2
+      },
+      "agent_e2e": {
+        "task_success_rate": 1,
+        "decision_accuracy": 1,
+        "unsafe_action_rate": 0,
+        "timeout": 1,
+        "repeated_tool_call_stops": 1
+      }
+    },
+    "after": {
+      "captured_at": "2026-08-18T10:00:00Z",
+      "intent": {
+        "llm_escalation_rate": 0.05,
+        "incorrect_escalation_rate": 0,
+        "challenge_behavior_accuracy": 1,
+        "fixed_regression_accuracy": 1
+      },
+      "retrieval": {
+        "single_query_recall_at_5": 1,
+        "single_query_mrr": 0.758974358974359,
+        "multi_query_recall_at_5": 1,
+        "multi_query_mrr": 1,
+        "bad_cases": 0
+      },
+      "agent_e2e": {
+        "task_success_rate": 1,
+        "decision_accuracy": 1,
+        "unsafe_action_rate": 0,
+        "timeout": 1,
+        "repeated_tool_call_stops": 1
+      }
+    }
+  },
+  "final_optimization_bad_cases": {
+    "before": 8,
+    "after": 0,
+    "fixed": 8,
+    "cases": [
+      {
+        "case_id": "chat-greeting",
+        "stage": "agent_execution",
+        "input": "你好，今天过得怎么样",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "clear non-operational requests shared the generic 0.50 confidence and fell below the hybrid threshold",
+        "fix_type": "rule_confidence",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "chat-rag-concept",
+        "stage": "agent_execution",
+        "input": "Can you explain what RAG means?",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "explicit conceptual questions were not separated from ambiguous general chat",
+        "fix_type": "rule_confidence",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "irrelevant-chat",
+        "stage": "agent_execution",
+        "input": "写一首关于墨尔本下雨的俳句",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "explicit creative requests were not recognized as strong deterministic general intent",
+        "fix_type": "rule_confidence",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "runbook-primary",
+        "stage": "agent_execution",
+        "input": "payment latency runbook，纯粹找文档",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "latency plus runbook terms were treated as conflict despite the explicit documentation-only preference",
+        "fix_type": "conflict_detection",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "switch-to-runbook",
+        "stage": "agent_execution",
+        "input": "不用查指标了，找一下 checkout runbook",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "the resolved knowledge preference was classified correctly but conflict metadata still forced escalation",
+        "fix_type": "conflict_detection",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "too-many-connections",
+        "stage": "agent_execution",
+        "input": "inventory 报 too many connections，查日志和 runbook",
+        "expected": "rule_direct",
+        "actual": "llm_escalated",
+        "root_cause": "multiple complementary evidence terms were mistaken for mutually exclusive intent signals",
+        "fix_type": "conflict_detection",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "correct-previous-parameters",
+        "stage": "retrieval",
+        "input": "改成 checkout，时间用最近 5 分钟",
+        "expected": "runbook-parameter-correction in top 5",
+        "actual": "top 5 omitted runbook-parameter-correction",
+        "root_cause": "the correction turn lacked an authoritative semantic query and generic expansion diluted parameter-correction evidence",
+        "fix_type": "authoritative_query",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      },
+      {
+        "case_id": "switch-service-correction",
+        "stage": "retrieval",
+        "input": "别查 checkout 了，改查 payment 最近 5 分钟错误日志",
+        "expected": "runbook-service-switch in top 5",
+        "actual": "top 5 omitted runbook-service-switch",
+        "root_cause": "obsolete service wording remained in the original query while unconditional expansion favored generic observability documents",
+        "fix_type": "authoritative_query",
+        "after_behavior": "passed current evaluation",
+        "fixed": true
+      }
+    ]
+  }
+}

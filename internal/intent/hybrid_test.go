@@ -46,6 +46,56 @@ func TestHybridRuleFirstSkipsLLMForClearInput(t *testing.T) {
 	assertHybridMetadata(t, result, 0.78, false, 0, "", false, "rule")
 }
 
+func TestHybridRuleFirstSkipsLLMForClearGeneralRequests(t *testing.T) {
+	for _, message := range []string{
+		"你好，今天过得怎么样",
+		"Can you explain what RAG means?",
+		"写一首关于墨尔本下雨的俳句",
+	} {
+		rule := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+		llm := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+		result := recognizeForTest(t, Config{
+			Enabled: true, Mode: "hybrid", LLMEnabled: true,
+			MinRuleConfidence: 0.75, MinLLMConfidence: 0.55,
+		}, llm, rule, RecognitionInput{Message: message})
+		if result.Intent != IntentGeneralChat || llm.calls != 0 {
+			t.Fatalf("message=%q llm=%d result=%#v", message, llm.calls, result)
+		}
+	}
+}
+
+func TestHybridRuleFirstDoesNotEscalateMissingSlots(t *testing.T) {
+	rule := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+	llm := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+	input := RecognitionInput{Message: "查最近十分钟的错误率"}
+	result := recognizeForTest(t, Config{
+		Enabled: true, Mode: "hybrid", LLMEnabled: true,
+		MinRuleConfidence: 0.75, MinLLMConfidence: 0.55,
+	}, llm, rule, input)
+	decision := ValidateSlots(input.Message, result, nil, FocusView{}, 0.55)
+	if llm.calls != 0 || decision.Decision != DecisionClarify {
+		t.Fatalf("llm=%d result=%#v decision=%#v", llm.calls, result, decision)
+	}
+}
+
+func TestHybridRuleFirstSkipsLLMForResolvedMultiSignalRequests(t *testing.T) {
+	for _, message := range []string{
+		"不用查指标了，找一下 checkout runbook",
+		"payment latency runbook，纯粹找文档",
+		"inventory 报 too many connections，查日志和 runbook",
+	} {
+		rule := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+		llm := &countingRecognizerStub{delegate: NewRuleBasedRecognizer()}
+		result := recognizeForTest(t, Config{
+			Enabled: true, Mode: "hybrid", LLMEnabled: true,
+			MinRuleConfidence: 0.75, MinLLMConfidence: 0.55,
+		}, llm, rule, RecognitionInput{Message: message})
+		if llm.calls != 0 {
+			t.Fatalf("message=%q llm=%d result=%#v", message, llm.calls, result)
+		}
+	}
+}
+
 func TestHybridEscalatesAmbiguousRuleToLLM(t *testing.T) {
 	rule := &countingRecognizerStub{result: IntentResult{
 		Intent:     IntentGeneralChat,

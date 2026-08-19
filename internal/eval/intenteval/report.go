@@ -37,6 +37,8 @@ func Markdown(report Report) string {
 		report.Metrics.SlotFieldAccuracy)
 	fmt.Fprintf(&builder, "- Joint Intent + Slot Exact Match: `%.4f`\n",
 		report.Metrics.JointIntentSlotExactMatch)
+	fmt.Fprintf(&builder, "- Clarification Decision Accuracy: `%.4f`\n",
+		report.Metrics.ClarificationDecisionAccuracy)
 	for _, field := range slotFields {
 		fmt.Fprintf(&builder, "  - %s: `%.4f`\n",
 			field,
@@ -50,13 +52,15 @@ func Markdown(report Report) string {
 			continue
 		}
 		failed++
-		fmt.Fprintf(&builder, "- `%s`: %s; intent `%s` → `%s`; slots `%s` → `%s`\n",
+		fmt.Fprintf(&builder, "- `%s`: %s; intent `%s` → `%s`; slots `%s` → `%s`; decision `%s` → `%s`\n",
 			current.ID,
 			current.FailureReason,
 			current.ExpectedIntent,
 			current.ActualIntent,
 			formatSlots(current.ExpectedSlots),
 			formatSlots(current.ActualSlots),
+			current.ExpectedDecision,
+			current.ActualDecision,
 		)
 	}
 	if failed == 0 {
@@ -78,6 +82,10 @@ func ThresholdFailures(report Report, getenv func(string) string) []string {
 		{
 			"WATCHOPS_JOINT_INTENT_SLOT_MIN",
 			report.Metrics.JointIntentSlotExactMatch,
+		},
+		{
+			"WATCHOPS_CLARIFICATION_ACCURACY_MIN",
+			report.Metrics.ClarificationDecisionAccuracy,
 		},
 	}
 	failures := []string{}

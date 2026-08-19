@@ -19,33 +19,37 @@ type Dataset struct {
 }
 
 type Case struct {
-	ID             string            `json:"id"`
-	Message        string            `json:"message"`
-	ExpectedIntent string            `json:"expected_intent"`
-	ExpectedSlots  map[string]string `json:"expected_slots"`
-	Notes          string            `json:"notes,omitempty"`
+	ID               string            `json:"id"`
+	Message          string            `json:"message"`
+	ExpectedIntent   string            `json:"expected_intent"`
+	ExpectedSlots    map[string]string `json:"expected_slots"`
+	ExpectedDecision string            `json:"expected_decision,omitempty"`
+	Notes            string            `json:"notes,omitempty"`
 }
 
 type CaseResult struct {
-	ID             string            `json:"id"`
-	Passed         bool              `json:"passed"`
-	FailureReason  string            `json:"failure_reason,omitempty"`
-	LatencyMS      float64           `json:"latency_ms"`
-	ExpectedIntent string            `json:"expected_intent"`
-	ActualIntent   string            `json:"actual_intent"`
-	ExpectedSlots  map[string]string `json:"expected_slots"`
-	ActualSlots    map[string]string `json:"actual_slots"`
-	Confidence     float64           `json:"confidence"`
-	Source         string            `json:"source"`
+	ID               string            `json:"id"`
+	Passed           bool              `json:"passed"`
+	FailureReason    string            `json:"failure_reason,omitempty"`
+	LatencyMS        float64           `json:"latency_ms"`
+	ExpectedIntent   string            `json:"expected_intent"`
+	ActualIntent     string            `json:"actual_intent"`
+	ExpectedSlots    map[string]string `json:"expected_slots"`
+	ActualSlots      map[string]string `json:"actual_slots"`
+	ExpectedDecision string            `json:"expected_decision"`
+	ActualDecision   string            `json:"actual_decision"`
+	Confidence       float64           `json:"confidence"`
+	Source           string            `json:"source"`
 }
 
 type Metrics struct {
-	IntentAccuracy            float64                   `json:"intent_accuracy"`
-	SlotFieldAccuracy         float64                   `json:"slot_field_accuracy"`
-	SlotFieldAccuracyByField  map[string]float64        `json:"slot_field_accuracy_by_field"`
-	JointIntentSlotExactMatch float64                   `json:"joint_intent_slot_exact_match"`
-	AverageLatencyMS          float64                   `json:"average_latency_ms"`
-	ConfusionMatrix           map[string]map[string]int `json:"intent_confusion_matrix"`
+	IntentAccuracy                float64                   `json:"intent_accuracy"`
+	SlotFieldAccuracy             float64                   `json:"slot_field_accuracy"`
+	SlotFieldAccuracyByField      map[string]float64        `json:"slot_field_accuracy_by_field"`
+	JointIntentSlotExactMatch     float64                   `json:"joint_intent_slot_exact_match"`
+	ClarificationDecisionAccuracy float64                   `json:"clarification_decision_accuracy"`
+	AverageLatencyMS              float64                   `json:"average_latency_ms"`
+	ConfusionMatrix               map[string]map[string]int `json:"intent_confusion_matrix"`
 }
 
 type Report struct {
@@ -97,6 +101,17 @@ func LoadDataset(reader io.Reader) (Dataset, error) {
 		}
 		if current.ExpectedSlots == nil {
 			current.ExpectedSlots = map[string]string{}
+		}
+		if current.ExpectedDecision == "" {
+			current.ExpectedDecision = string(intent.DecisionProceed)
+		}
+		if current.ExpectedDecision != string(intent.DecisionProceed) &&
+			current.ExpectedDecision != string(intent.DecisionClarify) {
+			return Dataset{}, fmt.Errorf(
+				"case %q has invalid expected_decision %q",
+				current.ID,
+				current.ExpectedDecision,
+			)
 		}
 		for key := range current.ExpectedSlots {
 			if !contains(slotFields, key) {

@@ -218,3 +218,56 @@ func hasAgent(result IntentResult, role AgentRole) bool {
 	}
 	return false
 }
+
+func TestRuleBasedPrioritizesCompoundIncidentOverTraceKeyword(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "分析 checkout 是否被 payment 延迟拖慢，结合 Trace 和 runbook",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Intent != IntentIncidentTriage || result.Service != "checkout" || result.Symptom != "latency" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuleBasedTreatsDatabaseConnectionErrorsAsIncident(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "排查 orders 数据库 connection refused，查日志和处理手册",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Intent != IntentIncidentTriage || result.Symptom != "error" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuleBasedCarriesFocusIntoExplicitFollowupIntent(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "那它的日志呢？",
+		Focus: FocusView{
+			Available: true, LastIntent: string(IntentMetricsQuery),
+			KnownSlots: map[string]string{"service": "payment", "time_range": "last_10_minutes"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Intent != IntentLogsQuery || result.Service != "payment" ||
+		result.TimeRange == nil || result.TimeRange.Relative != "last_10_minutes" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuleBasedUsesCorrectedServiceRatherThanNegatedService(t *testing.T) {
+	result, err := NewRuleBasedRecognizer().Recognize(context.Background(), RecognitionInput{
+		Message: "别查 checkout 了，改查 payment 最近 5 分钟错误日志",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Service != "payment" || result.Intent != IntentLogsQuery {
+		t.Fatalf("result = %#v", result)
+	}
+}

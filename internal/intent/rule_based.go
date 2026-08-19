@@ -54,8 +54,10 @@ func (r *RuleBasedRecognizer) Recognize(
 			reason = "ordinal reference has no session candidates"
 			contextReferenceUnresolved = true
 		}
-	} else if isEllipticalContinuation(message, intentType) && input.Focus.Available {
-		intentType = validContextIntent(input.Focus.LastIntent)
+	} else if (isEllipticalContinuation(message, intentType) || isContextReference(message) || isFocusCorrection(message)) && input.Focus.Available {
+		if intentType == IntentGeneralChat {
+			intentType = validContextIntent(input.Focus.LastIntent)
+		}
 		confidence = 0.78
 		reason = "resolved elliptical continuation from session focus"
 		contextApplied = true
@@ -106,7 +108,16 @@ func detectTraceID(message string) string {
 func detectService(message string) string {
 	match := servicePattern.FindString(message)
 	if match == "" {
-		match = commonServicePattern.FindString(message)
+		matches := commonServicePattern.FindAllString(message, -1)
+		if len(matches) > 0 {
+			match = matches[0]
+			if len(matches) > 1 && containsAny(
+				strings.ToLower(message),
+				"改成", "换成", "改查", "切到", "instead", "switch to", "not ",
+			) {
+				match = matches[len(matches)-1]
+			}
+		}
 	}
 	if match == "" {
 		return ""
@@ -168,7 +179,11 @@ func referencedCandidateIndex(message string) int {
 func isContextReference(message string) bool {
 	lower := strings.ToLower(strings.TrimSpace(message))
 	return referencedCandidateIndex(message) >= 0 ||
-		containsAny(lower, "就刚才那个", "刚才那个", "时间不变", "same time")
+		containsAny(
+			lower,
+			"就刚才那个", "刚才那个", "那个服务", "它的", "它呢",
+			"时间不变", "same time", "that service", "its ",
+		)
 }
 
 func isEllipticalContinuation(message string, classified IntentType) bool {
@@ -202,9 +217,13 @@ func detectSymptom(message string) string {
 	switch {
 	case containsAny(lower, "timeout", "超时", "deadline"):
 		return "timeout"
-	case containsAny(lower, "latency", "slow", "p95", "耗时", "慢"):
+	case containsAny(lower, "latency", "slow", "p95", "延迟", "耗时", "慢"):
 		return "latency"
-	case containsAny(lower, "error", "5xx", "500", "fail", "失败", "报错", "错误率", "錯誤率", "异常"):
+	case containsAny(
+		lower,
+		"error", "5xx", "500", "fail", "失败", "报错", "错误", "錯誤", "异常",
+		"connection refused", "too many connections", "连接失败", "连接拒绝",
+	):
 		return "error"
 	case containsAny(lower, "panic", "exception", "stack"):
 		return "exception"
@@ -215,13 +234,22 @@ func detectSymptom(message string) string {
 
 func classifyIntentByKeywords(message string, traceID string) (IntentType, float64, string) {
 	lower := strings.ToLower(message)
+	if hasExplicitKnowledgePreference(lower) {
+		return IntentKnowledgeQuery, 0.88, "explicit knowledge preference detected"
+	}
+	if isExplicitNonIncidentKnowledge(lower) || isKnowledgeArtifactRequest(lower) {
+		return IntentKnowledgeQuery, 0.88, "non-incident knowledge artifact request detected"
+	}
 	if hasExplicitLogPreference(lower) {
 		return IntentLogsQuery, 0.88, "explicit log preference detected"
 	}
-	if isCompositeDiagnosticRequest(lower) {
+	if hasExplicitMetricPreference(lower) {
+		return IntentMetricsQuery, 0.88, "explicit metric preference detected"
+	}
+	if isCompositeDiagnosticRequest(lower) || isMultiEvidenceIncidentRequest(lower) {
 		return IntentIncidentTriage, 0.88, "composite diagnostic request detected"
 	}
-	if traceID != "" || containsAny(lower, "trace", "span", "链路", "慢调用") {
+	if traceID != "" || containsAny(lower, "trace", "span", "链路", "调用链", "慢调用") {
 		return IntentTraceAnalysis, 0.9, "trace signal detected"
 	}
 	if containsAny(lower, "总结", "汇总", "当前状态", "进展", "status summary", "summarize") {
@@ -235,7 +263,12 @@ func classifyIntentByKeywords(message string, traceID string) (IntentType, float
 		return IntentKnowledgeQuery, 0.88, "explicit non-incident knowledge request detected"
 	}
 	if containsAny(lower, "runbook", "文档", "知识库", "怎么处理", "处理手册", "历史故障", "playbook") &&
-		containsAny(lower, "metric", "metrics", "log", "logs", "alert", "error rate", "error", "5xx", "500", "失败", "故障", "incident", "告警") {
+		containsAny(
+			lower,
+			"metric", "metrics", "指标", "log", "logs", "日志", "alert", "告警",
+			"error rate", "error", "错误", "5xx", "500", "失败", "故障", "incident",
+			"connection refused", "too many connections", "连接失败", "连接错误",
+		) {
 		return IntentIncidentTriage, 0.86, "knowledge request with incident evidence signals detected"
 	}
 	if containsAny(lower, "runbook", "文档", "知识库", "怎么处理", "处理手册", "历史故障", "playbook") {
@@ -250,8 +283,11 @@ func classifyIntentByKeywords(message string, traceID string) (IntentType, float
 	if containsAny(lower, "log", "日志", "panic", "exception", "stack") {
 		return IntentLogsQuery, 0.8, "log signal detected"
 	}
-	if containsAny(lower, "error", "5xx", "500", "fail", "failing", "失败", "报错", "异常", "incident", "故障", "告警", "timeout", "超时", "slow", "慢", "排查") {
+	if containsAny(lower, "error", "5xx", "500", "fail", "failing", "失败", "报错", "异常", "incident", "故障", "告警", "timeout", "超时", "slow", "慢", "排查", "connection refused", "too many connections") {
 		return IntentIncidentTriage, 0.82, "incident symptom detected"
+	}
+	if isClearGeneralRequest(lower) {
+		return IntentGeneralChat, 0.8, "clear non-operational request detected"
 	}
 	return IntentGeneralChat, 0.5, "no strong diagnostic signal detected"
 }
@@ -260,7 +296,14 @@ func detectIntentSignalConflict(message string) bool {
 	lower := strings.ToLower(message)
 	if hasExplicitLogPreference(lower) ||
 		hasExplicitMetricPreference(lower) ||
-		isCompositeDiagnosticRequest(lower) {
+		hasExplicitKnowledgePreference(lower) ||
+		isExplicitNonIncidentKnowledge(lower) ||
+		isKnowledgeArtifactRequest(lower) ||
+		isCompositeDiagnosticRequest(lower) ||
+		isMultiEvidenceIncidentRequest(lower) {
+		return false
+	}
+	if !containsAny(lower, "还是", "或者", " or ", " versus ", " vs ", "which one") {
 		return false
 	}
 	signals := 0
@@ -279,6 +322,23 @@ func detectIntentSignalConflict(message string) bool {
 	return signals > 1
 }
 
+func isClearGeneralRequest(lower string) bool {
+	lower = strings.TrimSpace(lower)
+	if containsAny(lower,
+		"你好", "您好", "hello", "hi ", "hey ",
+		"写一首", "写首", "poem", "haiku", "俳句",
+	) {
+		return true
+	}
+	return containsAny(lower,
+		"what does", "what is", "what are", "explain what", "means?",
+		"是什么意思", "是什么？", "是什么?", "解释一下",
+	) && !containsAny(lower,
+		"查", "查看", "排查", "故障", "错误", "异常", "timeout", "超时",
+		"metric", "metrics", "日志", "trace", "span", "runbook",
+	)
+}
+
 func hasExplicitLogPreference(lower string) bool {
 	return containsAny(
 		lower,
@@ -290,6 +350,9 @@ func hasExplicitLogPreference(lower string) bool {
 		"log first",
 		"prefer logs",
 		"only logs",
+		"改查日志",
+		"看看日志",
+		"查日志就行",
 	)
 }
 
@@ -307,6 +370,34 @@ func hasExplicitMetricPreference(lower string) bool {
 	)
 }
 
+func hasExplicitKnowledgePreference(lower string) bool {
+	knowledgeSignal := containsAny(lower, "runbook", "手册", "文档", "knowledge", "playbook", "guide")
+	return knowledgeSignal && (containsAny(lower,
+		"不用查指标", "别查指标", "不用看指标", "skip metrics",
+	) || containsAny(lower,
+		"纯粹找", "只想找", "只找", "只看文档", "docs only", "documentation only",
+	))
+}
+
+func isExplicitNonIncidentKnowledge(lower string) bool {
+	return containsAny(lower, "没报错", "没有报错", "没有故障", "没有线上故障", "no error", "not failing", "no incident") &&
+		containsAny(lower, "runbook", "文档", "知识库", "手册", "playbook", "guide")
+}
+
+func isKnowledgeArtifactRequest(lower string) bool {
+	return containsAny(lower, "find ", "找一下", "查找") &&
+		containsAny(lower, "guide", "文档", "runbook", "playbook") &&
+		!containsAny(lower, "error", "错误", "失败", "故障", "incident", "timeout", "超时", "延迟升高")
+}
+
+func isFocusCorrection(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	return containsAny(lower,
+		"改成", "换成", "改查", "切到", "不用查", "别查",
+		"instead", "switch to", "change to", "use the last", "last 5 minutes",
+	)
+}
+
 func isCompositeDiagnosticRequest(lower string) bool {
 	return containsAny(lower, "trace", "span", "链路", "慢调用") &&
 		containsAny(
@@ -318,12 +409,27 @@ func isCompositeDiagnosticRequest(lower string) bool {
 			"错误率",
 			"錯誤率",
 			"latency",
+			"延迟",
+			"耗时",
 			"p95",
 			"指标",
 			"log",
 			"日志",
 		) &&
 		containsAny(lower, "建议", "advice", "recommend", "结合", "综合")
+}
+
+func isMultiEvidenceIncidentRequest(lower string) bool {
+	metricSignal := containsAny(
+		lower,
+		"metric", "metrics", "指标", "error rate", "错误率", "latency", "延迟", "p95", "qps",
+	)
+	logSignal := containsAny(lower, "log", "logs", "日志", "exception", "panic")
+	incidentSignal := containsAny(
+		lower,
+		"error", "错误", "失败", "timeout", "超时", "slow", "慢", "延迟", "故障", "incident",
+	)
+	return metricSignal && logSignal && incidentSignal
 }
 
 func suggestToolsForIntent(intentType IntentType, traceID string) []ToolName {

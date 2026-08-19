@@ -1,0 +1,11 @@
+[
+  {"case_id":"payment-dependency-latency","stage":"clarification","root_cause":"cross-service dependency wording was treated as ambiguous multi-service input","fix_type":"rule_incomplete","before_behavior":"clarified instead of proceeding with checkout as the primary service"},
+  {"case_id":"database-connection-errors","stage":"intent","root_cause":"Chinese log and database connection error signals were absent from incident-over-knowledge precedence","fix_type":"code_bug","before_behavior":"classified as knowledge_query instead of incident_triage"},
+  {"case_id":"payment-dependency-latency","stage":"intent","root_cause":"compound trace plus Chinese latency plus runbook wording was not recognized as a composite investigation","fix_type":"rule_incomplete","before_behavior":"classified as trace_analysis instead of incident_triage"},
+  {"case_id":"database-connection-errors","stage":"slot","root_cause":"generic Chinese database connection error was not normalized to symptom=error","fix_type":"rule_incomplete","before_behavior":"symptom was empty"},
+  {"case_id":"database-connection-errors","stage":"tool_arguments","root_cause":"the planner selected only knowledge, so no service-aware log arguments were emitted","fix_type":"code_bug","before_behavior":"no selected tool carried service=orders or the requested time range"},
+  {"case_id":"payment-dependency-latency","stage":"tool_arguments","root_cause":"premature clarification prevented all tool argument generation","fix_type":"code_bug","before_behavior":"no tool arguments were produced"},
+  {"case_id":"checkout-error-rate-spike","stage":"tool_selection","root_cause":"exact-set evaluation rejected a reasonable metrics plus logs investigation path","fix_type":"eval_ground_truth_too_strict","before_behavior":"query_logs was treated as incorrect even though it was relevant corroboration"},
+  {"case_id":"database-connection-errors","stage":"tool_selection","root_cause":"Chinese explicit log signal was not recognized by the deterministic planner","fix_type":"code_bug","before_behavior":"selected search_knowledge but omitted required query_logs"},
+  {"case_id":"payment-dependency-latency","stage":"tool_selection","root_cause":"premature clarification stopped the tool path before trace and knowledge calls","fix_type":"code_bug","before_behavior":"selected no tools"}
+]

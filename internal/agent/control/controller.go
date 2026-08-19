@@ -18,6 +18,7 @@ type Limitation struct {
 
 type Evaluation struct {
 	FailureReason  string
+	StopReason     StopReason
 	ShouldFallback bool
 	Controlled     bool
 	Limitations    []Limitation
@@ -81,7 +82,8 @@ func (c *Controller) Evaluate(ctx context.Context, state State) Evaluation {
 			Message: "Several tools failed consecutively, so the Agent stopped trusting further risky execution.",
 		}, true)
 	}
-	if c.config.EnableRepeatedToolDetection && state.RepeatedToolCallCount > 1 {
+	if c.config.EnableRepeatedToolDetection &&
+		state.RepeatedToolCallCount > c.config.MaxRepeatedToolCalls {
 		addControlled("repeated_tool_call", Limitation{
 			Code:    "AGENT_REPEATED_TOOL_CALL",
 			Message: "The Agent repeated the same tool call pattern and the duplicate execution was treated as low value.",
@@ -105,6 +107,7 @@ func (c *Controller) Evaluate(ctx context.Context, state State) Evaluation {
 			Message: "No tool evidence was returned to support an observed root-cause claim.",
 		}, false)
 	}
+	evaluation.StopReason = stopReasonForFailure(evaluation.FailureReason)
 
 	span.SetAttributes(
 		attribute.String("failure_reason", evaluation.FailureReason),
@@ -112,6 +115,25 @@ func (c *Controller) Evaluate(ctx context.Context, state State) Evaluation {
 		attribute.Bool("fallback_required", evaluation.ShouldFallback),
 	)
 	return evaluation
+}
+
+func stopReasonForFailure(reason string) StopReason {
+	switch reason {
+	case "max_tool_calls_exceeded":
+		return StopReasonToolBudgetExceeded
+	case "consecutive_tool_failures":
+		return StopReasonToolFailure
+	case "repeated_tool_call":
+		return StopReasonRepeatedToolCall
+	case "max_iterations_reached":
+		return StopReasonMaxStepsReached
+	case "total_execution_timeout":
+		return StopReasonTimeout
+	case "invalid_final_json", "missing_required_sections":
+		return StopReasonModelFailure
+	default:
+		return ""
+	}
 }
 
 func (c *Controller) RepairJSON(ctx context.Context, content string) (string, bool) {

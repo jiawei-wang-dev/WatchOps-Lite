@@ -59,7 +59,8 @@ func TestDatasetEvaluationAndMetrics(t *testing.T) {
 	}
 	if report.Metrics.IntentAccuracy <= 0 ||
 		report.Metrics.SlotFieldAccuracy <= 0 ||
-		report.Metrics.JointIntentSlotExactMatch <= 0 {
+		report.Metrics.JointIntentSlotExactMatch <= 0 ||
+		report.Metrics.ClarificationDecisionAccuracy <= 0 {
 		t.Fatalf("metrics = %#v", report.Metrics)
 	}
 	for _, field := range slotFields {

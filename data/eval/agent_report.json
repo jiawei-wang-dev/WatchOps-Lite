@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-08-18T18:27:31.519132Z",
+  "enabled": false,
+  "external_llm": false,
+  "requested_cases": 20,
+  "executed_cases": 0,
+  "skipped_reason": "external LLM evaluation is opt-in; WATCHOPS_EVAL_LLM_ENABLED is not true",
+  "cases": []
+}

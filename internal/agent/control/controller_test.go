@@ -42,6 +42,9 @@ func TestEvaluateControlsRepeatedToolFailures(t *testing.T) {
 	if !evaluation.ShouldFallback || evaluation.FailureReason != "consecutive_tool_failures" {
 		t.Fatalf("evaluation = %#v, want controlled fallback", evaluation)
 	}
+	if evaluation.StopReason != StopReasonToolFailure {
+		t.Fatalf("stop reason = %q", evaluation.StopReason)
+	}
 }
 
 func TestEvaluateAddsLimitationForEmptyEvidence(t *testing.T) {

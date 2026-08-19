@@ -1,0 +1,74 @@
+[
+  {
+    "case_id": "chat-greeting",
+    "stage": "agent_execution",
+    "input": "你好，今天过得怎么样",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "clear non-operational requests shared the generic 0.50 confidence and fell below the hybrid threshold",
+    "fix_type": "rule_confidence"
+  },
+  {
+    "case_id": "chat-rag-concept",
+    "stage": "agent_execution",
+    "input": "Can you explain what RAG means?",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "explicit conceptual questions were not separated from ambiguous general chat",
+    "fix_type": "rule_confidence"
+  },
+  {
+    "case_id": "irrelevant-chat",
+    "stage": "agent_execution",
+    "input": "写一首关于墨尔本下雨的俳句",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "explicit creative requests were not recognized as strong deterministic general intent",
+    "fix_type": "rule_confidence"
+  },
+  {
+    "case_id": "runbook-primary",
+    "stage": "agent_execution",
+    "input": "payment latency runbook，纯粹找文档",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "latency plus runbook terms were treated as conflict despite the explicit documentation-only preference",
+    "fix_type": "conflict_detection"
+  },
+  {
+    "case_id": "switch-to-runbook",
+    "stage": "agent_execution",
+    "input": "不用查指标了，找一下 checkout runbook",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "the resolved knowledge preference was classified correctly but conflict metadata still forced escalation",
+    "fix_type": "conflict_detection"
+  },
+  {
+    "case_id": "too-many-connections",
+    "stage": "agent_execution",
+    "input": "inventory 报 too many connections，查日志和 runbook",
+    "expected": "rule_direct",
+    "actual": "llm_escalated",
+    "root_cause": "multiple complementary evidence terms were mistaken for mutually exclusive intent signals",
+    "fix_type": "conflict_detection"
+  },
+  {
+    "case_id": "correct-previous-parameters",
+    "stage": "retrieval",
+    "input": "改成 checkout，时间用最近 5 分钟",
+    "expected": "runbook-parameter-correction in top 5",
+    "actual": "top 5 omitted runbook-parameter-correction",
+    "root_cause": "the correction turn lacked an authoritative semantic query and generic expansion diluted parameter-correction evidence",
+    "fix_type": "authoritative_query"
+  },
+  {
+    "case_id": "switch-service-correction",
+    "stage": "retrieval",
+    "input": "别查 checkout 了，改查 payment 最近 5 分钟错误日志",
+    "expected": "runbook-service-switch in top 5",
+    "actual": "top 5 omitted runbook-service-switch",
+    "root_cause": "obsolete service wording remained in the original query while unconditional expansion favored generic observability documents",
+    "fix_type": "authoritative_query"
+  }
+]

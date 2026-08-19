@@ -378,7 +378,19 @@ func (s *Service) preRetrieveKnowledgeGraphNode(
 		attribute.String("intent.type", string(branch.result.Intent)),
 		attribute.Int("top_k", preRAGTopK(branch.result, s.preRAGTopK)),
 	)
-	result, err := s.multiQueryPreRAG(ragContext, branch)
+	queryInput := s.preRAGQueryInput(branch)
+	decision := queryplan.DecideMultiQuery(queryInput)
+	var result retrievalknowledge.RetrievalResult
+	if decision.UseMultiQuery {
+		result, err = s.multiQueryPreRAG(ragContext, branch)
+	} else {
+		result, err = s.singleQueryPreRAG(ragContext, branch, false)
+	}
+	if result.Metadata == nil {
+		result.Metadata = map[string]any{}
+	}
+	result.Metadata["multi_query_triggered"] = decision.UseMultiQuery
+	result.Metadata["multi_query_decision_reason"] = decision.Reason
 	ragSpan.SetAttributes(attribute.Bool("rag_hints_applied", true))
 	ragSpan.End()
 	if err != nil {
@@ -433,6 +445,9 @@ func (s *Service) multiQueryPreRAG(
 	if err != nil {
 		return s.singleQueryPreRAG(ctx, branch, true)
 	}
+	if len(plan.Queries) < 2 {
+		return s.singleQueryPreRAG(ctx, branch, true)
+	}
 	results := make([]queryplan.RAGSubQueryResult, 0, len(plan.Queries))
 	topK := preRAGTopK(branch.result, s.preRAGTopK)
 	for _, subQuery := range plan.Queries {
@@ -453,7 +468,7 @@ func (s *Service) multiQueryPreRAG(
 	merged := queryplan.MergeResults(plan, results, topK)
 	mergeSpan.SetAttributes(attribute.Int("selected_chunk_count", len(merged.Chunks)))
 	mergeSpan.End()
-	if len(merged.Chunks) == 0 {
+	if len(merged.Chunks) == 0 || !originalSubQuerySucceeded(results) {
 		return s.singleQueryPreRAG(ctx, branch, true)
 	}
 	span.SetAttributes(
@@ -475,14 +490,18 @@ func (s *Service) planPreRAGQueries(
 	if s.ragQueryPlanner == nil {
 		return queryplan.RAGQueryPlan{}, fmt.Errorf("%w: rag query planner unavailable", ErrExecution)
 	}
-	return s.ragQueryPlanner.Plan(ctx, queryplan.QueryPlanInput{
+	return s.ragQueryPlanner.Plan(ctx, s.preRAGQueryInput(branch))
+}
+
+func (s *Service) preRAGQueryInput(branch intentBranch) queryplan.QueryPlanInput {
+	return queryplan.QueryPlanInput{
 		UserMessage: branch.command.Message,
 		Intent:      branch.result,
 		Service:     branch.result.Service,
 		Symptom:     branch.result.Symptom,
 		Keywords:    branch.result.Keywords,
 		Now:         s.now(),
-	})
+	}
 }
 
 func (s *Service) singleQueryPreRAG(
@@ -490,7 +509,8 @@ func (s *Service) singleQueryPreRAG(
 	branch intentBranch,
 	plannerFallback bool,
 ) (retrievalknowledge.RetrievalResult, error) {
-	request := intent.BuildRetrievalRequest(branch.command.Message, branch.result, s.preRAGTopK)
+	query := queryplan.AuthoritativeQuery(s.preRAGQueryInput(branch))
+	request := intent.BuildRetrievalRequest(query, branch.result, s.preRAGTopK)
 	result, err := s.knowledgeRetriever.HybridRetrieve(ctx, request)
 	if result.Metadata == nil {
 		result.Metadata = map[string]any{}
@@ -501,6 +521,15 @@ func (s *Service) singleQueryPreRAG(
 	result.Metadata["query_rewrite_applied"] = false
 	result.Metadata["query_plan_fallback_used"] = plannerFallback
 	return result, err
+}
+
+func originalSubQuerySucceeded(results []queryplan.RAGSubQueryResult) bool {
+	for _, item := range results {
+		if item.Query.Type == queryplan.QueryOriginal {
+			return item.Error == nil && len(item.Result.Chunks) > 0
+		}
+	}
+	return false
 }
 
 func mergeContextGraphNode(

@@ -39,11 +39,13 @@ func main() {
 	}
 	fmt.Printf(
 		"intent eval: cases=%d intent_accuracy=%.4f "+
-			"slot_field_accuracy=%.4f joint_exact_match=%.4f\n",
+			"slot_field_accuracy=%.4f joint_exact_match=%.4f "+
+			"clarification_accuracy=%.4f\n",
 		report.Total,
 		report.Metrics.IntentAccuracy,
 		report.Metrics.SlotFieldAccuracy,
 		report.Metrics.JointIntentSlotExactMatch,
+		report.Metrics.ClarificationDecisionAccuracy,
 	)
 	for _, current := range report.Cases {
 		if !current.Passed {

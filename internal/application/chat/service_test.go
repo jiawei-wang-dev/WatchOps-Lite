@@ -313,7 +313,9 @@ func TestPreRAGPlannerFailureFallsBackToSingleQuery(t *testing.T) {
 		},
 	)
 
-	result, err := service.Execute(context.Background(), validCommand())
+	command := validCommand()
+	command.Message = "checkout 被 payment dependency latency 拖慢，结合 trace 和 runbook"
+	result, err := service.Execute(context.Background(), command)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -376,7 +378,9 @@ func TestPreRAGMultiQueryDedupesAndPublishesMetadata(t *testing.T) {
 		},
 	)
 
-	result, err := service.Execute(context.Background(), validCommand())
+	command := validCommand()
+	command.Message = "checkout 被 payment dependency latency 拖慢，结合 trace 和 runbook"
+	result, err := service.Execute(context.Background(), command)
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -396,6 +400,76 @@ func TestPreRAGMultiQueryDedupesAndPublishesMetadata(t *testing.T) {
 		preRAGMetadata["rag_sub_query_count"] != 2 ||
 		preRAGMetadata["selected_chunk_count"] != 2 {
 		t.Fatalf("metadata = %#v", result.Agent.Metadata)
+	}
+}
+
+func TestPreRAGSimpleKnowledgeUsesSingleQuery(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	retriever := &recordingKnowledgeRetriever{results: []retrievalknowledge.RetrievalResult{{
+		Chunks:   []retrievalknowledge.RetrievedKnowledge{{ID: "metric-guide", DocumentID: "metric-guide", Content: "metrics guide"}},
+		Metadata: map[string]any{"retrieval_mode": "hybrid"},
+	}}}
+	service := NewService(runner, store, sessionSummary.NewDeterministic(), ServiceConfig{
+		RecentWindowSize: 12, SummaryThreshold: 12,
+		KnowledgeRetriever: retriever,
+		IntentRecognizer: fakeIntentRecognizer{result: intent.Normalize(intent.IntentResult{
+			Intent: intent.IntentKnowledgeQuery, Service: "checkout", Confidence: 0.9, Source: "rule",
+		})},
+		RAGQueryPlanner: staticQueryPlanner{plan: queryplan.RAGQueryPlan{Queries: []queryplan.RAGSubQuery{
+			{Type: queryplan.QueryOriginal, Query: "one"}, {Type: queryplan.QueryCanonical, Query: "two"},
+		}}},
+		PreRAGTopK: 3,
+	})
+	command := validCommand()
+	command.Message = "find checkout runbook"
+	result, err := service.Execute(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retriever.requests) != 1 {
+		t.Fatalf("requests=%#v", retriever.requests)
+	}
+	metadata, _ := result.Agent.Metadata["pre_rag"].(map[string]any)
+	if metadata["multi_query_triggered"] != false || metadata["multi_query_decision_reason"] != "simple_knowledge_query" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+}
+
+func TestPreRAGMultiQueryFailuresFallBackToOriginalSingleQuery(t *testing.T) {
+	runner := &fakeRunner{output: emptyAgentOutput()}
+	store := &fakeSessionStore{snapshot: emptySessionSnapshot()}
+	plan := queryplan.RAGQueryPlan{Source: "rule", Queries: []queryplan.RAGSubQuery{
+		{Type: queryplan.QueryOriginal, Query: "checkout dependency failure", Weight: 1},
+		{Type: queryplan.QueryDiagnostic, Query: "checkout upstream timeout", Weight: 0.8},
+	}}
+	retriever := &recordingKnowledgeRetriever{
+		errs: []error{errors.New("original timeout"), errors.New("expansion timeout"), nil},
+		results: []retrievalknowledge.RetrievalResult{{}, {}, {
+			Chunks:   []retrievalknowledge.RetrievedKnowledge{{ID: "fallback", DocumentID: "fallback", Content: "original result"}},
+			Metadata: map[string]any{"retrieval_mode": "hybrid"},
+		}},
+	}
+	service := NewService(runner, store, sessionSummary.NewDeterministic(), ServiceConfig{
+		RecentWindowSize: 12, SummaryThreshold: 12,
+		KnowledgeRetriever: retriever,
+		IntentRecognizer: fakeIntentRecognizer{result: intent.Normalize(intent.IntentResult{
+			Intent: intent.IntentIncidentTriage, Service: "checkout", Symptom: "timeout", Confidence: 0.9, Source: "rule",
+		})},
+		RAGQueryPlanner: staticQueryPlanner{plan: plan}, PreRAGTopK: 3,
+	})
+	command := validCommand()
+	command.Message = "checkout 被 upstream timeout 拖慢"
+	result, err := service.Execute(context.Background(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retriever.requests) != 3 || !strings.Contains(retriever.requests[2].Query, command.Message) {
+		t.Fatalf("requests=%#v", retriever.requests)
+	}
+	metadata, _ := result.Agent.Metadata["pre_rag"].(map[string]any)
+	if metadata["multi_query_triggered"] != true || metadata["query_plan_fallback_used"] != true {
+		t.Fatalf("metadata=%#v", metadata)
 	}
 }
 

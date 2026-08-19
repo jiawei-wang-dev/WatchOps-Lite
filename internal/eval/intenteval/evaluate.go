@@ -25,7 +25,7 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 		Cases: make([]CaseResult, 0, len(dataset.Cases)),
 	}
 	recognizer := intent.NewRuleBasedRecognizer()
-	intentMatches, jointMatches, slotMatches, slotComparisons := 0, 0, 0, 0
+	intentMatches, jointMatches, decisionMatches, slotMatches, slotComparisons := 0, 0, 0, 0, 0
 	fieldMatches := map[string]int{}
 	confusion := map[string]map[string]int{}
 	var totalLatency float64
@@ -46,6 +46,18 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 
 		actualSlots := slotsFromResult(result)
 		expectedSlots := normalizedSlots(current.ExpectedSlots)
+		decision := intent.ValidateSlots(
+			current.Message,
+			result,
+			nil,
+			intent.FocusView{},
+			0.55,
+		)
+		actualDecision := string(decision.Decision)
+		decisionOK := actualDecision == current.ExpectedDecision
+		if decisionOK {
+			decisionMatches++
+		}
 		intentOK := err == nil && actualIntent == current.ExpectedIntent
 		if intentOK {
 			intentMatches++
@@ -55,6 +67,9 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 			mismatches = append(mismatches, "recognizer_error")
 		} else if !intentOK {
 			mismatches = append(mismatches, "intent")
+		}
+		if !decisionOK {
+			mismatches = append(mismatches, "clarification_decision")
 		}
 		slotsOK := true
 		for _, field := range slotFields {
@@ -67,22 +82,24 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 			slotsOK = false
 			mismatches = append(mismatches, field)
 		}
-		jointOK := intentOK && slotsOK
+		jointOK := intentOK && slotsOK && decisionOK
 		if jointOK {
 			jointMatches++
 			report.Passed++
 		}
 		report.Cases = append(report.Cases, CaseResult{
-			ID:             current.ID,
-			Passed:         jointOK,
-			FailureReason:  mismatchReason(mismatches),
-			LatencyMS:      latency,
-			ExpectedIntent: current.ExpectedIntent,
-			ActualIntent:   actualIntent,
-			ExpectedSlots:  expectedSlots,
-			ActualSlots:    actualSlots,
-			Confidence:     result.Confidence,
-			Source:         result.Source,
+			ID:               current.ID,
+			Passed:           jointOK,
+			FailureReason:    mismatchReason(mismatches),
+			LatencyMS:        latency,
+			ExpectedIntent:   current.ExpectedIntent,
+			ActualIntent:     actualIntent,
+			ExpectedSlots:    expectedSlots,
+			ActualSlots:      actualSlots,
+			ExpectedDecision: current.ExpectedDecision,
+			ActualDecision:   actualDecision,
+			Confidence:       result.Confidence,
+			Source:           result.Source,
 		})
 	}
 
@@ -93,12 +110,13 @@ func Evaluate(ctx context.Context, dataset Dataset) Report {
 	report.Failed = report.Total - report.Passed
 	report.DurationMS = time.Since(started).Milliseconds()
 	report.Metrics = Metrics{
-		IntentAccuracy:            ratio(intentMatches, report.Total),
-		SlotFieldAccuracy:         ratio(slotMatches, slotComparisons),
-		SlotFieldAccuracyByField:  fieldAccuracy,
-		JointIntentSlotExactMatch: ratio(jointMatches, report.Total),
-		AverageLatencyMS:          average(totalLatency, report.Total),
-		ConfusionMatrix:           confusion,
+		IntentAccuracy:                ratio(intentMatches, report.Total),
+		SlotFieldAccuracy:             ratio(slotMatches, slotComparisons),
+		SlotFieldAccuracyByField:      fieldAccuracy,
+		JointIntentSlotExactMatch:     ratio(jointMatches, report.Total),
+		ClarificationDecisionAccuracy: ratio(decisionMatches, report.Total),
+		AverageLatencyMS:              average(totalLatency, report.Total),
+		ConfusionMatrix:               confusion,
 	}
 	return report
 }

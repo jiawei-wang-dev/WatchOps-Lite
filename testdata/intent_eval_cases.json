@@ -264,9 +264,29 @@
       "id": "colloquial-payment",
       "message": "帮我看看 payment",
       "expected_intent": "general_chat",
+      "expected_decision": "clarify",
       "expected_slots": {
         "service": "payment"
       }
+    },
+    {
+      "id": "clarify-metrics-missing-service",
+      "message": "查最近十分钟的错误率",
+      "expected_intent": "metrics_query",
+      "expected_decision": "clarify",
+      "expected_slots": {
+        "time_range": "last_10_minutes",
+        "symptom": "error"
+      },
+      "notes": "Metrics requests require a service before execution."
+    },
+    {
+      "id": "clarify-trace-missing-target",
+      "message": "帮我分析一下 Trace",
+      "expected_intent": "trace_analysis",
+      "expected_decision": "clarify",
+      "expected_slots": {},
+      "notes": "Trace analysis requires either a trace ID or service plus time range."
     }
   ]
 }

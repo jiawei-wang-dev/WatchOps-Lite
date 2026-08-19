@@ -435,6 +435,9 @@ func ToolResultDataStatus(result common.ToolResult) string {
 func planToolCalls(input AgentInput) []plannedToolCall {
 	message := strings.ToLower(strings.TrimSpace(input.CurrentMessage))
 	service := inferService(message)
+	if strings.TrimSpace(input.Intent.Service) != "" {
+		service = strings.TrimSpace(input.Intent.Service)
+	}
 	calls := make([]plannedToolCall, 0, 4)
 	logKeywords := []string{"error", "timeout"}
 	if prefersChinese(input.CurrentMessage) {
@@ -489,10 +492,32 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 			},
 		)
 	}
+	if (strings.Contains(message, "metric") || strings.Contains(message, "指标")) &&
+		!hasPlannedTool(calls, metrics.Name) {
+		calls = append(calls, plannedToolCall{
+			name:      metrics.Name,
+			arguments: metrics.Input{Service: service, MetricName: "http_server_error_rate", TimeRange: input.TimeContext},
+		})
+	}
+
+	if (strings.Contains(message, " log") ||
+		strings.Contains(message, "logs") ||
+		strings.Contains(message, "日志") ||
+		strings.Contains(message, "exception") ||
+		strings.Contains(message, "panic")) && !hasPlannedTool(calls, logs.Name) {
+		calls = append(calls, plannedToolCall{
+			name: logs.Name,
+			arguments: logs.Input{
+				Service: service, TimeRange: input.TimeContext,
+				Keywords: logKeywords, Level: "error",
+			},
+		})
+	}
 
 	if strings.Contains(message, "trace") ||
 		strings.Contains(message, "slow") ||
 		strings.Contains(message, "链路") ||
+		strings.Contains(message, "调用链") ||
 		strings.Contains(message, "慢调用") {
 		calls = append(calls, plannedToolCall{
 			name: traces.Name,
@@ -518,6 +543,15 @@ func planToolCalls(input AgentInput) []plannedToolCall {
 	}
 
 	return calls
+}
+
+func hasPlannedTool(calls []plannedToolCall, name string) bool {
+	for _, call := range calls {
+		if call.name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func planIntentSuggestedToolCalls(

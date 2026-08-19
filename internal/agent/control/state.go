@@ -7,10 +7,11 @@ import (
 )
 
 type ToolRun struct {
-	Tool          string
-	Success       bool
-	ErrorCode     string
-	EvidenceCount int
+	Tool                string
+	NormalizedArguments string
+	Success             bool
+	ErrorCode           string
+	EvidenceCount       int
 }
 
 type State struct {
@@ -75,5 +76,8 @@ func toolSignature(run ToolRun) string {
 	if tool == "" {
 		return ""
 	}
-	return tool + "|" + strings.TrimSpace(run.ErrorCode) + "|" + strconv.Itoa(run.EvidenceCount)
+	if strings.TrimSpace(run.NormalizedArguments) != "" {
+		return ToolCallFingerprint(tool, run.NormalizedArguments)
+	}
+	return tool + "|legacy|" + strings.TrimSpace(run.ErrorCode) + "|" + strconv.Itoa(run.EvidenceCount)
 }

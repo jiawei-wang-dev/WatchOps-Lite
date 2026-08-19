@@ -1,4 +1,4 @@
-.PHONY: run test lint fmt verify eval-intent eval-retrieval verify-agent benchmark-agent check-deps e2e-demo e2e-demo-zh e2e-demo-multi e2e-demo-multi-zh
+.PHONY: run test lint fmt verify eval eval-all eval-agent eval-replay eval-intent eval-retrieval eval-retrieval-live verify-agent benchmark-agent check-deps e2e-demo e2e-demo-zh e2e-demo-multi e2e-demo-multi-zh
 
 CONFIG ?= configs/config.json
 
@@ -18,10 +18,24 @@ verify:
 	./scripts/verify.sh
 
 eval-retrieval:
+	go run ./cmd/eval-harness
+
+eval-retrieval-live:
 	./scripts/eval_retrieval.sh
 
 eval-intent:
 	go run ./cmd/intent-eval
+
+eval:
+	go run ./cmd/eval-harness
+
+eval-agent:
+	go run ./cmd/agent-eval
+
+eval-all: eval eval-agent
+
+eval-replay:
+	go run ./cmd/eval-harness -replay data/eval/bad_cases.json
 
 verify-agent: verify eval-intent benchmark-agent
 

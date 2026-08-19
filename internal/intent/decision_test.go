@@ -214,3 +214,19 @@ func TestValidateSlotsPrecedenceAndNoUnsafeDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSlotsAllowsDirectedCrossServiceDependency(t *testing.T) {
+	decision := ValidateSlots(
+		"checkout 是否被 payment 依赖拖慢",
+		IntentResult{
+			Intent: IntentIncidentTriage, Confidence: 0.9,
+			Service: "checkout", Symptom: "latency", Source: "test",
+		},
+		nil,
+		FocusView{},
+		0.55,
+	)
+	if decision.Decision != DecisionProceed || decision.KnownSlots["service"] != "checkout" {
+		t.Fatalf("decision = %#v", decision)
+	}
+}

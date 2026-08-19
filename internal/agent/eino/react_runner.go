@@ -68,6 +68,8 @@ func NewReActRunner(
 	}
 	if control.IsZero(config.Control) {
 		config.Control = control.DefaultConfig()
+		config.Control.MaxIterations = config.MaxIterations
+		config.Control.TotalExecutionTimeout = config.Timeout
 	}
 
 	baseTools := make([]einotool.BaseTool, 0, len(tools))
@@ -154,7 +156,7 @@ func (r *ReActRunner) runPrepared(
 		attribute.Bool("fallback_used", false),
 	)
 	defer span.End()
-	toolCache := newToolDedupeCache()
+	toolCache := newToolDedupeCache(r.config.Control)
 	ctx = context.WithValue(ctx, toolDedupeCacheContextKey{}, toolCache)
 
 	futureOption, future := react.WithMessageFuture()
@@ -211,6 +213,9 @@ func (r *ReActRunner) runPrepared(
 	for key, value := range toolStats {
 		output.Metadata[key] = value
 	}
+	if stopReason, _ := toolStats["stop_reason"].(string); stopReason != "" {
+		output.Metadata["stop_reason"] = stopReason
+	}
 	progress := evaluateAgentProgress(toolRuns, output.Inferences)
 	output.Metadata["agent_no_progress_round_count"] = progress.NoProgressRounds
 	if progress.StoppedNoProgress {
@@ -252,6 +257,9 @@ func (r *ReActRunner) runPrepared(
 		output.Metadata["failure_controller_triggered"] = evaluation.Controlled
 		output.Metadata["failure_controller_fallback_required"] = evaluation.ShouldFallback
 	}
+	if evaluation.StopReason != "" {
+		output.Metadata["stop_reason"] = string(evaluation.StopReason)
+	}
 	span.SetAttributes(
 		attribute.Bool("output_parse_success", parseSuccess),
 		attribute.Int("evidence_count", len(output.Evidence)),
@@ -265,10 +273,11 @@ func controlToolRuns(toolRuns []ToolRun) []control.ToolRun {
 	result := make([]control.ToolRun, 0, len(toolRuns))
 	for _, run := range toolRuns {
 		result = append(result, control.ToolRun{
-			Tool:          run.Tool,
-			Success:       run.Success,
-			ErrorCode:     string(run.ErrorCode),
-			EvidenceCount: run.EvidenceCount,
+			Tool:                run.Tool,
+			NormalizedArguments: run.NormalizedArgs,
+			Success:             run.Success,
+			ErrorCode:           string(run.ErrorCode),
+			EvidenceCount:       run.EvidenceCount,
 		})
 	}
 	return result
@@ -555,6 +564,7 @@ type toolDedupeCache struct {
 	noDataCount    int
 	partialCount   int
 	fallbackCount  int
+	budget         *control.ExecutionBudget
 }
 
 type toolDedupeEntry struct {
@@ -563,8 +573,15 @@ type toolDedupeEntry struct {
 	DataStatus string
 }
 
-func newToolDedupeCache() *toolDedupeCache {
-	return &toolDedupeCache{entries: map[string]toolDedupeEntry{}}
+func newToolDedupeCache(config ...control.Config) *toolDedupeCache {
+	selected := control.DefaultConfig()
+	if len(config) > 0 {
+		selected = config[0]
+	}
+	return &toolDedupeCache{
+		entries: map[string]toolDedupeEntry{},
+		budget:  control.NewExecutionBudget(selected),
+	}
 }
 
 func toolDedupeCacheFromContext(ctx context.Context) *toolDedupeCache {
@@ -662,7 +679,7 @@ func (c *toolDedupeCache) summary() map[string]any {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return map[string]any{
+	result := map[string]any{
 		"tool_call_attempt_count":   c.attemptCount,
 		"tool_call_executed_count":  c.executedCount,
 		"tool_call_unique_count":    len(c.entries),
@@ -673,6 +690,19 @@ func (c *toolDedupeCache) summary() map[string]any {
 		"partial_tool_count":        c.partialCount,
 		"fallback_tool_count":       c.fallbackCount,
 	}
+	if c.budget != nil {
+		snapshot := c.budget.Snapshot()
+		if snapshot.AgentSteps > 0 {
+			result["agent_step_count"] = snapshot.AgentSteps
+		}
+		result["execution_budget_tool_calls"] = snapshot.ToolCalls
+		result["execution_budget_retries"] = snapshot.Retries
+		result["execution_budget_repeated_calls"] = snapshot.RepeatedCalls
+		if snapshot.StopReason != "" {
+			result["stop_reason"] = string(snapshot.StopReason)
+		}
+	}
+	return result
 }
 
 func deduplicatedToolResult(
@@ -715,6 +745,13 @@ func (t *agentTool) InvokableRun(
 	cache := toolDedupeCacheFromContext(ctx)
 	cache.recordAttempt()
 	callMetadata := extractToolCallMetadata(t.name, []byte(arguments))
+	if cache != nil && cache.budget != nil {
+		if reason := cache.budget.BeforeToolCall(ctx, t.name, callMetadata.NormalizedArgs); reason != "" {
+			encoded := budgetStoppedToolResult(t.name, callMetadata, reason)
+			emitToolResultStreamEvent(ctx, t.name, encoded)
+			return encoded, nil
+		}
+	}
 	signature := strings.ToLower(t.name + "|" + callMetadata.NormalizedArgsHash)
 	if entry, ok := cache.lookup(signature); ok {
 		cache.recordDeduped()
@@ -739,11 +776,13 @@ func (t *agentTool) InvokableRun(
 	if err != nil {
 		toolError := safeToolError(t.name, err)
 		if toolError.Retryable {
-			cache.recordRetry()
-			retryCount = 1
-			retryReason = string(toolError.Code)
-			cache.recordExecuted()
-			result, err = t.delegate.InvokableRun(ctx, arguments, options...)
+			if cache == nil || cache.budget == nil || cache.budget.RecordRetry(ctx) == "" {
+				cache.recordRetry()
+				retryCount = 1
+				retryReason = string(toolError.Code)
+				cache.recordExecuted()
+				result, err = t.delegate.InvokableRun(ctx, arguments, options...)
+			}
 		}
 	}
 	if err == nil {
@@ -799,6 +838,34 @@ func (t *agentTool) InvokableRun(
 		"error_code": string(toolError.Code),
 	})
 	return string(encoded), nil
+}
+
+func budgetStoppedToolResult(
+	toolName string,
+	callMetadata toolCallMetadata,
+	reason control.StopReason,
+) string {
+	result := common.ToolResult{
+		Tool: toolName, Success: false,
+		Evidence: []common.EvidenceItem{},
+		Warnings: []common.ToolWarning{},
+		Metadata: map[string]any{
+			"data_status":    "unknown",
+			"stop_reason":    string(reason),
+			"budget_blocked": true,
+		},
+		Error: common.NewToolError(
+			common.ErrorCodeInternal,
+			toolName,
+			"tool execution stopped by the Agent execution budget",
+			false,
+			map[string]any{"stop_reason": string(reason)},
+			"return a bounded answer with an explicit limitation",
+		),
+	}
+	result = enrichToolResultMetadata(result, callMetadata)
+	encoded, _ := json.Marshal(result)
+	return string(encoded)
 }
 
 func emitToolResultStreamEvent(ctx context.Context, toolName string, encoded string) {

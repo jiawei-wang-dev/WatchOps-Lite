@@ -92,7 +92,9 @@ func ValidateSlots(
 	}
 
 	lower := strings.ToLower(strings.TrimSpace(message))
-	if result.Intent != IntentGeneralChat && len(commonServicePattern.FindAllString(message, -1)) > 1 {
+	if result.Intent != IntentGeneralChat &&
+		len(commonServicePattern.FindAllString(message, -1)) > 1 &&
+		!isRelationalServiceRequest(message) {
 		return clarifyDecision(decision, "AMBIGUOUS_SERVICE",
 			"你想先排查哪个服务？例如 checkout 或 payment。")
 	}
@@ -155,6 +157,16 @@ func ValidateSlots(
 		return clarifyDecision(decision, "MISSING_REQUIRED_SLOT", question)
 	}
 	return decision
+}
+
+func isRelationalServiceRequest(message string) bool {
+	lower := strings.ToLower(message)
+	return containsAny(
+		lower,
+		"dependency", "depends on", "upstream", "downstream", "calling ",
+		"依赖", "上游", "下游", "调用", "被", "拖慢", "导致", "影响",
+		"改成", "换成", "改查", "切到", "别查", "instead", "switch to",
+	)
 }
 
 func clarifyDecision(value IntentDecision, reason, question string) IntentDecision {

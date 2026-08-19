@@ -1,0 +1,22 @@
+[
+  {"case_id":"e2e-01","category":"metrics","input":"show checkout error rate for the last 10 minutes"},
+  {"case_id":"e2e-02","category":"metrics","input":"show payment p95 latency for the last 20 minutes"},
+  {"case_id":"e2e-03","category":"logs","input":"query checkout error logs from the last 15 minutes"},
+  {"case_id":"e2e-04","category":"logs","input":"find payment timeout logs from the last 30 minutes"},
+  {"case_id":"e2e-05","category":"trace","input":"analyze trace 4bf92f3577b34da6a3ce929d0e0e4736"},
+  {"case_id":"e2e-06","category":"trace","input":"inspect slow checkout traces from the last 20 minutes"},
+  {"case_id":"e2e-07","category":"knowledge","input":"find the checkout error rate runbook"},
+  {"case_id":"e2e-08","category":"knowledge","input":"show the payment timeout playbook"},
+  {"case_id":"e2e-09","category":"incident","input":"investigate checkout errors using metrics and logs"},
+  {"case_id":"e2e-10","category":"incident","input":"payment 5xx alert in the last 15 minutes"},
+  {"case_id":"e2e-11","category":"clarification","input":"show recent error rate"},
+  {"case_id":"e2e-12","category":"clarification","input":"analyze the trace"},
+  {"case_id":"e2e-13","category":"metrics","input":"查看 checkout 最近 10 分钟错误率"},
+  {"case_id":"e2e-14","category":"logs","input":"查 payment 最近 20 分钟错误日志"},
+  {"case_id":"e2e-15","category":"trace","input":"看看 checkout 最近十分钟的 Trace 为什么慢"},
+  {"case_id":"e2e-16","category":"knowledge","input":"找一下 payment 超时处理手册"},
+  {"case_id":"e2e-17","category":"incident","input":"checkout 故障超时，查指标和日志"},
+  {"case_id":"e2e-18","category":"mitigation","input":"给 checkout 超时止损建议"},
+  {"case_id":"e2e-19","category":"summary","input":"汇总 checkout 昨天的排障"},
+  {"case_id":"e2e-20","category":"general","input":"你好，请介绍你能做什么"}
+]

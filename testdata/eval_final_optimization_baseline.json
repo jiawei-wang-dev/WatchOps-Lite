@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-08-18T10:00:00Z",
+  "intent": {
+    "llm_escalation_rate": 0.225,
+    "incorrect_escalation_rate": 0.15,
+    "challenge_behavior_accuracy": 1.0,
+    "fixed_regression_accuracy": 1.0
+  },
+  "retrieval": {
+    "single_query_recall_at_5": 0.9285714285714286,
+    "single_query_mrr": 0.5583333333333333,
+    "multi_query_recall_at_5": 0.8571428571428571,
+    "multi_query_mrr": 0.5761904761904761,
+    "bad_cases": 2
+  },
+  "agent_e2e": {
+    "task_success_rate": 1.0,
+    "decision_accuracy": 1.0,
+    "unsafe_action_rate": 0.0,
+    "timeout": 1,
+    "repeated_tool_call_stops": 1
+  }
+}

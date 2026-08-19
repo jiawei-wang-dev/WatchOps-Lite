@@ -59,6 +59,7 @@ type CaseResult struct {
 	Notes                string         `json:"notes,omitempty"`
 	Metadata             map[string]any `json:"metadata,omitempty"`
 	LatencyMS            float64        `json:"latency_ms"`
+	CandidateCount       int            `json:"candidate_count"`
 	RelevantFound        int            `json:"relevant_found"`
 	RelevantTotal        int            `json:"relevant_total"`
 	ReciprocalRank       float64        `json:"reciprocal_rank"`
@@ -66,18 +67,19 @@ type CaseResult struct {
 }
 
 type Report struct {
-	Total            int          `json:"total"`
-	Passed           int          `json:"passed"`
-	Failed           int          `json:"failed"`
-	PassRate         float64      `json:"pass_rate"`
-	HitRateAtK       float64      `json:"hit_rate_at_k"`
-	RecallAtK        float64      `json:"recall_at_k"`
-	MRR              float64      `json:"mrr"`
-	NDCGAtK          float64      `json:"ndcg_at_k"`
-	AverageLatencyMS float64      `json:"average_latency_ms"`
-	P95LatencyMS     float64      `json:"p95_latency_ms"`
-	EmptyRecallCount int          `json:"empty_recall_count"`
-	Cases            []CaseResult `json:"cases"`
+	Total                 int          `json:"total"`
+	Passed                int          `json:"passed"`
+	Failed                int          `json:"failed"`
+	PassRate              float64      `json:"pass_rate"`
+	HitRateAtK            float64      `json:"hit_rate_at_k"`
+	RecallAtK             float64      `json:"recall_at_k"`
+	MRR                   float64      `json:"mrr"`
+	NDCGAtK               float64      `json:"ndcg_at_k"`
+	AverageLatencyMS      float64      `json:"average_latency_ms"`
+	AverageCandidateCount float64      `json:"average_candidate_count"`
+	P95LatencyMS          float64      `json:"p95_latency_ms"`
+	EmptyRecallCount      int          `json:"empty_recall_count"`
+	Cases                 []CaseResult `json:"cases"`
 }
 
 func LoadCases(reader io.Reader) ([]Case, error) {
@@ -122,6 +124,7 @@ func Evaluate(
 		report.MRR += result.ReciprocalRank
 		report.NDCGAtK += result.NDCG
 		report.AverageLatencyMS += result.LatencyMS
+		report.AverageCandidateCount += float64(result.CandidateCount)
 		relevantFound += result.RelevantFound
 		relevantTotal += result.RelevantTotal
 		latencies = append(latencies, result.LatencyMS)
@@ -135,6 +138,7 @@ func Evaluate(
 		report.MRR /= float64(report.Total)
 		report.NDCGAtK /= float64(report.Total)
 		report.AverageLatencyMS /= float64(report.Total)
+		report.AverageCandidateCount /= float64(report.Total)
 	}
 	if relevantTotal > 0 {
 		report.RecallAtK = float64(relevantFound) / float64(relevantTotal)
@@ -184,6 +188,10 @@ func evaluateCase(
 		return result
 	}
 	result.TopKResultIDs = topKIDs(results)
+	result.CandidateCount = len(results)
+	if total, ok := numericMetadata(results[0].Metadata, "total_candidates"); ok {
+		result.CandidateCount = int(total)
+	}
 	result.MatchedKeywords = MatchKeywords(current.ExpectedKeywords, results)
 	result.RetrievalMode = retrievalMode(results[0])
 	result.BM25Score = scoreField(results[0], "bm25_score")
